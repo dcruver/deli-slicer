@@ -6,7 +6,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from deli import _engine, library, project, settings, view
+import textwrap
+
+from deli import _engine, library, orca_install, project, settings, view
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -364,6 +366,42 @@ def _slice(args: argparse.Namespace) -> int:
     return 0
 
 
+def _import(args: argparse.Namespace) -> int:
+    presets = orca_install.Presets([Path(folder) for folder in args.orca])
+    if args.name is None:
+        # Like `deli printer`: without a name, list what there is.
+        for name in presets.names(args.kind):
+            print(name)
+        return 0
+
+    imported = presets.convert(args.kind, args.name, args.printer)
+    converted = imported.converted
+    for_printer = f", for Orca's printer '{imported.printer_name}'" if imported.printer_name else ""
+    if args.output:
+        text = orca_install.ini(imported)
+        _, unknown = _engine.split_config(text)  # bad values raise; unknown settings are reported below
+        Path(args.output).write_text(text)
+        print(f"Wrote {args.kind} '{imported.orca_name}'{for_printer} to {args.output} ({len(converted.settings)} settings)")
+    else:
+        loaded = orca_install.into_library(imported, args.name_as)
+        unknown = loaded.unknown
+        verb = "Replaced" if loaded.replaced else "Imported"
+        print(f"{verb} {args.kind} '{loaded.name}' from Orca's '{imported.orca_name}'{for_printer} ({len(loaded.settings)} settings)")
+        if summary := _SUMMARIES[args.kind](loaded.settings):
+            print(f"  {summary}")
+        print(f"  stored in {loaded.path}")
+        if loaded.connection:
+            print(f"  left out its connection settings: {', '.join(loaded.connection)}")
+    for note in converted.notes:
+        print(f"  note: {note}")
+    if unknown:
+        print(f"  ignored {len(unknown)} converted settings this engine does not know: {', '.join(unknown)}")
+    if converted.dropped:
+        print(f"  {len(converted.dropped)} Orca settings have no PrusaSlicer equivalent and were left out:")
+        print(textwrap.fill(", ".join(sorted(converted.dropped)), width=96, initial_indent="    ", subsequent_indent="    "))
+    return 0
+
+
 def _view(args: argparse.Namespace) -> int:
     return view.serve(args.port, open_browser=not args.no_browser)
 
@@ -463,9 +501,25 @@ def main(argv: list[str] | None = None) -> int:
     view_.add_argument("--no-browser", action="store_true", help="print the address instead of opening a browser")
     view_.set_defaults(run=_view)
 
+    import_ = commands.add_parser(
+        "import",
+        help="convert a preset from the OrcaSlicer on this machine into your library",
+        description="Convert one of OrcaSlicer's presets, bundled or your own, into a PrusaSlicer-style printer, "
+        "process or filament in your library. The name can be part of Orca's name for it, if that is enough to "
+        "tell it apart. Without a name, list Orca's presets of that kind.",
+    )
+    import_.add_argument("app", choices=["orca"], help="the slicer to import from")
+    import_.add_argument("kind", choices=library.KINDS)
+    import_.add_argument("name", nargs="?", help="Orca's name for the preset, or part of it")
+    import_.add_argument("--printer", help="Orca's printer to convert a process or filament for (default: the first it fits)")
+    import_.add_argument("--name", dest="name_as", help="name to store it under (default: Orca's name)")
+    import_.add_argument("-o", "--output", help="write the converted INI file here instead of into your library")
+    import_.add_argument("--orca", action="append", default=[], metavar="DIR", help="a folder of Orca presets to look in as well")
+    import_.set_defaults(run=_import)
+
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except (library.LibraryError, project.ProjectError, settings.SettingError, CommandError) as err:
+    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return 1

@@ -7,8 +7,9 @@ subcommand edits that file and exits. Slicing is done in-process by PrusaSlicer'
 `libslic3r`, so no slicer application needs to be installed.
 
 ```
+deli import orca printer "Elegoo Centauri Carbon 0.6 nozzle"
 deli add part.stl
-deli printer "Elegoo Centauri Carbon"
+deli printer elegoo-centauri-carbon-0.6-nozzle
 deli set infill 20%
 deli scale x 110%
 deli slice

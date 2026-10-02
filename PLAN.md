@@ -266,8 +266,26 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 - The files in `profiles/` were written by a one-off script from Orca's stock presets
   (not the user's copy, which only adds the printer's network address). They produce
   the same G-code as the files validated in step 3.
-- Still to build: `deli import orca "<preset name>"`, which runs the converter against
-  a local Orca install and writes an INI that `deli load` accepts.
+- `deli import orca <kind> "<Orca name>"` converts a preset from the Orca installed
+  here into the library, or to a file with `-o` (which `deli load` then accepts, named
+  by the `*_settings_id` the file carries). The name can be given in any case or as a
+  unique part of Orca's name; otherwise the matches are listed. Without a name, it
+  lists Orca's presets of that kind. A process or filament is converted for a printer:
+  `--printer`, else the first in its `compatible_printers`. Extra folders of presets
+  come from `--orca DIR`. 14 tests; `tests/data/orca/` holds flattened Centauri Carbon
+  presets as fixtures, and one test runs against the real Flatpak install when present.
+  - Orca's presets are found in `~/.config/OrcaSlicer` and the Flatpak's
+    `~/.var/app/com.orcaslicer.OrcaSlicer/config/OrcaSlicer` (`user/default/` for the
+    user's own, `system/<vendor>/` for the bundled copies), plus the bundled
+    `profiles/<vendor>/` folders of a Flatpak or `/usr/share` install.
+  - Each vendor is indexed on its own, because every vendor ships base presets under
+    the same names (`fdm_process_common` and the like) with different contents. A
+    preset's `inherits` chain is followed within the user's presets and then the first
+    vendor it reaches. Indexing everything together gave the Centauri process a
+    different vendor's base (3 walls, other speeds) and was the first bug found.
+  - Presets with `instantiation = false` (the bases) are not listed or matched.
+  - Importing the bundled Centauri Carbon presets gives the shipped `profiles/`
+    exactly, apart from `0.80` being written `0.8`.
 
 ### 6. `deli view`
 

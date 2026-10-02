@@ -22,7 +22,7 @@ KINDS = ("printer", "filament", "process")
 MAX_BYTES = 1_000_000
 
 # The setting in which PrusaSlicer records the name of each kind of preset.
-_ID_KEYS = {"printer": "printer_settings_id", "filament": "filament_settings_id", "process": "print_settings_id"}
+ID_KEYS = {"printer": "printer_settings_id", "filament": "filament_settings_id", "process": "print_settings_id"}
 _FOLDERS = {"printer": "printers", "filament": "filaments", "process": "processes"}
 
 
@@ -113,12 +113,21 @@ def fingerprint(path: Path) -> str:
 
 def _name_in(settings: dict[str, str], kind: str) -> str:
     # Filament names are a list, one per extruder, with quotes around names that need them.
-    return settings.get(_ID_KEYS[kind], "").split(";")[0].strip().strip('"')
+    return settings.get(ID_KEYS[kind], "").split(";")[0].strip().strip('"')
 
 
 def load(kind: str, source: str, name: str | None = None) -> Loaded:
     """Copy the settings of one kind from `source` into the library."""
     text = fetch(source)
+    url = urllib.parse.urlsplit(source)
+    if url.scheme == "":
+        source = str(Path(source).expanduser().resolve())
+    return store(kind, text, source, name=name, fallback=Path(url.path).stem)
+
+
+def store(kind: str, text: str, source: str, name: str | None = None, fallback: str = "") -> Loaded:
+    """Put the settings of one kind from INI `text` into the library, named `name`, else
+    as the text names itself, else `fallback`. `source` is recorded in the file."""
     try:
         groups, unknown = _engine.split_config(text)
     except ValueError as err:
@@ -130,10 +139,7 @@ def load(kind: str, source: str, name: str | None = None) -> Loaded:
     if not settings:
         raise LibraryError(f"{source} has no {kind} settings")
 
-    url = urllib.parse.urlsplit(source)
-    if url.scheme == "":
-        source = str(Path(source).expanduser().resolve())
-    name = slug(name or _name_in(settings, kind) or Path(url.path).stem)
+    name = slug(name or _name_in(settings, kind) or fallback)
     if not name:
         raise LibraryError(f"cannot work out a name for this {kind}; give one with --name")
 
