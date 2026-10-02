@@ -1,0 +1,260 @@
+# deli: plan and current state
+
+Written 2026-10-02 as a handoff and updated the same day after steps 1 to 3 were
+finished. `CLAUDE.md` describes what deli is; this file says what has been decided,
+what exists, and what to do next.
+
+## Decisions already made
+
+Do not reopen these without a reason.
+
+- **Shape:** deli is a set of shell commands in the git model (`deli add`, `deli set`,
+  `deli slice`, ...). No REPL and no TUI. State lives in a `deli.toml` in the current
+  directory.
+- **Engine:** PrusaSlicer's `libslic3r`, linked in-process. Not Orca's fork, not a
+  slicer CLI, not CuraEngine. Chosen for stability and lighter dependencies.
+- **Licence:** AGPL-3.0-only, because of the engine.
+- **Language:** Python with `uv`; the engine is reached through a C++ extension module.
+- **Sharing printers:** a printer, filament or process is a PrusaSlicer INI file that
+  anyone can host. `deli load <kind> <source>` copies one into a per-user library from
+  an `https://` or `file://` URL or a path. There is no central registry, and plain
+  `http://` is refused. Each kind is stored on its own: loading a printer from a full
+  PrusaSlicer export keeps only the printer's settings. Loading is the only step that
+  uses the network, so a loaded printer changes only when it is loaded again.
+- **Packaging:** `scikit-build-core` builds the extension and nanobind binds it, using
+  Python's stable ABI. Chosen with distribution in mind: users get one prebuilt wheel
+  per platform with the engine inside, and only wheel builders need `build/deps`.
+- **Profiles:** PrusaSlicer INI. Orca JSON is converted on import. The first target is
+  the user's Elegoo Centauri Carbon with the **0.6 mm nozzle**.
+- **Viewer:** one pane that shows the part on the bed, opened by `deli view`. It only
+  displays. Planned as a local three.js page that redraws when `deli.toml` changes.
+- **Revision 1 scope:** a single object. Multi-object selection and bed arrangement
+  come later.
+
+## What exists
+
+| Piece | State |
+|---|---|
+| Scaffold (`src/deli`, `tests`, `pyproject.toml`) | Done. `deli` only prints a hello line. |
+| `vendor/PrusaSlicer` | Shallow submodule pinned to `version_2.9.6`. |
+| `src/deli/orca.py` | Orca to PrusaSlicer converter. 28 tests pass. |
+| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 6 tests pass. See step 4. |
+| Dependency build in `build/deps` | Done. All 24 packages built with no patches. |
+| `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
+| Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
+| `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 13 tests pass. See step 5. |
+| Other `deli` subcommands | Not started. |
+
+Three commits on `main`, no remote. The binding, the build switch and this file are
+not committed yet.
+
+## Dependency build
+
+PrusaSlicer's dependencies are built from source by its own superbuild into
+`build/deps/destdir/usr/local`. `build/` is gitignored.
+
+Configure (already done once, safe to repeat):
+
+```
+export CMAKE_POLICY_VERSION_MINIMUM=3.5 CFLAGS="-std=gnu17 -fPIC" CXXFLAGS="-fPIC -include cstdint"
+cmake -S vendor/PrusaSlicer/deps -B build/deps -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  "-DPrusaSlicer_deps_PACKAGE_EXCLUDES=wxWidgets;OpenCSG;Catch2"
+```
+
+Build, with the same three environment variables exported:
+
+```
+cmake --build build/deps -- -j1 -k 0 > build/deps-build.log 2>&1
+```
+
+The top level runs one package at a time (`-j1`); each package compiles in parallel.
+The build is incremental, so re-running the command only rebuilds what changed.
+
+State: the build finished on 2026-10-02 with exit code 0 after about 33 minutes. All
+24 packages completed: Blosc, Boost, CGAL, CURL, Cereal, EXPAT, Eigen, GLEW, GMP,
+JPEG, LibBGCode, MPFR, NLopt, NanoSVG, OCCT, OpenEXR, OpenSSL, OpenVDB, Qhull, TBB,
+ZLIB, heatshrink, json and z3. The full log is `build/deps-build.log`. These commands
+are only needed again if `build/` is deleted.
+
+Why the flags and extra steps exist:
+
+- The machine has GCC 15.2 and CMake 4.2, both newer than the pinned dependencies
+  expect. `CMAKE_POLICY_VERSION_MINIMUM` lets old `cmake_minimum_required` calls
+  through, `-std=gnu17` avoids C23 breaking old C code, and `-include cstdint` covers
+  missing includes. With these flags no dependency needed patching, and PrusaSlicer's
+  own sources compiled unpatched with the same flags.
+- `-fPIC` is required because the static libraries end up inside a Python extension.
+- On Linux the superbuild assumes system zlib and libpng. Their dev packages are not
+  installed, so both were built into the same prefix by hand: zlib with
+  `cmake --build build/deps --target dep_ZLIB`, and libpng 1.6.43 from its tarball
+  (sources and build in `build/extra`).
+- `sudo` needs a password. Already installed by the user: `build-essential cmake
+  ninja-build autoconf m4 libtool texinfo libdbus-1-dev libglu1-mesa-dev`.
+
+## Next steps
+
+### 1. Finish the dependencies
+
+Done.
+
+### 2. Build libslic3r without the GUI
+
+Done. This standalone build is only needed for the console binary, which is useful
+for checking results; the Python binding compiles the engine again in its own build
+directory (step 4). PrusaSlicer's own top level configured and built unpatched, with
+the same three environment variables exported as for the dependencies:
+
+```
+cmake -S vendor/PrusaSlicer -B build/prusaslicer -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DSLIC3R_GUI=no -DSLIC3R_STATIC=1 -DSLIC3R_BUILD_TESTS=OFF \
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -DCMAKE_PREFIX_PATH=$PWD/build/deps/destdir/usr/local
+cmake --build build/prusaslicer --target PrusaSlicer -- -j8
+```
+
+- Use `-j8`, not the default 16. The precompiled header and the CGAL sources need
+  several GB each, the machine has no swap, and the compiler was killed at `-j16`.
+- The unconditional `find_package` calls for DBus1, OpenGL and GLEW all resolved.
+- `libslic3r` publicly links `libseqarrange` (needs z3) and LibBGCode, so those
+  dependencies cannot be skipped.
+- Checked: `build/prusaslicer/src/prusa-slicer --export-gcode --load
+  vendor/PrusaSlicer/tests/data/default_fff.ini` slices
+  `vendor/PrusaSlicer/tests/data/test_stl/ASCII/20mmbox-LF.stl` into 100 layers.
+
+### 3. Validate the converted Centauri Carbon profile
+
+Done. A 20 mm cube was sliced with the three converted INIs and, for reference, with
+Orca 2.4.2's own command line using the original profiles. Both outputs and their
+inputs are in `build/orca-compare`.
+
+- Of the 182 converted settings, 181 appear unchanged in the config block PrusaSlicer
+  writes into the G-code. The other, `print_host`, is never echoed there.
+- The cube slices with no warnings or template errors: 67 layers in both slicers.
+- The start block (40 commands) and end block (26 commands) are identical to Orca's,
+  command for command, apart from Orca's `M73` progress lines.
+- Print speeds per feature, accelerations, temperatures and fan behaviour match
+  closely. The differences found are listed under the open items below.
+- Orca's command line ignores the printer's `default_bed_type` and assumes Cool Plate
+  (35 °C bed). Pass `--curr-bed-type "Textured PEI Plate"` to get a like-for-like
+  reference, and mark the flattened presets `"from": "system"` or it rejects them as
+  incompatible.
+
+### 4. Python binding
+
+Done. Start at step 5.
+
+- `deli._engine` is a nanobind module built by the root `CMakeLists.txt`, which adds
+  `vendor/PrusaSlicer` as a subdirectory and links `libslic3r` statically. It carries
+  the GCC 15 and CMake 4 workarounds itself, so no environment variables are needed.
+- `uv sync` builds it. The first build compiles the engine (about 16 minutes) into
+  `build/cp312-abi3-linux_x86_64`, which is kept; after that, editing `_engine.cpp`
+  costs about 20 seconds on the next `uv run`. Parallelism is capped at `-j8` in
+  `pyproject.toml` for the memory reason given in step 2.
+- The surface is one call: `_engine.slice(model, config, output, scale=, rotate=)`
+  returns the G-code path, print time in seconds, filament in mm and g, and any
+  warnings. `config` is INI text; missing settings take PrusaSlicer's defaults. The
+  object is centred on the bed, as PrusaSlicer's command line does.
+- Unknown settings raise `ValueError`. PrusaSlicer itself drops them silently, both
+  in the library and in the console binary, so do not rely on the console binary to
+  catch a misspelt setting.
+- Checked: with the converted Centauri Carbon INIs the module's G-code is identical
+  to the console binary's, apart from the timestamp and object name.
+- Checked: `uv build --wheel` gives a 24 MB `cp312-abi3-linux_x86_64` wheel holding
+  only the package and the module, which needs no shared libraries beyond libc and
+  libstdc++. Not done: a manylinux build, an sdist, licence notices for the bundled
+  libraries, and any platform other than Linux x86_64.
+- Post-processing scripts (`post_process`) and thumbnails are not run by the module.
+
+### 5. Commands, revision 1
+
+`load` is done; `add`, `printer`, `set`, `scale`, `rotate` and `slice` are not started.
+Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
+`fill_density`) with completion over real setting names.
+
+- `deli load printer|filament|process <source> [--name NAME]` stores
+  `~/.config/deli/{printers,filaments,processes}/<name>.ini` (honours
+  `XDG_CONFIG_HOME`). The name comes from the file's `printer_settings_id`,
+  `filament_settings_id` or `print_settings_id`, else the file name, and is reduced to
+  lower case with hyphens so it needs no quoting. Loading the same name again replaces
+  it.
+- `_engine.split_config` decides which setting belongs to which kind, using
+  PrusaSlicer's own preset lists. Settings this engine version does not know are
+  reported and left out; bad values are an error.
+- A link to a file's page on GitHub (`github.com/.../blob/...`) is fetched as the raw
+  file. Checked against a real GitHub link.
+- Still to design for `deli printer <name>`: it selects a loaded printer for the
+  project and `deli.toml` records the name and a hash of its settings. Writing
+  `deli.toml` needs a TOML writer; the standard library only reads TOML.
+- Still to build: `deli import orca "<preset name>"`, which runs the converter against
+  a local Orca install and writes an INI that `deli load` accepts.
+
+### 6. `deli view`
+
+The viewer pane, after slicing works.
+
+### Later
+
+Multi-object selection, bed arrangement, sending to the printer, thumbnails.
+
+## Profile conversion: what is settled and what is open
+
+`src/deli/orca.py` resolves Orca's `inherits` chain and converts machine, process and
+filament through explicit rename tables. Nothing is copied by name alone, because
+several settings share a name but differ in type or meaning. Settings without an
+equivalent are returned in `Converted.dropped`, and caveats in `Converted.notes`.
+
+Source profiles on this machine:
+
+- bundled: `/var/lib/flatpak/app/com.orcaslicer.OrcaSlicer/current/active/files/share/OrcaSlicer/profiles/Elegoo`
+- user: `~/.var/app/com.orcaslicer.OrcaSlicer/config/OrcaSlicer/user/default`
+- printer `Elegoo Centauri Carbon 0.6 nozzle - Copy`, process
+  `0.30mm Standard @Elegoo CC 0.6 nozzle`, filament `Elegoo PLA @ECC`
+
+Open items, each a real behaviour difference from Orca:
+
+- **Excluded bed corner.** Orca keeps parts out of 246–256 × 0–20 mm. PrusaSlicer has
+  no such setting, so deli must enforce it when placing parts.
+- **Flow.** Orca's process has `print_flow_ratio` 0.97 on top of the filament's 0.98.
+  It is not applied. Decide whether deli multiplies it into `extrusion_multiplier` when
+  it merges the three profiles. Measured on the test cube: deli extrudes 1489.8 mm of
+  filament against Orca's 1440.1 mm, about 3 % more.
+- **First layer change.** PrusaSlicer skips `before_layer_gcode` and `layer_gcode` on
+  the first layer; Orca runs them on every layer. The printer is therefore never told
+  `CURRENT_LAYER=1` and reports layer 0 until the second layer starts.
+- **Progress.** Orca emits `M73` progress lines and a `HEADER_BLOCK` with the layer
+  count; deli's output has neither. Whether the printer's screen needs them is unknown.
+- **Fan values.** PrusaSlicer writes fractional fan speeds such as `M106 S249.9`; Orca
+  writes whole numbers. Whether the printer's firmware accepts a fraction is untested.
+- **Printer model.** `printer_model` is dropped, so the `;printer_model:` comment in
+  the start block is empty. Orca writes `Elegoo Centauri Carbon` there.
+- **Bridges.** Orca prints internal bridges at 45 mm/s; PrusaSlicer has one bridge
+  speed, so deli prints them at 30 mm/s.
+- **Brim.** Orca's default `auto_brim` is converted to no brim.
+- **Fans.** Auxiliary and exhaust fan settings are dropped. The chamber-fan commands
+  inside the start G-code are kept.
+- **Pressure advance.** The PA block is removed from the printer start G-code and
+  re-emitted in the filament start G-code only when the filament enables it. The PLA
+  profile sets 0.024 but does not enable it, so nothing is emitted.
+- **Filament change G-code** is not converted: single-filament only.
+- **Upload.** The printer uses Orca's `elegoolink` host type at
+  `http://centauri-carbon.cruver.network`. PrusaSlicer has no equivalent; sending
+  prints is unsolved.
+- **Other printers.** The converter has only been checked on the Centauri Carbon. Run
+  over all 1,001 printer presets bundled with Orca 2.4.2, each with one compatible
+  process and filament and a test cube: 400 sliced, 233 failed while slicing, 77 gave a
+  config the engine rejected, 28 crashed the converter, and 263 were not tested because
+  no matching process or filament was found. The main causes are Orca variables in
+  start and end G-code that are not translated, relative extrusion without `G92 E0` in
+  the layer-change G-code, thumbnail formats PrusaSlicer does not know, and multi-line
+  values that break the INI. A preset that slices has not been compared with Orca.
+- The key-name tests read setting names out of `PrintConfig.cpp` with a regex. Once the
+  engine builds, replace that with the engine's own list.
+
+## Things to know
+
+- Orca's CLI was the first plan and was dropped. `README.md` and `CLAUDE.md` are
+  already updated; ignore any older notes that mention it.
+- Converted G-code has not been printed on the real printer. Step 3's comparison with
+  Orca passed, but the user has not yet approved a first print, and the fractional fan
+  values above are untested on the firmware. Do not send anything to the printer
+  without the user's say-so.

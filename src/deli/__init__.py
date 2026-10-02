@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from deli!")
+from deli.cli import main
+
+__all__ = ["main"]
