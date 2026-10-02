@@ -99,6 +99,14 @@ def _choose(args: argparse.Namespace) -> int:
     return 0
 
 
+class CommandError(Exception):
+    """A command was given something it cannot work with."""
+
+
+def _size_text(size) -> str:
+    return " x ".join(f"{round(side, 2):g}" for side in size) + " mm"
+
+
 def _add(args: argparse.Namespace) -> int:
     doc = project.read()
     parts = project.parts(doc)
@@ -128,7 +136,117 @@ def _add(args: argparse.Namespace) -> int:
         print(f"Added {stored}")
         project.add_part(doc, stored)
     project.write(doc)
-    print(f"  {' x '.join(f'{round(side, 2):g}' for side in size)} mm")
+    print(f"  {_size_text(size)}")
+    return 0
+
+
+AXES = "xyz"
+
+
+def _the_part(doc) -> dict:
+    parts = project.parts(doc)
+    if not parts:
+        raise CommandError("this print has no part yet; add one with: deli add <file>")
+    return parts[0]
+
+
+def _size(part: dict, scale: list[float], rotate: list[float]):
+    try:
+        return _engine.model_size(part["file"], scale=scale, rotate=rotate)
+    except RuntimeError as err:
+        raise CommandError(f"cannot read {part['file']} as a model: {err}") from None
+
+
+def _axis(text: str) -> int:
+    if text.lower() not in AXES:
+        raise CommandError(f"'{text}' is not an axis; use x, y or z")
+    return AXES.index(text.lower())
+
+
+def _factor(text: str, size: float | None) -> float:
+    """A scale factor from 110%, 1.1, or a size such as 30mm along an axis of `size`."""
+    text = text.strip().lower()
+    try:
+        if text.endswith("%"):
+            factor = float(text[:-1]) / 100
+        elif text.endswith("mm"):
+            if size is None:
+                raise CommandError(f"say which side should be {text}: deli scale x|y|z {text}")
+            factor = float(text[:-2]) / size
+        else:
+            factor = float(text)
+    except ValueError:
+        raise CommandError(f"'{text}' is not a scale; write it as 110%, 1.1 or, with an axis, 30mm") from None
+    if factor <= 0:
+        raise CommandError(f"a scale must be more than zero, not {text}")
+    return factor
+
+
+def _percent(factors: list[float]) -> str:
+    if len(set(factors)) == 1:
+        return f"{factors[0] * 100:g}%"
+    return " x ".join(f"{factor * 100:g}%" for factor in factors)
+
+
+def _scale(args: argparse.Namespace) -> int:
+    doc = project.read()
+    part = _the_part(doc)
+    scale = project.part_transform(part, "scale")
+    rotate = project.part_transform(part, "rotate")
+
+    if len(args.args) > 2:
+        raise CommandError("usage: deli scale [x|y|z] FACTOR")
+    if not args.args:
+        state = f"is scaled to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "is not scaled"
+        print(f"{part['file']} {state}")
+    elif len(args.args) == 1:
+        scale = [_factor(args.args[0], None)] * 3
+    else:
+        axis = _axis(args.args[0])
+        scale[axis] = _factor(args.args[1], _size(part, project.IDENTITY["scale"], project.IDENTITY["rotate"])[axis])
+    if args.args:
+        done = f"to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "back to its size in the file"
+        print(f"Scaled {part['file']} {done}")
+    size = _size(part, scale, rotate)
+    if args.args:
+        project.set_part_transform(part, "scale", scale)
+        project.write(doc)
+    print(f"  {_size_text(size)}")
+    return 0
+
+
+def _degrees(text: str) -> float:
+    try:
+        return float(text.strip().lower().removesuffix("°").removesuffix("deg"))
+    except ValueError:
+        raise CommandError(f"'{text}' is not an angle; write it in degrees, such as 45") from None
+
+
+def _turned(rotate: list[float]) -> str:
+    return ", ".join(f"{angle:g}° about {axis}" for axis, angle in zip(AXES, rotate) if angle)
+
+
+def _rotate(args: argparse.Namespace) -> int:
+    doc = project.read()
+    part = _the_part(doc)
+    scale = project.part_transform(part, "scale")
+    rotate = project.part_transform(part, "rotate")
+
+    if len(args.args) > 2:
+        raise CommandError("usage: deli rotate [x|y|z] DEGREES")
+    if not args.args:
+        state = f"is rotated {_turned(rotate)}" if rotate != project.IDENTITY["rotate"] else "is not rotated"
+        print(f"{part['file']} {state}")
+    else:
+        # Without an axis, turn the part on the bed: about z.
+        axis = _axis(args.args[0]) if len(args.args) == 2 else 2
+        rotate[axis] = _degrees(args.args[-1])
+        print(f"Rotated {part['file']} {_turned(rotate) or 'back to how it lies in the file'}")
+    size = _size(part, scale, rotate)
+    if args.args:
+        project.set_part_transform(part, "rotate", rotate)
+        project.write(doc)
+    print(f"  {_size_text(size)}")
     return 0
 
 
@@ -250,9 +368,32 @@ def main(argv: list[str] | None = None) -> int:
     unset.add_argument("setting", help="a setting's name or short name")
     unset.set_defaults(run=_unset)
 
+    scale = commands.add_parser(
+        "scale",
+        help="scale the part, or show its scale",
+        usage="deli scale [x|y|z] [FACTOR]",
+        description="Scale the part. `deli scale 110%%` scales it evenly, `deli scale x 110%%` along one axis, and "
+        "`deli scale z 30mm` makes it that size along an axis. A scale is of the model as it is in its file, "
+        "so `deli scale 100%%` undoes it. Without arguments, show the scale and the size it gives.",
+    )
+    scale.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    scale.set_defaults(run=_scale)
+
+    rotate = commands.add_parser(
+        "rotate",
+        help="rotate the part, or show its rotation",
+        usage="deli rotate [x|y|z] [DEGREES]",
+        description="Rotate the part. `deli rotate 45` turns it 45 degrees on the bed, about z; `deli rotate x 90` "
+        "turns it about another axis. Rotations are applied about x, then y, then z, after scaling, and each is of "
+        "the model as it is in its file, so `deli rotate 0` undoes it. Without arguments, show the rotation and "
+        "the size it gives.",
+    )
+    rotate.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    rotate.set_defaults(run=_rotate)
+
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except (library.LibraryError, project.ProjectError, settings.SettingError) as err:
+    except (library.LibraryError, project.ProjectError, settings.SettingError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return 1

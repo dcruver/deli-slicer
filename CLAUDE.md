@@ -13,6 +13,7 @@ Git-style, shell-native slicer front end for 3D printing. Python, managed with `
 - `deli printer <name>`, `deli filament <name>` and `deli process <name>` each choose one from the library for the print in the current directory and record its name and a hash of its settings in `deli.toml`. `deli.toml` is edited with `tomlkit` so hand-written comments survive.
 - `deli add <file>` adds a model to the print as a `[[part]]` table in `deli.toml`, after the engine has read it. Revision 1 holds one part; `--replace` swaps it.
 - `deli set <setting> <value>` records a setting the print changes in `[settings]` in `deli.toml`, after the engine has checked it together with the chosen profiles; `deli unset <setting>` removes it. `src/deli/settings.py` holds the short names (`infill` for `fill_density`).
+- `deli scale [x|y|z] <factor>` and `deli rotate [x|y|z] <degrees>` record the part's `scale` and `rotate` (three numbers each) in its `[[part]]` table; both are absolute, relative to the model file, and the engine applies scale, then rotations about x, y, z.
 - `deli view` opens a single viewer pane (local three.js page) showing the part on the bed; it is a viewer only.
 - Revision 1 is single-object. Multi-object selection and bed arrangement are planned for later.
 

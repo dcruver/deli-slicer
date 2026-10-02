@@ -106,3 +106,24 @@ def unset_setting(doc: tomlkit.TOMLDocument, key: str) -> None:
     del doc["settings"][key]
     if not doc["settings"]:
         del doc["settings"]
+
+
+# A part's transforms, as `_engine.slice` takes them: three scale factors, and three
+# angles in degrees about X, Y and Z, applied in that order after scaling.
+IDENTITY = {"scale": [1.0, 1.0, 1.0], "rotate": [0.0, 0.0, 0.0]}
+
+
+def part_transform(part: dict, key: str) -> list[float]:
+    values = part.get(key, IDENTITY[key])
+    numbers = isinstance(values, list) and len(values) == 3
+    if not numbers or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+        raise ProjectError(f"{FILE}: a part's '{key}' should be three numbers, for x, y and z")
+    return [float(v) for v in values]
+
+
+def set_part_transform(part: dict, key: str, values: list[float]) -> None:
+    """Record a part's scale or rotation, leaving nothing behind when it is the identity."""
+    if values == IDENTITY[key]:
+        part.pop(key, None)
+    else:
+        part[key] = [int(v) if v == int(v) else v for v in values]

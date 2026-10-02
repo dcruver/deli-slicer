@@ -111,13 +111,11 @@ DynamicPrintConfig complete_config(DynamicPrintConfig config)
     return config;
 }
 
-SliceResult slice(const std::string &model_path, const std::string &config_ini, const std::string &output_path,
-                  std::array<double, 3> scale, std::array<double, 3> rotate)
+// The model in a file, scaled by per-axis factors and then turned about X, Y and Z, in
+// that order, by angles in degrees; every object of it is then dropped onto the bed.
+Model load_transformed(const std::string &model_path, const std::array<double, 3> &scale,
+                       const std::array<double, 3> &rotate)
 {
-    nb::gil_scoped_release release;
-
-    DynamicPrintConfig config = complete_config(parse_config(config_ini));
-
     Model model = FileReader::load_model(model_path);
     for (ModelObject *object : model.objects) {
         object->scale(Vec3d(scale[0], scale[1], scale[2]));
@@ -126,6 +124,16 @@ SliceResult slice(const std::string &model_path, const std::string &config_ini, 
         object->rotate(Geometry::deg2rad(rotate[2]), Z);
         object->ensure_on_bed();
     }
+    return model;
+}
+
+SliceResult slice(const std::string &model_path, const std::string &config_ini, const std::string &output_path,
+                  std::array<double, 3> scale, std::array<double, 3> rotate)
+{
+    nb::gil_scoped_release release;
+
+    DynamicPrintConfig config = complete_config(parse_config(config_ini));
+    Model              model  = load_transformed(model_path, scale, rotate);
 
     // Same placement as PrusaSlicer's command line: arranged on the bed, which centres a single object.
     arr2::ArrangeSettings arrange;
@@ -158,12 +166,12 @@ SliceResult slice(const std::string &model_path, const std::string &config_ini, 
     return result;
 }
 
-// Extent of the model in a file along X, Y and Z, in millimetres, as it is before any scaling or rotation.
-std::array<double, 3> model_size(const std::string &model_path)
+// Extent of the model in a file along X, Y and Z, in millimetres, once scaled and turned.
+std::array<double, 3> model_size(const std::string &model_path, std::array<double, 3> scale, std::array<double, 3> rotate)
 {
     nb::gil_scoped_release release;
 
-    const Model model = FileReader::load_model(model_path);
+    const Model model = load_transformed(model_path, scale, rotate);
     const Vec3d size  = model.bounding_box_exact().size();
     return {size.x(), size.y(), size.z()};
 }
@@ -226,8 +234,10 @@ NB_MODULE(_engine, m)
           "`scale` holds per-axis factors and `rotate` degrees about X, Y and Z, applied in that\n"
           "order after scaling. The object is then dropped onto the bed and centred.");
 
-    m.def("model_size", &model_size, "model"_a,
-          "Extent of the model in a file along X, Y and Z, in millimetres.\n\n"
+    m.def("model_size", &model_size, "model"_a, nb::kw_only(),
+          "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},
+          "Extent of the model in a file along X, Y and Z, in millimetres, after `scale` and\n"
+          "`rotate` are applied as `slice` applies them.\n\n"
           "Raises RuntimeError when the file cannot be read as a model.");
 
     m.def("split_config", &split_config, "config"_a,

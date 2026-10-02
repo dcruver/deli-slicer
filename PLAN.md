@@ -50,7 +50,8 @@ Do not reopen these without a reason.
 | `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
 | `deli add` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 11 tests pass. See step 5. |
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
-| Other `deli` subcommands | Not started. |
+| `deli scale`, `deli rotate` (`src/deli/cli.py`) | Done. 19 tests pass. See step 5. |
+| `deli slice` | Not started. |
 
 Everything above is committed on `main`. There is no remote.
 
@@ -173,8 +174,7 @@ Done. Start at step 5.
 
 ### 5. Commands, revision 1
 
-`load`, `printer`, `filament`, `process`, `add` and `set` are done; `scale`, `rotate` and
-`slice` are not started.
+Everything but `slice` is done.
 Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 `fill_density`) with completion over real setting names.
 
@@ -236,6 +236,18 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   - `[settings]` is where `slice` will read overrides from; hand-written `true`/`false`
     and numbers are read as the engine's strings by `project.settings`.
   - Not built: shell completion over setting names.
+- `deli scale [x|y|z] FACTOR` and `deli rotate [x|y|z] DEGREES` record `scale` and
+  `rotate` in the `[[part]]` table, three numbers each, as `_engine.slice` takes them.
+  Both are absolute: a scale is of the model in its file, so `deli scale 100%` undoes
+  it, and a rotation about an axis replaces the one before, so `deli rotate z 0`
+  undoes it. Neither key is written when it is the identity. A factor can be `110%`,
+  `1.1` or, with an axis, a size such as `30mm`. `deli rotate 45` with no axis turns
+  about z. Each command prints the part's size afterwards, from
+  `_engine.model_size(file, scale=, rotate=)`, which transforms the model exactly as
+  `slice` does (`load_transformed` in `_engine.cpp`), so what is shown is what slices.
+- `slice` has everything it needs in `deli.toml`: `[[part]]` with `file`, `scale` and
+  `rotate`; `[printer]`, `[filament]`, `[process]` with names and hashes;
+  `[settings]` with overrides. `cli._profile` and `project.settings` read them.
 - Not decided: what `slice` does when the chosen printer's hash no longer matches the
   library.
 - The files in `profiles/` were written by a one-off script from Orca's stock presets
