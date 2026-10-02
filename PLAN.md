@@ -46,7 +46,7 @@ Do not reopen these without a reason.
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
 | `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 14 tests pass. See step 5. |
-| `deli printer` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 10 tests pass. See step 5. |
+| `deli printer`, `deli filament`, `deli process` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 19 tests pass. See step 5. |
 | `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
 | Other `deli` subcommands | Not started. |
 
@@ -171,7 +171,8 @@ Done. Start at step 5.
 
 ### 5. Commands, revision 1
 
-`load` and `printer` are done; `add`, `set`, `scale`, `rotate` and `slice` are not started.
+`load`, `printer`, `filament` and `process` are done; `add`, `set`, `scale`, `rotate` and
+`slice` are not started.
 Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 `fill_density`) with completion over real setting names.
 
@@ -196,8 +197,10 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   library since it was chosen or is no longer there.
 - `deli.toml` is read and written with `tomlkit`, which keeps the comments and layout
   of a file the user also edits by hand.
-- Not built: choosing a filament and a process, which `slice` will need. The library
-  and `project.select` already take the kind as a parameter.
+- `deli filament <name>` and `deli process <name>` work the same way and record
+  `[filament]` and `[process]`. One function in `cli.py` (`_choose`) serves all three.
+  Nothing checks that the three fit each other (a 0.6 mm process with a 0.4 mm
+  printer, say); `slice` will be the first place a mismatch shows.
 - Not decided: what `slice` does when the chosen printer's hash no longer matches the
   library.
 - The files in `profiles/` were written by a one-off script from Orca's stock presets

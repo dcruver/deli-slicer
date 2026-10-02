@@ -24,11 +24,38 @@ def _printer_summary(settings: dict[str, str]) -> str:
     return ", ".join(parts)
 
 
+def _filament_summary(settings: dict[str, str]) -> str:
+    """Material, nozzle temperature and bed temperature, for whichever of them the filament sets."""
+    parts = []
+    if "filament_type" in settings:
+        parts.append(settings["filament_type"].replace(";", " / "))
+    if "temperature" in settings:
+        parts.append(f"nozzle {settings['temperature'].replace(',', ' / ')} °C")
+    if "bed_temperature" in settings:
+        parts.append(f"bed {settings['bed_temperature'].replace(',', ' / ')} °C")
+    return ", ".join(parts)
+
+
+def _process_summary(settings: dict[str, str]) -> str:
+    """Layer height, infill and perimeters, for whichever of them the process sets."""
+    parts = []
+    if "layer_height" in settings:
+        parts.append(f"layers {float(settings['layer_height']):g} mm")
+    if "fill_density" in settings:
+        parts.append(" ".join(["infill", settings["fill_density"], settings.get("fill_pattern", "")]).strip())
+    if "perimeters" in settings:
+        parts.append(f"perimeters {settings['perimeters']}")
+    return ", ".join(parts)
+
+
+_SUMMARIES = {"printer": _printer_summary, "filament": _filament_summary, "process": _process_summary}
+
+
 def _load(args: argparse.Namespace) -> int:
     loaded = library.load(args.kind, args.source, args.name)
     verb = "Replaced" if loaded.replaced else "Loaded"
     print(f"{verb} {loaded.kind} '{loaded.name}' ({len(loaded.settings)} settings) from {loaded.source}")
-    if loaded.kind == "printer" and (summary := _printer_summary(loaded.settings)):
+    if summary := _SUMMARIES[loaded.kind](loaded.settings):
         print(f"  {summary}")
     print(f"  stored in {loaded.path}")
     for kind, count in loaded.others.items():
@@ -40,31 +67,33 @@ def _load(args: argparse.Namespace) -> int:
     return 0
 
 
-def _printer(args: argparse.Namespace) -> int:
+def _choose(args: argparse.Namespace) -> int:
+    """`deli printer`, `deli filament` and `deli process`: choose one from the library, or list them."""
+    kind = args.command
     doc = project.read()
-    current = project.selected(doc, "printer")
-    loaded = library.names("printer")
+    current = project.selected(doc, kind)
+    loaded = library.names(kind)
 
     if args.name is None:
         # Like `git branch`: list what there is and mark the one in use.
         if not loaded and not current:
-            print("No printers loaded. Add one with: deli load printer <source>")
+            print(f"No {kind} is loaded. Add one with: deli load {kind} <source>")
         for name in sorted({*loaded, *filter(None, [current.get("name")])}):
             note = ""
             if name == current.get("name"):
                 if name not in loaded:
                     note = " (not in your library)"
-                elif library.fingerprint(library.find("printer", name)) != current.get("sha256"):
-                    note = f" (changed in your library since it was chosen; accept with: deli printer {name})"
+                elif library.fingerprint(library.find(kind, name)) != current.get("sha256"):
+                    note = f" (changed in your library since it was chosen; accept with: deli {kind} {name})"
             print(f"{'*' if name == current.get('name') else ' '} {name}{note}")
         return 0
 
     name = library.slug(args.name)
-    path = library.find("printer", name)
-    project.select(doc, "printer", name, library.fingerprint(path))
+    path = library.find(kind, name)
+    project.select(doc, kind, name, library.fingerprint(path))
     project.write(doc)
-    print(f"Printer set to '{name}'")
-    if summary := _printer_summary(library.read_settings(path)):
+    print(f"{kind.capitalize()} set to '{name}'")
+    if summary := _SUMMARIES[kind](library.read_settings(path)):
         print(f"  {summary}")
     return 0
 
@@ -83,13 +112,15 @@ def main(argv: list[str] | None = None) -> int:
     load.add_argument("--name", help="name to store it under (default: the name in the file)")
     load.set_defaults(run=_load)
 
-    printer = commands.add_parser(
-        "printer",
-        help="choose the printer for this print, or list the loaded printers",
-        description="Choose a loaded printer for the print in this directory. Without a name, list the loaded printers.",
-    )
-    printer.add_argument("name", nargs="?", help="a printer in your library")
-    printer.set_defaults(run=_printer)
+    plurals = {"printer": "printers", "filament": "filaments", "process": "processes"}
+    for kind, plural in plurals.items():
+        choose = commands.add_parser(
+            kind,
+            help=f"choose the {kind} for this print, or list the loaded {plural}",
+            description=f"Choose a loaded {kind} for the print in this directory. Without a name, list the loaded {plural}.",
+        )
+        choose.add_argument("name", nargs="?", help=f"a {kind} in your library")
+        choose.set_defaults(run=_choose)
 
     args = parser.parse_args(argv)
     try:
