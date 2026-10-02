@@ -46,8 +46,7 @@ Do not reopen these without a reason.
 | `deli printer` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 10 tests pass. See step 5. |
 | Other `deli` subcommands | Not started. |
 
-Three commits on `main`, no remote. The binding, the build switch and this file are
-not committed yet.
+Everything above is committed on `main`. There is no remote.
 
 ## Dependency build
 
