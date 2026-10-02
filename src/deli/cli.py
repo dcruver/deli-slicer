@@ -33,6 +33,8 @@ def _load(args: argparse.Namespace) -> int:
     print(f"  stored in {loaded.path}")
     for kind, count in loaded.others.items():
         print(f"  the file also has {count} {kind} settings: deli load {kind} {args.source}")
+    if loaded.connection:
+        print(f"  left out its connection settings: {', '.join(loaded.connection)}")
     if loaded.unknown:
         print(f"  ignored {len(loaded.unknown)} settings this engine does not know: {', '.join(loaded.unknown)}")
     return 0

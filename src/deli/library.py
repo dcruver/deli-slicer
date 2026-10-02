@@ -26,6 +26,11 @@ _ID_KEYS = {"printer": "printer_settings_id", "filament": "filament_settings_id"
 _FOLDERS = {"printer": "printers", "filament": "filaments", "process": "processes"}
 
 
+def _is_connection(key: str) -> bool:
+    """Whether a setting says how to reach one particular machine: its address, API key or login."""
+    return key == "print_host" or key.startswith("printhost_")
+
+
 class LibraryError(Exception):
     """A source could not be loaded, or the library does not hold what was asked for."""
 
@@ -39,6 +44,7 @@ class Loaded:
     settings: dict[str, str]
     others: dict[str, int]  # other kinds found in the same file, with their setting counts
     unknown: list[str]
+    connection: list[str]  # connection settings that had a value and were left out
     replaced: bool
 
 
@@ -117,7 +123,10 @@ def load(kind: str, source: str, name: str | None = None) -> Loaded:
         groups, unknown = _engine.split_config(text)
     except ValueError as err:
         raise LibraryError(f"{source}: {err}") from None
-    settings = groups.get(kind)
+    found = groups.get(kind, {})
+    # A file that is passed around must not carry the address or key of its author's machine.
+    settings = {key: value for key, value in found.items() if not _is_connection(key)}
+    connection = sorted(key for key, value in found.items() if _is_connection(key) and value)
     if not settings:
         raise LibraryError(f"{source} has no {kind} settings")
 
@@ -136,4 +145,4 @@ def load(kind: str, source: str, name: str | None = None) -> Loaded:
     path.write_text("\n".join(lines) + "\n")
 
     others = {other: len(groups[other]) for other in KINDS if other != kind and groups.get(other)}
-    return Loaded(kind, name, path, source, settings, others, unknown, replaced)
+    return Loaded(kind, name, path, source, settings, others, unknown, connection, replaced)

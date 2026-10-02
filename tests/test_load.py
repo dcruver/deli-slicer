@@ -130,6 +130,22 @@ def test_settings_the_engine_does_not_know_are_reported(home, tmp_path, capsys):
     assert "no_such_setting" not in (home / "printers" / "odd.ini").read_text()
 
 
+def test_connection_settings_are_left_out(home, tmp_path, capsys):
+    source = tmp_path / "mine.ini"
+    source.write_text(
+        "bed_shape = 0x0,300x0,300x300,0x300\nhost_type = octoprint\n"
+        "print_host = http://printer.example\nprinthost_apikey = SECRET\nprinthost_cafile =\n"
+    )
+
+    assert main(["load", "printer", str(source)]) == 0
+
+    stored = settings(home / "printers" / "mine.ini")
+    assert stored.keys() == {"bed_shape", "host_type"}  # the kind of host is not private
+    out = capsys.readouterr().out
+    assert "left out its connection settings: print_host, printhost_apikey" in out  # the empty one is not news
+    assert "printer.example" not in out and "SECRET" not in out
+
+
 def test_bad_value_is_an_error(home, tmp_path, capsys):
     source = tmp_path / "bad.ini"
     source.write_text("gcode_flavor = banana\n")

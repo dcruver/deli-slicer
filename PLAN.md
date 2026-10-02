@@ -21,6 +21,9 @@ Do not reopen these without a reason.
   `http://` is refused. Each kind is stored on its own: loading a printer from a full
   PrusaSlicer export keeps only the printer's settings. Loading is the only step that
   uses the network, so a loaded printer changes only when it is loaded again.
+- **Where shared profiles live:** in `profiles/` in this repo for now, in
+  `printers/`, `processes/` and `filaments/`. They move to their own repo if the
+  project gets traction. `profiles/README.md` says what is there and how it was checked.
 - **Packaging:** `scikit-build-core` builds the extension and nanobind binds it, using
   Python's stable ABI. Chosen with distribution in mind: users get one prebuilt wheel
   per platform with the engine inside, and only wheel builders need `build/deps`.
@@ -42,8 +45,9 @@ Do not reopen these without a reason.
 | Dependency build in `build/deps` | Done. All 24 packages built with no patches. |
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
-| `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 13 tests pass. See step 5. |
+| `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 14 tests pass. See step 5. |
 | `deli printer` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 10 tests pass. See step 5. |
+| `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
 | Other `deli` subcommands | Not started. |
 
 Everything above is committed on `main`. There is no remote.
@@ -180,6 +184,9 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 - `_engine.split_config` decides which setting belongs to which kind, using
   PrusaSlicer's own preset lists. Settings this engine version does not know are
   reported and left out; bad values are an error.
+- `deli load` leaves out `print_host` and every `printhost_*` setting and says which it
+  dropped, so a shared file cannot carry its author's address or API key. `host_type`
+  is kept: it says what kind of host the printer runs, not where it is.
 - A link to a file's page on GitHub (`github.com/.../blob/...`) is fetched as the raw
   file. Checked against a real GitHub link.
 - `deli printer <name>` chooses a loaded printer for the print in the current
@@ -193,6 +200,9 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   and `project.select` already take the kind as a parameter.
 - Not decided: what `slice` does when the chosen printer's hash no longer matches the
   library.
+- The files in `profiles/` were written by a one-off script from Orca's stock presets
+  (not the user's copy, which only adds the printer's network address). They produce
+  the same G-code as the files validated in step 3.
 - Still to build: `deli import orca "<preset name>"`, which runs the converter against
   a local Orca install and writes an INI that `deli load` accepts.
 
@@ -246,7 +256,9 @@ Open items, each a real behaviour difference from Orca:
 - **Filament change G-code** is not converted: single-filament only.
 - **Upload.** The printer uses Orca's `elegoolink` host type at
   `http://centauri-carbon.cruver.network`. PrusaSlicer has no equivalent; sending
-  prints is unsolved.
+  prints is unsolved. When it is built, the address comes from the `DELI_HOST`
+  environment variable (and an API key, where a host needs one, from `DELI_API_KEY`),
+  not from a printer file or `deli.toml`. Nothing reads either variable yet.
 - **Other printers.** The converter has only been checked on the Centauri Carbon. Run
   over all 1,001 printer presets bundled with Orca 2.4.2, each with one compatible
   process and filament and a test cube: 400 sliced, 233 failed while slicing, 77 gave a
