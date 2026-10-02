@@ -26,6 +26,9 @@ Git-style, shell-native slicer front end for 3D printing. Python, managed with `
 ```
 uv run deli          # run the CLI
 uv run pytest -q     # run the tests
+make install         # put `deli` on the PATH, pointing at this checkout
+make reinstall       # the same, rebuilding the binding after C++ changes
+make uninstall
 ```
 
 ## Local environment
