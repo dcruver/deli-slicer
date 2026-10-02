@@ -1,0 +1,132 @@
+import json
+import shutil
+import struct
+import threading
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+from deli import library, view
+from deli.cli import main
+
+ROOT = Path(__file__).resolve().parents[1]
+CUBE = ROOT / "vendor/PrusaSlicer/tests/data/test_stl/ASCII/20mmbox-LF.stl"
+EXPORT = ROOT / "vendor/PrusaSlicer/tests/data/default_fff.ini"  # bed 250 x 210, height 210
+
+
+@pytest.fixture(autouse=True)
+def job(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    job = tmp_path / "job"
+    job.mkdir()
+    shutil.copy(CUBE, job / "cube.stl")
+    monkeypatch.chdir(job)
+    return job
+
+
+@pytest.fixture
+def url():
+    """A running viewer server; the address it listens on."""
+    server = view.server()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def get(url: str) -> tuple[int, str, bytes]:
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.status, response.headers["Content-Type"], response.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.headers["Content-Type"], err.read()
+
+
+def test_state_describes_an_empty_directory(url):
+    status, _, body = get(url + "/state")
+
+    assert status == 200
+    state = json.loads(body)
+    assert state["part"] is None
+    assert state["printer"] is None
+    assert state["bed"] == view.DEFAULT_BED
+
+
+def test_state_has_the_part_and_the_printers_bed(url):
+    library.load("printer", str(EXPORT))
+    main(["printer", "original-prusa-i3-mk3"])
+    main(["add", "cube.stl"])
+    main(["scale", "z", "200%"])
+    main(["rotate", "45"])
+
+    state = json.loads(get(url + "/state")[2])
+
+    assert state["printer"] == "original-prusa-i3-mk3"
+    assert state["bed"] == [[0, 0], [250, 0], [250, 210], [0, 210]]
+    assert state["height"] == 210
+    assert state["part"]["file"] == "cube.stl"
+    assert state["part"]["scale"] == [1, 1, 2]
+    assert state["part"]["rotate"] == [0, 0, 45]
+    assert state["part"]["size"] == pytest.approx([28.28, 28.28, 40], abs=0.01)
+
+
+def test_version_changes_when_the_print_does(url):
+    main(["add", "cube.stl"])
+    before = json.loads(get(url + "/state")[2])["version"]
+
+    main(["scale", "110%"])
+
+    assert json.loads(get(url + "/state")[2])["version"] != before
+
+
+def test_mesh_is_the_part_centred_on_the_bed(url):
+    library.load("printer", str(EXPORT))
+    main(["printer", "original-prusa-i3-mk3"])
+    main(["add", "cube.stl"])
+
+    status, content_type, body = get(url + "/mesh")
+
+    assert status == 200 and content_type == "application/octet-stream"
+    n_vertices, n_triangles = struct.unpack_from("<II", body)
+    assert (n_vertices, n_triangles) == (8, 12)
+    vertices = struct.unpack_from(f"<{n_vertices * 3}f", body, 8)
+    assert (min(vertices[0::3]), max(vertices[0::3])) == (115, 135)  # about x = 125
+    assert (min(vertices[1::3]), max(vertices[1::3])) == (95, 115)  # about y = 105
+    assert (min(vertices[2::3]), max(vertices[2::3])) == (0, 20)  # resting on the bed
+    indices = struct.unpack_from(f"<{n_triangles * 3}I", body, 8 + n_vertices * 12)
+    assert max(indices) == 7
+
+
+def test_mesh_without_a_part_is_empty(url):
+    _, _, body = get(url + "/mesh")
+
+    assert body == struct.pack("<II", 0, 0)
+
+
+def test_page_and_its_scripts_are_served(url):
+    status, content_type, body = get(url + "/")
+    assert status == 200 and content_type.startswith("text/html")
+    assert b"viewer.js" in body
+
+    assert get(url + "/viewer.js")[0] == 200
+    assert get(url + "/vendor/three.module.min.js")[1] == "text/javascript"
+    assert get(url + "/vendor/OrbitControls.js")[0] == 200
+
+
+def test_only_the_viewers_files_are_served(url, job):
+    (job / "secret.html").write_text("mine")
+
+    assert get(url + "/../../secret.html")[0] == 404
+    assert get(url + "/vendor/LICENSE")[0] == 404  # not a page type
+    assert get(url + "/nothing.js")[0] == 404
+
+
+def test_broken_project_file_is_reported_not_fatal(url, job):
+    (job / "deli.toml").write_text("[part\n")
+
+    status, _, body = get(url + "/state")
+
+    assert status == 200
+    assert "not valid TOML" in json.loads(body)["error"]
+    assert get(url + "/mesh")[0] == 500

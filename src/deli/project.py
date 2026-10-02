@@ -7,6 +7,8 @@ from pathlib import Path
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
 
+from deli import library
+
 FILE = Path("deli.toml")
 
 
@@ -127,3 +129,11 @@ def set_part_transform(part: dict, key: str, values: list[float]) -> None:
         part.pop(key, None)
     else:
         part[key] = [int(v) if v == int(v) else v for v in values]
+
+
+def chosen_profile(doc: tomlkit.TOMLDocument, kind: str) -> tuple[str, dict[str, str]] | None:
+    """Name and settings of the printer, filament or process chosen for the print, if it is in the library."""
+    name = selected(doc, kind).get("name")
+    if not name or name not in library.names(kind):
+        return None
+    return name, library.read_settings(library.find(kind, name))

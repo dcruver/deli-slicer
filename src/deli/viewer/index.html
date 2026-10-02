@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deli view</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1e23; color: #d8dbe0;
+               font: 14px/1.4 system-ui, sans-serif; }
+  canvas { display: block; }
+  #info { position: fixed; top: 12px; left: 12px; padding: 10px 14px; background: rgba(27, 30, 35, 0.85);
+          border: 1px solid #3a3f48; border-radius: 6px; max-width: 24em; }
+  #info b { color: #fff; }
+  #info .dim { color: #9aa0a8; }
+  #info .error { color: #ff8a80; }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<div id="info">Connecting to deli…</div>
+<script type="module" src="./viewer.js"></script>
+</body>
+</html>

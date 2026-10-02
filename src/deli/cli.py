@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from deli import _engine, library, project, settings
+from deli import _engine, library, project, settings, view
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -250,18 +250,10 @@ def _rotate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _profile(doc, kind: str) -> tuple[str, dict[str, str]] | None:
-    """Name and settings of the printer, filament or process chosen for the print, if it is in the library."""
-    name = project.selected(doc, kind).get("name")
-    if not name or name not in library.names(kind):
-        return None
-    return name, library.read_settings(library.find(kind, name))
-
-
 def _profile_note(doc, key: str) -> str:
     """What the chosen profile has for a setting, to print under the print's own value."""
     kind = settings.kinds()[key]
-    profile = _profile(doc, kind)
+    profile = project.chosen_profile(doc, kind)
     if not profile or key not in profile[1]:
         return ""
     return f"the {kind} '{profile[0]}' has {profile[1][key]}"
@@ -291,7 +283,7 @@ def _set(args: argparse.Namespace) -> int:
             print(f"{key} is not changed by this print")
         return 0
 
-    chosen = [profile[1] for kind in library.KINDS if (profile := _profile(doc, kind))]
+    chosen = [profile[1] for kind in library.KINDS if (profile := project.chosen_profile(doc, kind))]
     others = {name: value for part in chosen for name, value in part.items()} | overrides
     value = settings.check(key, args.value, others)
     project.set_setting(doc, key, value)
@@ -370,6 +362,10 @@ def _slice(args: argparse.Namespace) -> int:
     for warning in result.warnings:
         print(f"  warning: {warning}")
     return 0
+
+
+def _view(args: argparse.Namespace) -> int:
+    return view.serve(args.port, open_browser=not args.no_browser)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -456,6 +452,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     slice_.add_argument("-o", "--output", help="where to write the G-code (default: the part's name with .gcode)")
     slice_.set_defaults(run=_slice)
+
+    view_ = commands.add_parser(
+        "view",
+        help="show the part on the bed in your browser",
+        description="Open a page that shows the part on the printer's bed, placed as `deli slice` places it. "
+        "The page follows deli.toml: changes made in the shell appear in it. Runs until Ctrl-C.",
+    )
+    view_.add_argument("--port", type=int, default=0, help="port to serve on (default: any free one)")
+    view_.add_argument("--no-browser", action="store_true", help="print the address instead of opening a browser")
+    view_.set_defaults(run=_view)
 
     args = parser.parse_args(argv)
     try:

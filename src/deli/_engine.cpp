@@ -1,7 +1,8 @@
 // deli's binding to PrusaSlicer's libslic3r. The surface is deliberately narrow:
 // one call that loads a model, transforms it, slices it and writes the G-code,
-// one that measures a model, one that sorts the settings of an INI file into printer,
-// process and filament, and one that lists the settings of each of those kinds.
+// one that measures a model, one that hands its triangles to a viewer, one that sorts
+// the settings of an INI file into printer, process and filament, and one that lists
+// the settings of each of those kinds.
 
 #include <array>
 #include <map>
@@ -176,6 +177,34 @@ std::array<double, 3> model_size(const std::string &model_path, std::array<doubl
     return {size.x(), size.y(), size.z()};
 }
 
+// The triangles of a model scaled, turned and dropped onto the bed as `slice` does, then
+// centred over a point of the bed. Vertices are float32 x, y, z; triangles are three
+// uint32 vertex indices each.
+std::pair<nb::bytes, nb::bytes> mesh(const std::string &model_path, std::array<double, 3> scale,
+                                     std::array<double, 3> rotate, std::array<double, 2> centre)
+{
+    std::vector<float>    vertices;
+    std::vector<uint32_t> triangles;
+    {
+        nb::gil_scoped_release release;
+
+        Model       model  = load_transformed(model_path, scale, rotate);
+        const Vec3d middle = model.bounding_box_exact().center();
+        const Vec3d offset(centre[0] - middle.x(), centre[1] - middle.y(), 0.);
+        for (ModelObject *object : model.objects) {
+            object->translate_instances(offset);
+            const TriangleMesh m    = object->mesh();
+            const uint32_t     base = uint32_t(vertices.size() / 3);
+            for (const Vec3f &v : m.its.vertices)
+                vertices.insert(vertices.end(), {v.x(), v.y(), v.z()});
+            for (const Vec3i &t : m.its.indices)
+                triangles.insert(triangles.end(), {base + uint32_t(t(0)), base + uint32_t(t(1)), base + uint32_t(t(2))});
+        }
+    }
+    return {nb::bytes(reinterpret_cast<const char *>(vertices.data()), vertices.size() * sizeof(float)),
+            nb::bytes(reinterpret_cast<const char *>(triangles.data()), triangles.size() * sizeof(uint32_t))};
+}
+
 using Settings = std::map<std::string, std::string>;
 
 // Sort the settings of an INI file by the kind of preset PrusaSlicer keeps them in.
@@ -239,6 +268,12 @@ NB_MODULE(_engine, m)
           "Extent of the model in a file along X, Y and Z, in millimetres, after `scale` and\n"
           "`rotate` are applied as `slice` applies them.\n\n"
           "Raises RuntimeError when the file cannot be read as a model.");
+
+    m.def("mesh", &mesh, "model"_a, nb::kw_only(),
+          "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},
+          "centre"_a = std::array<double, 2>{0., 0.},
+          "The triangles of a model after `scale` and `rotate`, resting on z = 0 and centred over\n"
+          "`centre`: a pair of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
 
     m.def("split_config", &split_config, "config"_a,
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"

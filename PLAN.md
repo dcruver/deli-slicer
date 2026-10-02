@@ -52,6 +52,7 @@ Do not reopen these without a reason.
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
 | `deli scale`, `deli rotate` (`src/deli/cli.py`) | Done. 19 tests pass. See step 5. |
 | `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
+| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 8 tests pass. See step 6. |
 
 Everything above is committed on `main`. There is no remote.
 
@@ -270,7 +271,26 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 
 ### 6. `deli view`
 
-The viewer pane, after slicing works.
+Done. 8 tests pass.
+
+- `src/deli/view.py` runs `http.server.ThreadingHTTPServer` on `127.0.0.1` (any free
+  port, or `--port`), opens the browser (`--no-browser` to skip) and serves
+  `src/deli/viewer/`: `index.html`, `viewer.js`, and three.js 0.170.0 with its
+  `OrbitControls` addon in `vendor/` (MIT; licence file alongside). Nothing is fetched
+  from the network. Only those files are served; `/state` and `/mesh` are the two
+  dynamic resources.
+- `/state` is JSON: the bed outline and height from the chosen printer (a plain
+  200 × 200 bed when none is chosen), the part with its scale, rotation and size, and
+  a `version` that changes whenever `deli.toml` or the part's file does. The page
+  fetches it every 500 ms and redraws on a new version, so shell commands show up in
+  the browser. `/mesh` is binary: two uint32 counts, float32 vertices, uint32 indices,
+  from `_engine.mesh`, which transforms and drops the model as `slice` does and
+  centres it over the bed, as `slice`'s arrangement does for a single object.
+- Checked in Chrome: the Centauri Carbon bed and volume, a frog model, and a
+  `deli scale` / `deli rotate` from another shell redrawing the page.
+- The viewer's files are in the wheel (checked with `uv build --wheel`; 25.7 MB, of
+  which the unstripped `.so` is 65 MB before compression).
+- Not shown: G-code, supports, the excluded bed corner, more than one part.
 
 ### Later
 

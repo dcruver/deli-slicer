@@ -15,7 +15,7 @@ deli slice
 deli view
 ```
 
-Status: early. Everything above works except `view`.
+Status: early. Everything above works. Nothing sends a print to a printer yet.
 
 ## Engine
 
