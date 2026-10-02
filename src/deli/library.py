@@ -7,6 +7,7 @@ only changes when it is loaded again.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import urllib.error
@@ -25,8 +26,8 @@ _ID_KEYS = {"printer": "printer_settings_id", "filament": "filament_settings_id"
 _FOLDERS = {"printer": "printers", "filament": "filaments", "process": "processes"}
 
 
-class LoadError(Exception):
-    """A source could not be fetched, or does not hold usable settings."""
+class LibraryError(Exception):
+    """A source could not be loaded, or the library does not hold what was asked for."""
 
 
 @dataclass
@@ -63,21 +64,45 @@ def fetch(source: str) -> str:
         if url.scheme == "https":
             with urllib.request.urlopen(github_raw(source), timeout=30) as response:
                 if urllib.parse.urlsplit(response.url).scheme != "https":
-                    raise LoadError(f"{source} redirects to {response.url}, which is not https")
+                    raise LibraryError(f"{source} redirects to {response.url}, which is not https")
                 data = response.read(MAX_BYTES + 1)
         elif url.scheme == "file":
             data = Path(urllib.request.url2pathname(url.path)).read_bytes()
         elif url.scheme == "":
             data = Path(source).expanduser().read_bytes()
         else:
-            raise LoadError(f"cannot load from {source}: use an https:// or file:// URL, or a path")
+            raise LibraryError(f"cannot load from {source}: use an https:// or file:// URL, or a path")
         if len(data) > MAX_BYTES:
-            raise LoadError(f"{source} is larger than {MAX_BYTES // 1000} kB, too large for a settings file")
+            raise LibraryError(f"{source} is larger than {MAX_BYTES // 1000} kB, too large for a settings file")
         return data.decode()
     except (OSError, urllib.error.URLError) as err:
-        raise LoadError(f"cannot read {source}: {err}") from None
+        raise LibraryError(f"cannot read {source}: {err}") from None
     except UnicodeDecodeError:
-        raise LoadError(f"{source} is not a text file") from None
+        raise LibraryError(f"{source} is not a text file") from None
+
+
+def names(kind: str) -> list[str]:
+    """Names of everything of one kind in the library."""
+    return sorted(path.stem for path in (library_dir() / _FOLDERS[kind]).glob("*.ini"))
+
+
+def find(kind: str, name: str) -> Path:
+    path = library_dir() / _FOLDERS[kind] / f"{name}.ini"
+    if not path.exists():
+        loaded = ", ".join(names(kind)) or "none"
+        raise LibraryError(f"no {kind} named '{name}' is loaded (loaded: {loaded}); add one with: deli load {kind} <source>")
+    return path
+
+
+def read_settings(path: Path) -> dict[str, str]:
+    lines = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]
+    return {key.strip(): value.strip() for key, _, value in (line.partition("=") for line in lines)}
+
+
+def fingerprint(path: Path) -> str:
+    """Hash of a library file's settings, so a project can tell when they have changed."""
+    lines = sorted(f"{key} = {value}\n" for key, value in read_settings(path).items())
+    return hashlib.sha256("".join(lines).encode()).hexdigest()
 
 
 def _name_in(settings: dict[str, str], kind: str) -> str:
@@ -91,17 +116,17 @@ def load(kind: str, source: str, name: str | None = None) -> Loaded:
     try:
         groups, unknown = _engine.split_config(text)
     except ValueError as err:
-        raise LoadError(f"{source}: {err}") from None
+        raise LibraryError(f"{source}: {err}") from None
     settings = groups.get(kind)
     if not settings:
-        raise LoadError(f"{source} has no {kind} settings")
+        raise LibraryError(f"{source} has no {kind} settings")
 
     url = urllib.parse.urlsplit(source)
     if url.scheme == "":
         source = str(Path(source).expanduser().resolve())
     name = slug(name or _name_in(settings, kind) or Path(url.path).stem)
     if not name:
-        raise LoadError(f"cannot work out a name for this {kind}; give one with --name")
+        raise LibraryError(f"cannot work out a name for this {kind}; give one with --name")
 
     path = library_dir() / _FOLDERS[kind] / f"{name}.ini"
     replaced = path.exists()

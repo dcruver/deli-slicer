@@ -109,7 +109,7 @@ def test_redirect_away_from_https_is_refused(home, monkeypatch):
 
     monkeypatch.setattr(library.urllib.request, "urlopen", lambda url, timeout: Response())
 
-    with pytest.raises(library.LoadError, match="not https"):
+    with pytest.raises(library.LibraryError, match="not https"):
         library.load("printer", "https://example.com/voron.ini")
 
 

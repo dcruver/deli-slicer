@@ -9,6 +9,7 @@ Git-style, shell-native slicer front end for 3D printing. Python, managed with `
 - Slicing is done in-process by PrusaSlicer's `libslic3r`, linked into a Python extension module. No slicer application has to be installed.
 - Profiles are PrusaSlicer INI. Orca JSON profiles are converted to INI by deli; the first target is the Elegoo Centauri Carbon.
 - `deli load printer|filament|process <source>` copies a PrusaSlicer INI file, from an `https://` or `file://` URL or a path, into the per-user library in `~/.config/deli`. Nothing else uses the network.
+- `deli printer <name>` chooses a loaded printer for the print in the current directory and records its name and a hash of its settings in `deli.toml`. `deli.toml` is edited with `tomlkit` so hand-written comments survive.
 - `deli view` opens a single viewer pane (local three.js page) showing the part on the bed; it is a viewer only.
 - Revision 1 is single-object. Multi-object selection and bed arrangement are planned for later.
 

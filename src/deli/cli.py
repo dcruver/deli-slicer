@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from deli import library
+from deli import library, project
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -38,6 +38,35 @@ def _load(args: argparse.Namespace) -> int:
     return 0
 
 
+def _printer(args: argparse.Namespace) -> int:
+    doc = project.read()
+    current = project.selected(doc, "printer")
+    loaded = library.names("printer")
+
+    if args.name is None:
+        # Like `git branch`: list what there is and mark the one in use.
+        if not loaded and not current:
+            print("No printers loaded. Add one with: deli load printer <source>")
+        for name in sorted({*loaded, *filter(None, [current.get("name")])}):
+            note = ""
+            if name == current.get("name"):
+                if name not in loaded:
+                    note = " (not in your library)"
+                elif library.fingerprint(library.find("printer", name)) != current.get("sha256"):
+                    note = f" (changed in your library since it was chosen; accept with: deli printer {name})"
+            print(f"{'*' if name == current.get('name') else ' '} {name}{note}")
+        return 0
+
+    name = library.slug(args.name)
+    path = library.find("printer", name)
+    project.select(doc, "printer", name, library.fingerprint(path))
+    project.write(doc)
+    print(f"Printer set to '{name}'")
+    if summary := _printer_summary(library.read_settings(path)):
+        print(f"  {summary}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="deli", description="Git-style slicer front end for 3D printing.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -52,9 +81,17 @@ def main(argv: list[str] | None = None) -> int:
     load.add_argument("--name", help="name to store it under (default: the name in the file)")
     load.set_defaults(run=_load)
 
+    printer = commands.add_parser(
+        "printer",
+        help="choose the printer for this print, or list the loaded printers",
+        description="Choose a loaded printer for the print in this directory. Without a name, list the loaded printers.",
+    )
+    printer.add_argument("name", nargs="?", help="a printer in your library")
+    printer.set_defaults(run=_printer)
+
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except library.LoadError as err:
+    except (library.LibraryError, project.ProjectError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return 1

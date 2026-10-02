@@ -9,7 +9,9 @@ authors = [
     { name = "Don Cruver", email = "donald@cruver.ai" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "tomlkit>=0.15.1",
+]
 
 [project.scripts]
 deli = "deli:main"

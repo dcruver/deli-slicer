@@ -43,6 +43,7 @@ Do not reopen these without a reason.
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
 | `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 13 tests pass. See step 5. |
+| `deli printer` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 10 tests pass. See step 5. |
 | Other `deli` subcommands | Not started. |
 
 Three commits on `main`, no remote. The binding, the build switch and this file are
@@ -167,7 +168,7 @@ Done. Start at step 5.
 
 ### 5. Commands, revision 1
 
-`load` is done; `add`, `printer`, `set`, `scale`, `rotate` and `slice` are not started.
+`load` and `printer` are done; `add`, `set`, `scale`, `rotate` and `slice` are not started.
 Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 `fill_density`) with completion over real setting names.
 
@@ -182,9 +183,17 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   reported and left out; bad values are an error.
 - A link to a file's page on GitHub (`github.com/.../blob/...`) is fetched as the raw
   file. Checked against a real GitHub link.
-- Still to design for `deli printer <name>`: it selects a loaded printer for the
-  project and `deli.toml` records the name and a hash of its settings. Writing
-  `deli.toml` needs a TOML writer; the standard library only reads TOML.
+- `deli printer <name>` chooses a loaded printer for the print in the current
+  directory, creating `deli.toml` if needed. It records `[printer]` with `name` and
+  `sha256`, a hash of the printer's settings in the library. `deli printer` alone lists
+  the loaded printers, marks the chosen one, and flags it if it has changed in the
+  library since it was chosen or is no longer there.
+- `deli.toml` is read and written with `tomlkit`, which keeps the comments and layout
+  of a file the user also edits by hand.
+- Not built: choosing a filament and a process, which `slice` will need. The library
+  and `project.select` already take the kind as a parameter.
+- Not decided: what `slice` does when the chosen printer's hash no longer matches the
+  library.
 - Still to build: `deli import orca "<preset name>"`, which runs the converter against
   a local Orca install and writes an INI that `deli load` accepts.
 
