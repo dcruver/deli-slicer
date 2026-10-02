@@ -315,6 +315,63 @@ def _unset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _accepted_profile(doc, kind: str) -> dict[str, str]:
+    """Settings of the chosen printer, filament or process, which must be in the library
+    and unchanged since it was chosen, since the print was set up against that version."""
+    chosen = project.selected(doc, kind)
+    name = chosen.get("name")
+    if not name:
+        raise CommandError(f"no {kind} is chosen; choose one with: deli {kind} <name>")
+    path = library.find(kind, name)
+    if "sha256" not in chosen:
+        raise CommandError(f"deli.toml names the {kind} '{name}' without its hash; accept it with: deli {kind} {name}")
+    if library.fingerprint(path) != chosen["sha256"]:
+        raise CommandError(
+            f"the {kind} '{name}' has changed in your library since it was chosen for this print; "
+            f"look it over, then accept it with: deli {kind} {name}"
+        )
+    return library.read_settings(path)
+
+
+def _duration(seconds: float) -> str:
+    minutes, secs = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min"
+    if minutes:
+        return f"{minutes} min {secs:02d} s"
+    return f"{secs} s"
+
+
+def _slice(args: argparse.Namespace) -> int:
+    doc = project.read()
+    part = _the_part(doc)
+    scale = project.part_transform(part, "scale")
+    rotate = project.part_transform(part, "rotate")
+    config: dict[str, str] = {}
+    for kind in library.KINDS:
+        config |= _accepted_profile(doc, kind)
+    config |= project.settings(doc)
+
+    output = Path(args.output) if args.output else Path(part["file"]).with_suffix(".gcode").name
+    ini = "".join(f"{key} = {value}\n" for key, value in config.items())
+    try:
+        result = _engine.slice(part["file"], ini, str(output), scale=scale, rotate=rotate)
+    except ValueError as err:
+        raise CommandError(f"the settings of this print cannot be used: {err}") from None
+    except RuntimeError as err:
+        raise CommandError(f"cannot slice {part['file']}: {err}") from None
+
+    print(f"Sliced {part['file']} to {result.gcode_path}")
+    used = f"{result.filament_mm / 1000:.2f} m of filament"
+    if result.filament_g:
+        used += f", {result.filament_g:.1f} g"
+    print(f"  {_duration(result.print_time)}, {used}")
+    for warning in result.warnings:
+        print(f"  warning: {warning}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="deli", description="Git-style slicer front end for 3D printing.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -390,6 +447,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     rotate.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     rotate.set_defaults(run=_rotate)
+
+    slice_ = commands.add_parser(
+        "slice",
+        help="slice the print to G-code",
+        description="Slice the part with the chosen printer, filament and process and the changed settings, "
+        "writing G-code next to deli.toml.",
+    )
+    slice_.add_argument("-o", "--output", help="where to write the G-code (default: the part's name with .gcode)")
+    slice_.set_defaults(run=_slice)
 
     args = parser.parse_args(argv)
     try:

@@ -15,7 +15,7 @@ deli slice
 deli view
 ```
 
-Status: early. Everything above works except `slice` and `view`.
+Status: early. Everything above works except `view`.
 
 ## Engine
 

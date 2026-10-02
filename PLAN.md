@@ -51,7 +51,7 @@ Do not reopen these without a reason.
 | `deli add` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 11 tests pass. See step 5. |
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
 | `deli scale`, `deli rotate` (`src/deli/cli.py`) | Done. 19 tests pass. See step 5. |
-| `deli slice` | Not started. |
+| `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
 
 Everything above is committed on `main`. There is no remote.
 
@@ -174,7 +174,7 @@ Done. Start at step 5.
 
 ### 5. Commands, revision 1
 
-Everything but `slice` is done.
+All of these are done.
 Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 `fill_density`) with completion over real setting names.
 
@@ -248,8 +248,20 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 - `slice` has everything it needs in `deli.toml`: `[[part]]` with `file`, `scale` and
   `rotate`; `[printer]`, `[filament]`, `[process]` with names and hashes;
   `[settings]` with overrides. `cli._profile` and `project.settings` read them.
-- Not decided: what `slice` does when the chosen printer's hash no longer matches the
-  library.
+- `deli slice [-o FILE]` reads the part and its transforms, the three chosen profiles
+  from the library and `[settings]`, merges them in that order (printer, filament,
+  process, then overrides) into INI text and calls `_engine.slice`. The G-code goes to
+  the part's name with `.gcode` beside `deli.toml` unless `-o` says otherwise. It
+  prints the estimated time, filament length and weight, and the engine's warnings.
+  With the Centauri Carbon profiles it writes the same G-code as step 3, apart from
+  the object name.
+- **Decided:** `slice` refuses when a chosen profile is not in the library, has no hash
+  in `deli.toml`, or has changed in the library since it was chosen, and says how to
+  accept the new version (`deli printer NAME`). All three kinds must be chosen. A
+  print is physical, so the settings it runs with are the ones that were looked at.
+- `slice` writes nothing to `deli.toml`.
+- The excluded bed corner (below) is not enforced; a single centred object never
+  reaches it. It matters once parts can be placed.
 - The files in `profiles/` were written by a one-off script from Orca's stock presets
   (not the user's copy, which only adds the printer's network address). They produce
   the same G-code as the files validated in step 3.
