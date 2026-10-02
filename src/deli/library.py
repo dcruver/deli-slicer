@@ -26,7 +26,7 @@ _ID_KEYS = {"printer": "printer_settings_id", "filament": "filament_settings_id"
 _FOLDERS = {"printer": "printers", "filament": "filaments", "process": "processes"}
 
 
-def _is_connection(key: str) -> bool:
+def is_connection(key: str) -> bool:
     """Whether a setting says how to reach one particular machine: its address, API key or login."""
     return key == "print_host" or key.startswith("printhost_")
 
@@ -125,8 +125,8 @@ def load(kind: str, source: str, name: str | None = None) -> Loaded:
         raise LibraryError(f"{source}: {err}") from None
     found = groups.get(kind, {})
     # A file that is passed around must not carry the address or key of its author's machine.
-    settings = {key: value for key, value in found.items() if not _is_connection(key)}
-    connection = sorted(key for key, value in found.items() if _is_connection(key) and value)
+    settings = {key: value for key, value in found.items() if not is_connection(key)}
+    connection = sorted(key for key, value in found.items() if is_connection(key) and value)
     if not settings:
         raise LibraryError(f"{source} has no {kind} settings")
 

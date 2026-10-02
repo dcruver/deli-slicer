@@ -77,3 +77,32 @@ def replace_part(part: dict, file: str) -> None:
     """Put another model in a part's place. Its scaling and rotation belonged to the old model and go."""
     part.clear()
     part["file"] = file
+
+
+def settings(doc: tomlkit.TOMLDocument) -> dict[str, str]:
+    """The `[settings]` table: what this print overrides, as the engine reads values."""
+    table = doc.get("settings", {})
+    if not isinstance(table, dict) or any(isinstance(value, (dict, list)) for value in table.values()):
+        raise ProjectError(f"{FILE}: 'settings' should be a table of setting = value lines")
+    # TOML's true and false are the engine's 1 and 0.
+    return {key: str(int(value)) if isinstance(value, bool) else str(value) for key, value in table.items()}
+
+
+def set_setting(doc: tomlkit.TOMLDocument, key: str, value: str) -> None:
+    settings(doc)
+    # A number is written as a number, so the file reads as it would if written by hand.
+    written: int | float | str = value
+    for number in (int, float):
+        try:
+            if str(number(value)) == value:
+                written = number(value)
+                break
+        except ValueError:
+            pass
+    doc.setdefault("settings", tomlkit.table())[key] = written
+
+
+def unset_setting(doc: tomlkit.TOMLDocument, key: str) -> None:
+    del doc["settings"][key]
+    if not doc["settings"]:
+        del doc["settings"]

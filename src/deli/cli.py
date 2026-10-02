@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from deli import _engine, library, project
+from deli import _engine, library, project, settings
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -132,6 +132,71 @@ def _add(args: argparse.Namespace) -> int:
     return 0
 
 
+def _profile(doc, kind: str) -> tuple[str, dict[str, str]] | None:
+    """Name and settings of the printer, filament or process chosen for the print, if it is in the library."""
+    name = project.selected(doc, kind).get("name")
+    if not name or name not in library.names(kind):
+        return None
+    return name, library.read_settings(library.find(kind, name))
+
+
+def _profile_note(doc, key: str) -> str:
+    """What the chosen profile has for a setting, to print under the print's own value."""
+    kind = settings.kinds()[key]
+    profile = _profile(doc, kind)
+    if not profile or key not in profile[1]:
+        return ""
+    return f"the {kind} '{profile[0]}' has {profile[1][key]}"
+
+
+def _set(args: argparse.Namespace) -> int:
+    doc = project.read()
+    overrides = project.settings(doc)
+
+    if args.setting is None:
+        # Like `deli printer`: without arguments, list what there is.
+        if not overrides:
+            print("This print changes no settings. Change one with: deli set <setting> <value>")
+        for key, value in overrides.items():
+            note = _profile_note(doc, key) if key in settings.kinds() else "not a setting the engine knows"
+            print(f"{key} = {value}" + (f"  ({note})" if note else ""))
+        return 0
+
+    key = settings.resolve(args.setting)
+    note = _profile_note(doc, key)
+    if args.value is None:
+        if key in overrides:
+            print(f"{key} = {overrides[key]}" + (f"  ({note})" if note else ""))
+        elif note:
+            print(f"{key} is not changed by this print; {note}")
+        else:
+            print(f"{key} is not changed by this print")
+        return 0
+
+    chosen = [profile[1] for kind in library.KINDS if (profile := _profile(doc, kind))]
+    others = {name: value for part in chosen for name, value in part.items()} | overrides
+    value = settings.check(key, args.value, others)
+    project.set_setting(doc, key, value)
+    project.write(doc)
+    print(f"{key} = {value}" + (f"  ({note})" if note else ""))
+    return 0
+
+
+def _unset(args: argparse.Namespace) -> int:
+    doc = project.read()
+    overrides = project.settings(doc)
+    # A name written by hand in deli.toml can be removed even if it is not a real setting.
+    key = args.setting if args.setting in overrides else settings.resolve(args.setting)
+    if key not in overrides:
+        print(f"{key} is not changed by this print")
+        return 0
+    note = _profile_note(doc, key) if key in settings.kinds() else ""
+    project.unset_setting(doc, key)
+    project.write(doc)
+    print(f"{key} is no longer changed by this print" + (f"; {note}" if note else ""))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="deli", description="Git-style slicer front end for 3D printing.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -165,9 +230,29 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--replace", action="store_true", help="print this model instead of the one already added")
     add.set_defaults(run=_add)
 
+    short = ", ".join(f"{alias} ({name})" for alias, name in settings.ALIASES.items())
+    set_ = commands.add_parser(
+        "set",
+        help="change a setting for this print, or list the changed settings",
+        description="Change a setting for the print in this directory, leaving the printer, filament and process "
+        "in your library as they are. With only a setting, show it. With nothing, list the changed settings.",
+        epilog=f"Settings go by PrusaSlicer's names. Short names: {short}.",
+    )
+    set_.add_argument("setting", nargs="?", help="a setting's name, such as fill_density, or a short name, such as infill")
+    set_.add_argument("value", nargs="?", help="its new value")
+    set_.set_defaults(run=_set)
+
+    unset = commands.add_parser(
+        "unset",
+        help="stop changing a setting for this print",
+        description="Remove a setting changed with `deli set`, so the print uses the chosen profile's value again.",
+    )
+    unset.add_argument("setting", help="a setting's name or short name")
+    unset.set_defaults(run=_unset)
+
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except (library.LibraryError, project.ProjectError) as err:
+    except (library.LibraryError, project.ProjectError, settings.SettingError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return 1

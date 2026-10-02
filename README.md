@@ -15,7 +15,7 @@ deli slice
 deli view
 ```
 
-Status: early. `load`, `printer`, `filament`, `process` and `add` work; `set`, `scale`,
+Status: early. `load`, `printer`, `filament`, `process`, `add` and `set` work; `scale`,
 `slice` and `view` do not exist yet.
 
 ## Engine

@@ -49,6 +49,7 @@ Do not reopen these without a reason.
 | `deli printer`, `deli filament`, `deli process` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 19 tests pass. See step 5. |
 | `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
 | `deli add` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 11 tests pass. See step 5. |
+| `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
 | Other `deli` subcommands | Not started. |
 
 Everything above is committed on `main`. There is no remote.
@@ -172,7 +173,7 @@ Done. Start at step 5.
 
 ### 5. Commands, revision 1
 
-`load`, `printer`, `filament`, `process` and `add` are done; `set`, `scale`, `rotate` and
+`load`, `printer`, `filament`, `process`, `add` and `set` are done; `scale`, `rotate` and
 `slice` are not started.
 Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 `fill_density`) with completion over real setting names.
@@ -214,6 +215,27 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   builds nor ships it.
 - When the engine fails to read a model it also writes its own log line to stderr,
   with a timestamp. That line carries the reason; the exception does not.
+- `deli set <setting> <value>` records a setting in `[settings]`, under the engine's
+  name. `deli set <setting>` shows it and `deli set` lists what the print changes, each
+  beside the chosen profile's value. `deli unset <setting>` removes one.
+  - Names: the engine's own, with hyphens or underscores, or a short name from
+    `settings.ALIASES` (`infill`, `infill_pattern`, `layer`, `walls`, `top_layers`,
+    `bottom_layers`, `supports`, `brim`). A wrong name gets a "did you mean". There are
+    no short names for temperatures, because the first layer's are separate settings
+    and one short name would change only half of them.
+  - Values are checked by the engine (`_engine.split_config`) together with the chosen
+    printer, filament and process and the settings already changed, because some rules
+    span settings: gyroid infill cannot be 100% dense. With no profile chosen the check
+    is against PrusaSlicer's defaults. The value is stored as the engine writes it, a
+    number as a TOML number. `on`/`off` are accepted for 1/0, and a bare `infill 20`
+    means 20% (PrusaSlicer itself would read it as 2000%).
+  - Connection settings (`print_host`, `printhost_*`) are refused.
+  - `_engine.setting_names()` lists every setting by kind. Four are in more than one
+    kind (`compatible_printers`, `compatible_printers_condition`, `inherits`,
+    `nozzle_high_flow`); `settings.kinds()` files each under the first.
+  - `[settings]` is where `slice` will read overrides from; hand-written `true`/`false`
+    and numbers are read as the engine's strings by `project.settings`.
+  - Not built: shell completion over setting names.
 - Not decided: what `slice` does when the chosen printer's hash no longer matches the
   library.
 - The files in `profiles/` were written by a one-off script from Orca's stock presets

@@ -1,7 +1,7 @@
 // deli's binding to PrusaSlicer's libslic3r. The surface is deliberately narrow:
 // one call that loads a model, transforms it, slices it and writes the G-code,
-// one that measures a model, and one that sorts the settings of an INI file into
-// printer, process and filament.
+// one that measures a model, one that sorts the settings of an INI file into printer,
+// process and filament, and one that lists the settings of each of those kinds.
 
 #include <array>
 #include <map>
@@ -195,6 +195,16 @@ std::pair<std::map<std::string, Settings>, std::vector<std::string>> split_confi
     return {groups, unknown};
 }
 
+// Every setting PrusaSlicer keeps in a printer, a process and a filament preset.
+std::map<std::string, std::vector<std::string>> setting_names()
+{
+    return {
+        {"printer", Preset::printer_options()},
+        {"process", Preset::print_options()},
+        {"filament", Preset::filament_options()},
+    };
+}
+
 } // namespace
 
 NB_MODULE(_engine, m)
@@ -224,4 +234,7 @@ NB_MODULE(_engine, m)
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"
           "Returns the groups, each a dict of setting name to value, and a list of the settings\n"
           "this version of PrusaSlicer does not know. Bad values raise ValueError.");
+
+    m.def("setting_names", &setting_names,
+          "The names of the settings PrusaSlicer keeps in a 'printer', a 'process' and a 'filament'.");
 }
