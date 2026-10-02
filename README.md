@@ -14,9 +14,11 @@ deli set infill 20%
 deli scale x 110%
 deli slice
 deli view
+DELI_HOST=elegoo://centauri.local deli send --print
 ```
 
-Status: early. Everything above works. Nothing sends a print to a printer yet.
+Status: early. Everything above works. `deli send` speaks to Elegoo Centauri Carbon,
+Moonraker and OctoPrint hosts and has so far only been tested against fakes.
 
 ## Engine
 

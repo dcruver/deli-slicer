@@ -16,6 +16,7 @@ Git-style, shell-native slicer front end for 3D printing. Python, managed with `
 - `deli set <setting> <value>` records a setting the print changes in `[settings]` in `deli.toml`, after the engine has checked it together with the chosen profiles; `deli unset <setting>` removes it. `src/deli/settings.py` holds the short names (`infill` for `fill_density`).
 - `deli scale [x|y|z] <factor>` and `deli rotate [x|y|z] <degrees>` record the part's `scale` and `rotate` (three numbers each) in its `[[part]]` table; both are absolute, relative to the model file, and the engine applies scale, then rotations about x, y, z.
 - `deli slice [-o FILE]` merges the chosen printer, filament and process with `[settings]` and slices the part in-process, writing `<part>.gcode` beside `deli.toml`. It refuses if a chosen profile is missing from the library or its hash no longer matches (`deli <kind> <name>` accepts the new version).
+- `deli send [FILE] [--print]` uploads G-code to the printer in `DELI_HOST` (`elegoo://`, `moonraker://` or `octoprint://` host; key in `DELI_API_KEY`). `src/deli/send.py` has the Elegoo SDCP protocol, reimplemented from OrcaSlicer, and a minimal websocket client; tests use fake printers only.
 - `deli view` serves a single viewer page (`src/deli/view.py`, `src/deli/viewer/`: three.js vendored, MIT) on localhost showing the part on the bed, placed as `slice` places it; it is a viewer only and follows `deli.toml` by polling `/state`.
 - Revision 1 is single-object. Multi-object selection and bed arrangement are planned for later.
 

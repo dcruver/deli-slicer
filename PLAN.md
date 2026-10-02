@@ -53,6 +53,7 @@ Do not reopen these without a reason.
 | `deli scale`, `deli rotate` (`src/deli/cli.py`) | Done. 19 tests pass. See step 5. |
 | `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
 | `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 8 tests pass. See step 6. |
+| `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. Not tried on the real printer. See "Upload" below. |
 
 Everything above is committed on `main`. There is no remote.
 
@@ -312,7 +313,7 @@ Done. 8 tests pass.
 
 ### Later
 
-Multi-object selection, bed arrangement, sending to the printer, thumbnails.
+Multi-object selection, bed arrangement, thumbnails.
 
 ## Profile conversion: what is settled and what is open
 
@@ -355,10 +356,28 @@ Open items, each a real behaviour difference from Orca:
   profile sets 0.024 but does not enable it, so nothing is emitted.
 - **Filament change G-code** is not converted: single-filament only.
 - **Upload.** The printer uses Orca's `elegoolink` host type at
-  `http://centauri-carbon.cruver.network`. PrusaSlicer has no equivalent; sending
-  prints is unsolved. When it is built, the address comes from the `DELI_HOST`
-  environment variable (and an API key, where a host needs one, from `DELI_API_KEY`),
-  not from a printer file or `deli.toml`. Nothing reads either variable yet.
+  `http://centauri-carbon.cruver.network`. PrusaSlicer has no equivalent, so
+  `deli send` (`src/deli/send.py`) speaks Elegoo's protocol itself, reimplemented
+  from OrcaSlicer's `ElegooLink.cpp` (the original Centauri Carbon path, not the
+  "CC2" one): `GET /` must mention ELEGOO; the file goes up in 1 MiB multipart POSTs
+  to `/uploadFile/upload` with fields `Check=1`, `S-File-MD5` (upper-case hex of the
+  whole file), `Offset`, `Uuid` (one per upload), `TotalSize`, `File`; each answer is
+  JSON with `code` `000000`. `--print` then opens `ws://host:3030/websocket`, polls
+  SDCP command 0 until `Status.CurrentStatus` no longer holds 8 (file check), and
+  sends command 128 with `Filename` `/local/<name>`, `StartLayer` 0,
+  `Calibration_switch` (`--level`), `PrintPlatformType` 0 (textured PEI),
+  `Tlp_Switch` 0; `Data.Ack` 0 means started. The websocket client is deli's own
+  (RFC 6455, text frames only). All of this is tested against fake servers in
+  `tests/test_send.py` and **has not been tried on the real printer.**
+  - The address comes from `DELI_HOST`, whose scheme names the kind of host:
+    `elegoo://`, `moonraker://`, `octoprint://`. Plain `http://` works when the chosen
+    printer's `host_type` is one deli can send to (moonraker, octoprint). `DELI_API_KEY`
+    holds the key OctoPrint needs and Moonraker may. Moonraker (`POST
+    /server/files/upload`, `root=gcodes`, `print=`) and OctoPrint (`POST
+    /api/files/local`, `select=`, `print=`, `X-Api-Key`) are written from their API
+    documentation and tested against fakes only.
+  - Without a file, `deli send` sends this print's G-code and refuses if `deli.toml`
+    is newer than it. Upload only by default; `--print` starts the print.
 - **Other printers.** The converter has only been checked on the Centauri Carbon. Run
   over all 1,001 printer presets bundled with Orca 2.4.2, each with one compatible
   process and filament and a test cube: 400 sliced, 233 failed while slicing, 77 gave a

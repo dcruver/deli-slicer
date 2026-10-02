@@ -8,7 +8,7 @@ from pathlib import Path
 
 import textwrap
 
-from deli import _engine, library, orca_install, project, settings, view
+from deli import _engine, library, orca_install, project, send, settings, view
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -402,6 +402,37 @@ def _import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _size_of(path: Path) -> str:
+    size = path.stat().st_size
+    return f"{size / 1e6:.1f} MB" if size >= 1e6 else f"{size / 1e3:.0f} kB"
+
+
+def _send(args: argparse.Namespace) -> int:
+    doc = project.read()
+    if args.file:
+        path = Path(args.file)
+        if not path.is_file():
+            raise CommandError(f"no such file: {args.file}")
+    else:
+        path = Path(Path(_the_part(doc)["file"]).with_suffix(".gcode").name)
+        if not path.is_file():
+            raise CommandError(f"{path} does not exist; slice first with: deli slice")
+        if project.FILE.exists() and project.FILE.stat().st_mtime > path.stat().st_mtime:
+            raise CommandError(f"deli.toml has changed since {path} was sliced; run deli slice again, or name the file to send")
+
+    printer = project.chosen_profile(doc, "printer")
+    host = send.host_from_env(printer[1].get("host_type", "") if printer else "")
+    print(f"Sending {path} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
+
+    def progress(sent: int, total: int) -> None:
+        if total > send.CHUNK:
+            print(f"  {sent / 1e6:.1f} of {total / 1e6:.1f} MB", flush=True)
+
+    send.send(host, path, start=args.start, level=args.level, progress=progress)
+    print("Printing started." if args.start else f"Sent. Start it from the printer, or send again with --print.")
+    return 0
+
+
 def _view(args: argparse.Namespace) -> int:
     return view.serve(args.port, open_browser=not args.no_browser)
 
@@ -517,9 +548,21 @@ def main(argv: list[str] | None = None) -> int:
     import_.add_argument("--orca", action="append", default=[], metavar="DIR", help="a folder of Orca presets to look in as well")
     import_.set_defaults(run=_import)
 
+    send_ = commands.add_parser(
+        "send",
+        help="upload the sliced G-code to the printer in DELI_HOST",
+        description="Upload G-code to the printer named by the DELI_HOST environment variable, such as "
+        "elegoo://centauri.local, moonraker://voron.local or octoprint://ender.local (API key in DELI_API_KEY). "
+        "Without a file, the G-code sliced for this print is sent, if deli.toml has not changed since.",
+    )
+    send_.add_argument("file", nargs="?", help="the G-code file to send (default: this print's)")
+    send_.add_argument("--print", dest="start", action="store_true", help="start printing once it has arrived")
+    send_.add_argument("--level", action="store_true", help="with --print on an Elegoo printer: level the bed first")
+    send_.set_defaults(run=_send)
+
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, CommandError) as err:
+    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return 1
