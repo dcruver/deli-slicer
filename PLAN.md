@@ -48,6 +48,7 @@ Do not reopen these without a reason.
 | `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 14 tests pass. See step 5. |
 | `deli printer`, `deli filament`, `deli process` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 19 tests pass. See step 5. |
 | `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
+| `deli add` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 11 tests pass. See step 5. |
 | Other `deli` subcommands | Not started. |
 
 Everything above is committed on `main`. There is no remote.
@@ -171,7 +172,7 @@ Done. Start at step 5.
 
 ### 5. Commands, revision 1
 
-`load`, `printer`, `filament` and `process` are done; `add`, `set`, `scale`, `rotate` and
+`load`, `printer`, `filament`, `process` and `add` are done; `set`, `scale`, `rotate` and
 `slice` are not started.
 Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
 `fill_density`) with completion over real setting names.
@@ -201,6 +202,18 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   `[filament]` and `[process]`. One function in `cli.py` (`_choose`) serves all three.
   Nothing checks that the three fit each other (a 0.6 mm process with a 0.4 mm
   printer, say); `slice` will be the first place a mismatch shows.
+- `deli add <file>` records the model as a `[[part]]` table with a `file`, an array of
+  tables so that more parts can follow without changing the format. The path is stored
+  relative to the project directory when the file is inside it, absolute otherwise.
+  The engine reads the file first (`_engine.model_size`), so a file that is not a
+  model is refused, and its size in millimetres is printed. A second part is refused,
+  because revision 1 prints one; `deli add --replace <file>` swaps the model and drops
+  the old one's transforms. Transforms will be keys of the same table.
+- STEP files cannot be added. PrusaSlicer reads them through a separate
+  `OCCTWrapper.so` that it looks for beside the running program, and deli neither
+  builds nor ships it.
+- When the engine fails to read a model it also writes its own log line to stderr,
+  with a timestamp. That line carries the reason; the exception does not.
 - Not decided: what `slice` does when the chosen printer's hash no longer matches the
   library.
 - The files in `profiles/` were written by a one-off script from Orca's stock presets

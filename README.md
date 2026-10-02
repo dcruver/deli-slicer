@@ -15,8 +15,8 @@ deli slice
 deli view
 ```
 
-Status: scaffold only. None of the commands above exist yet, and the engine has not
-been built.
+Status: early. `load`, `printer`, `filament`, `process` and `add` work; `set`, `scale`,
+`slice` and `view` do not exist yet.
 
 ## Engine
 

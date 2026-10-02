@@ -42,3 +42,38 @@ def select(doc: tomlkit.TOMLDocument, kind: str, name: str, sha256: str) -> None
     table = doc.setdefault(kind, tomlkit.table())
     table["name"] = name
     table["sha256"] = sha256
+
+
+def parts(doc: tomlkit.TOMLDocument) -> list[dict]:
+    """The `[[part]]` tables: the models of the print, each with the file it is read from."""
+    found = doc.get("part", [])
+    if not isinstance(found, list) or not all(isinstance(part, dict) and "file" in part for part in found):
+        raise ProjectError(f"{FILE}: 'part' should be a list of [[part]] tables, each with a file")
+    return found
+
+
+def stored_path(path: Path) -> str:
+    """How a model's path is written in `deli.toml`: relative when it is inside the project
+    directory, so the directory can be moved or shared, and absolute otherwise."""
+    path = path.resolve()
+    try:
+        return path.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def add_part(doc: tomlkit.TOMLDocument, file: str) -> None:
+    parts(doc)
+    part = tomlkit.table()
+    part["file"] = file
+    if "part" not in doc:
+        if doc:
+            doc.add(tomlkit.nl())  # a blank line after whatever the file already holds
+        doc["part"] = tomlkit.aot()
+    doc["part"].append(part)
+
+
+def replace_part(part: dict, file: str) -> None:
+    """Put another model in a part's place. Its scaling and rotation belonged to the old model and go."""
+    part.clear()
+    part["file"] = file

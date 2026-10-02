@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from deli import library, project
+from deli import _engine, library, project
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -98,6 +99,39 @@ def _choose(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add(args: argparse.Namespace) -> int:
+    doc = project.read()
+    parts = project.parts(doc)
+    path = Path(args.file).expanduser()
+    if not path.is_file():
+        raise project.ProjectError(f"no such file: {args.file}")
+    stored = project.stored_path(path)
+
+    if any(part["file"] == stored for part in parts):
+        print(f"{stored} is already in this print")
+        return 0
+    # Revision 1 prints a single part.
+    if parts and not args.replace:
+        raise project.ProjectError(
+            f"this print already has a part, {parts[0]['file']}, and deli prints one part at a time for now; "
+            f"to print this one instead: deli add --replace {args.file}"
+        )
+    try:
+        size = _engine.model_size(str(path))
+    except RuntimeError as err:
+        raise project.ProjectError(f"cannot read {args.file} as a model: {err}") from None
+
+    if parts:
+        print(f"Replaced {parts[0]['file']} with {stored}")
+        project.replace_part(parts[0], stored)
+    else:
+        print(f"Added {stored}")
+        project.add_part(doc, stored)
+    project.write(doc)
+    print(f"  {' x '.join(f'{round(side, 2):g}' for side in size)} mm")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="deli", description="Git-style slicer front end for 3D printing.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
@@ -121,6 +155,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library")
         choose.set_defaults(run=_choose)
+
+    add = commands.add_parser(
+        "add",
+        help="add a model to this print",
+        description="Add a model file to the print in this directory.",
+    )
+    add.add_argument("file", help="an STL, OBJ, 3MF or AMF file")
+    add.add_argument("--replace", action="store_true", help="print this model instead of the one already added")
+    add.set_defaults(run=_add)
 
     args = parser.parse_args(argv)
     try:

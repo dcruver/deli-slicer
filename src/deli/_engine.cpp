@@ -1,6 +1,7 @@
 // deli's binding to PrusaSlicer's libslic3r. The surface is deliberately narrow:
 // one call that loads a model, transforms it, slices it and writes the G-code,
-// and one that sorts the settings of an INI file into printer, process and filament.
+// one that measures a model, and one that sorts the settings of an INI file into
+// printer, process and filament.
 
 #include <array>
 #include <map>
@@ -157,6 +158,16 @@ SliceResult slice(const std::string &model_path, const std::string &config_ini, 
     return result;
 }
 
+// Extent of the model in a file along X, Y and Z, in millimetres, as it is before any scaling or rotation.
+std::array<double, 3> model_size(const std::string &model_path)
+{
+    nb::gil_scoped_release release;
+
+    const Model model = FileReader::load_model(model_path);
+    const Vec3d size  = model.bounding_box_exact().size();
+    return {size.x(), size.y(), size.z()};
+}
+
 using Settings = std::map<std::string, std::string>;
 
 // Sort the settings of an INI file by the kind of preset PrusaSlicer keeps them in.
@@ -204,6 +215,10 @@ NB_MODULE(_engine, m)
           "`config` is PrusaSlicer INI text; settings it leaves out take PrusaSlicer's defaults.\n"
           "`scale` holds per-axis factors and `rotate` degrees about X, Y and Z, applied in that\n"
           "order after scaling. The object is then dropped onto the bed and centred.");
+
+    m.def("model_size", &model_size, "model"_a,
+          "Extent of the model in a file along X, Y and Z, in millimetres.\n\n"
+          "Raises RuntimeError when the file cannot be read as a model.");
 
     m.def("split_config", &split_config, "config"_a,
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"
