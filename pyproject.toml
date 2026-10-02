@@ -15,8 +15,21 @@ dependencies = []
 deli = "deli:main"
 
 [build-system]
-requires = ["uv_build>=0.12.5,<0.13.0"]
-build-backend = "uv_build"
+requires = ["scikit-build-core>=0.10", "nanobind>=2.2"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+# Kept between builds so the engine (about 15 minutes to compile) is only built once.
+build-dir = "build/{wheel_tag}"
+# One wheel per platform: the module uses Python's stable ABI.
+wheel.py-api = "cp312"
+wheel.exclude = ["**/*.cpp"]
+# libslic3r's largest sources need several GB each to compile.
+build.tool-args = ["-j8"]
+
+[tool.uv]
+# Rebuild the extension when its sources change, not only when this file does.
+cache-keys = [{ file = "pyproject.toml" }, { file = "CMakeLists.txt" }, { file = "src/deli/_engine.cpp" }]
 
 [dependency-groups]
 dev = [
