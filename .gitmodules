@@ -1,0 +1,4 @@
+[submodule "vendor/PrusaSlicer"]
+	path = vendor/PrusaSlicer
+	url = https://github.com/prusa3d/PrusaSlicer
+	shallow = true

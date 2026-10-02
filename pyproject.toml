@@ -3,6 +3,8 @@ name = "deli"
 version = "0.1.0"
 description = "Git-style, shell-native slicer front end for 3D printing"
 readme = "README.md"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [
     { name = "Don Cruver", email = "donald@cruver.ai" }
 ]
