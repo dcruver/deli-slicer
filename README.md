@@ -19,6 +19,10 @@ deli slice
 deli send --print
 ```
 
+![deli view in a browser: a sliced 3DBenchy on the Centauri Carbon's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
+
+`deli view` after `deli slice`: the sliced print on the printer's bed, in your browser.
+
 Status: early. Everything above works, and has so far been used on one machine and
 against a fake printer, not for a real print. See "Not done yet" at the end.
 
