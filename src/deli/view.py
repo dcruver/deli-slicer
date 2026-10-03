@@ -1,9 +1,11 @@
 """`deli view`: a local page that shows the part on the bed and follows `deli.toml`.
 
-A small HTTP server on localhost serves the page from `viewer/` and two dynamic
-resources: `/state`, what the print is now, and `/mesh`, the part's triangles placed
-as `slice` would place them. The page asks for `/state` regularly and redraws when
-its `version` changes, so an edit in the shell shows up in the browser.
+A small HTTP server on localhost serves the page from `viewer/` and three dynamic
+resources: `/state`, what the print is now, `/mesh`, the part's triangles placed
+as `slice` would place them, and `/toolpaths`, the extrusions in the G-code `slice`
+wrote, supports included, for as long as nothing has changed since. The page asks for
+`/state` regularly and redraws when its `version` changes, so an edit or a slice in
+the shell shows up in the browser.
 """
 
 from __future__ import annotations
@@ -23,9 +25,16 @@ DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer 
 
 
 def _version() -> str:
-    """Changes when `deli.toml` or any part's file does."""
+    """Changes when `deli.toml`, any part's file or the print's G-code does."""
+    paths = [project.FILE]
+    try:
+        doc = project.read()
+        paths += [Path(part["file"]) for part in project.parts(doc)]
+        paths.append(Path(project.gcode_name(doc)))
+    except project.ProjectError:
+        pass
     stamps = []
-    for path in (project.FILE, *(Path(part["file"]) for part in _parts_quietly())):
+    for path in paths:
         try:
             stat = path.stat()
             stamps.append(f"{path}:{stat.st_mtime_ns}:{stat.st_size}")
@@ -34,11 +43,19 @@ def _version() -> str:
     return hashlib.sha256("\n".join(stamps).encode()).hexdigest()[:16]
 
 
-def _parts_quietly() -> list[dict]:
+def _gcode(doc) -> Path | None:
+    """The G-code `deli slice` wrote for this print, unless `deli.toml` or a part's file
+    has changed since: it is then no longer a picture of the print."""
+    found = project.parts(doc)
+    if not found:
+        return None
+    path = Path(project.gcode_name(doc))
     try:
-        return project.parts(project.read())
-    except project.ProjectError:
-        return []
+        sliced = path.stat().st_mtime
+        sources = (project.FILE, *(Path(part["file"]) for part in found))
+        return path if all(source.stat().st_mtime <= sliced for source in sources) else None
+    except OSError:
+        return None
 
 
 def _bed(doc) -> tuple[list[list[float]], float, str | None]:
@@ -65,7 +82,7 @@ def _config(doc) -> str:
 
 def state() -> dict:
     """What the page needs to describe the print: the bed, the parts and their transforms."""
-    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "parts": []}
+    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "parts": [], "gcode": None}
     try:
         doc = project.read()
         result["bed"], result["height"], result["printer"] = _bed(doc)
@@ -78,6 +95,9 @@ def state() -> dict:
             except RuntimeError as err:
                 result["error"] = f"cannot read {part['file']}: {err}"
             result["parts"].append(described)
+        if gcode := _gcode(doc):
+            result["gcode"] = gcode.name
+            result["roles"] = _engine.extrusion_roles()
     except project.ProjectError as err:
         result["error"] = str(err)
     return result
@@ -96,6 +116,18 @@ def mesh() -> bytes:
     return struct.pack("<II", len(vertices) // 12, len(triangles) // 12) + vertices + triangles
 
 
+def toolpaths() -> bytes:
+    """The extrusions in the print's G-code, in printing order: a uint32 count, then for
+    each eight float32 (start x, y, z, end x, y, z, width, height), then a uint32 layer
+    for each, then a uint8 for each, an index into `/state`'s `roles`. Empty when the
+    print has not been sliced since it last changed."""
+    gcode = _gcode(project.read())
+    if gcode is None:
+        return struct.pack("<I", 0)
+    segments, layers, roles = _engine.toolpaths(str(gcode))
+    return struct.pack("<I", len(roles)) + segments + layers + roles
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A002 - the base class's signature
         pass  # the shell is the user's, not a request log
@@ -107,6 +139,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, "application/json", json.dumps(state()).encode())
             elif path == "/mesh":
                 self._send(200, "application/octet-stream", mesh())
+            elif path == "/toolpaths":
+                self._send(200, "application/octet-stream", toolpaths())
             else:
                 self._send_page("index.html" if path == "/" else path.lstrip("/"))
         except (project.ProjectError, RuntimeError) as err:

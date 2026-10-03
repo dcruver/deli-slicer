@@ -115,6 +115,51 @@ def test_mesh_without_a_part_is_empty(url):
     assert body == struct.pack("<II", 0, 0)
 
 
+def sliced_cube():
+    """The cube with all three profiles chosen, sliced to cube.gcode."""
+    for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
+        library.load(kind, str(EXPORT))
+        main([kind, name])
+    main(["add", "cube.stl"])
+    main(["slice"])
+
+
+def test_state_names_the_gcode_once_the_print_is_sliced(url):
+    main(["add", "cube.stl"])
+    before = json.loads(get(url + "/state")[2])
+    assert before["gcode"] is None
+
+    sliced_cube()
+
+    state = json.loads(get(url + "/state")[2])
+    assert state["gcode"] == "cube.gcode"
+    assert "Support material" in state["roles"]
+    assert state["version"] != before["version"]
+
+
+def test_toolpaths_are_the_extrusions_of_the_sliced_print(url):
+    sliced_cube()
+
+    status, content_type, body = get(url + "/toolpaths")
+
+    assert status == 200 and content_type == "application/octet-stream"
+    (n,) = struct.unpack_from("<I", body)
+    assert n > 1000 and len(body) == 4 + n * (32 + 4 + 1)
+    layers = struct.unpack_from(f"<{n}I", body, 4 + n * 32)
+    assert layers[-1] == 99  # 20 mm at 0.2 mm
+    roles = json.loads(get(url + "/state")[2])["roles"]
+    assert "External perimeter" in {roles[role] for role in body[4 + n * 36 :]}
+
+
+def test_gcode_is_not_shown_once_the_print_has_changed(url):
+    sliced_cube()
+
+    main(["scale", "110%"])
+
+    assert json.loads(get(url + "/state")[2])["gcode"] is None
+    assert get(url + "/toolpaths")[2] == struct.pack("<I", 0)
+
+
 def test_page_and_its_scripts_are_served(url):
     status, content_type, body = get(url + "/")
     assert status == 200 and content_type.startswith("text/html")

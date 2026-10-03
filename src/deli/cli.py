@@ -609,7 +609,7 @@ def _view(args: argparse.Namespace) -> int:
     return view.serve(args.port, open_browser=not args.no_browser)
 
 
-ENGINE_API = 3  # must match API_VERSION in _engine.cpp
+ENGINE_API = 4  # must match API_VERSION in _engine.cpp
 
 
 def _completion(args: argparse.Namespace) -> int:

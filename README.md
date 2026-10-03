@@ -24,7 +24,8 @@ deli send --print
 `deli view` after `deli slice`: the sliced print on the printer's bed, in your browser.
 
 Status: early. Everything above works, and has so far been used on one machine and
-against a fake printer, not for a real print. See "Not done yet" at the end.
+for one real print: a cube on an Elegoo Centauri Carbon, sliced and sent with
+`deli send --print`. See "Not done yet" at the end.
 
 ## Install
 
@@ -147,7 +148,7 @@ deli supports organic                           # automatic supports; on, off, g
 deli scale lid 110%                             # name the part when there is more than one
 deli rotate lid 45
 deli view                                       # shows the parts on the bed in your browser, live
-deli slice                                      # writes the G-code next to deli.toml
+deli slice                                      # writes the G-code next to deli.toml; the view then shows it, layer by layer
 deli send                                       # uploads it; add --print to start printing
 ```
 
@@ -206,7 +207,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli slice [-o FILE]` | slice to G-code |
-| `deli view` | the parts on the bed, in your browser |
+| `deli view` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer |
 | `deli send [FILE] [--print]` | upload to the printer in your config |
 | `deli config [key] [value]` | your printers' addresses and loaded filaments |
 | `deli completion bash\|zsh\|fish` | shell completion |
@@ -217,10 +218,9 @@ check the file arrived and start it from the printer's own screen.
 
 Things that a user would notice, roughly in the order they matter:
 
-- **No real print yet.** `deli send` speaks to Elegoo Centauri Carbon, Moonraker and
-  OctoPrint hosts and has only been tested against fakes. The converted Centauri
-  profile's start G-code has been checked against OrcaSlicer's output, not on the
-  printer.
+- **One real print so far.** A cube, sliced with the converted Centauri Carbon profile
+  and sent with `deli send --print`, printed well. Nothing harder has been printed, and
+  `deli send` to Moonraker and OctoPrint hosts has only been tested against fakes.
 - **Converted profiles differ from Orca in small ways.** The process's 0.97 flow ratio
   is not applied (about 3 % more filament); fan speeds are written with decimals, which
   the firmware may or may not accept; there are no `M73` progress lines, so the
@@ -241,7 +241,9 @@ Things that a user would notice, roughly in the order they matter:
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
 - **Hosts:** PrusaLink, Duet and the others PrusaSlicer knows are not supported by
   `deli send`; the Centauri Carbon 2's newer protocol is not either.
-- **No thumbnails** in the G-code, so the printer's screen shows no preview.
+- **Thumbnails are untried on a printer.** The G-code carries the picture the printer's
+  profile asks for, drawn by deli; whether the Centauri Carbon's screen shows it has not
+  been checked.
 
 ## Engine
 

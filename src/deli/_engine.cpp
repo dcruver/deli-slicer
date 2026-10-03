@@ -1,11 +1,15 @@
 // deli's binding to PrusaSlicer's libslic3r. The surface is deliberately narrow:
 // one call that loads a model, transforms it, slices it and writes the G-code,
-// one that measures a model, one that hands its triangles to a viewer, one that sorts
-// the settings of an INI file into printer, process and filament, and one that lists
-// the settings of each of those kinds.
+// one that measures a model, one that hands its triangles to a viewer, one that reads
+// the extrusions back out of a G-code file for the viewer, one that sorts the settings
+// of an INI file into printer, process and filament, and one that lists the settings
+// of each of those kinds.
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -28,7 +32,10 @@
 #include "libslic3r/BuildVolume.hpp"
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/Config.hpp"
+#include "libslic3r/ExtrusionRole.hpp"
 #include "libslic3r/FileReader.hpp"
+#include "libslic3r/GCode/GCodeProcessor.hpp"
+#include "libslic3r/GCode/ThumbnailData.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/MultipleBeds.hpp"
 #include "libslic3r/Preset.hpp"
@@ -181,6 +188,95 @@ Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &co
     return model;
 }
 
+// A picture of the parts for the printer's screen. libslic3r leaves thumbnails to
+// PrusaSlicer's OpenGL window, so this draws one itself: the parts as they stand on the
+// bed, seen from the front right and above as `deli view` first shows them, in the
+// viewer's orange, on a transparent background. Rows run bottom to top, which is what
+// PrusaSlicer's image encoders expect.
+ThumbnailData render_thumbnail(const Model &model, unsigned width, unsigned height)
+{
+    constexpr int   samples   = 4;               // per pixel, each way, to smooth the edges
+    constexpr float colour[3] = {242, 140, 40};
+    const int       w = int(width) * samples, h = int(height) * samples;
+    const Vec3f     toward = Vec3f(0.9f, -1.1f, 0.8f).normalized(); // from the parts to the eye
+    const Vec3f     right  = Vec3f::UnitZ().cross(toward).normalized();
+    const Vec3f     up     = toward.cross(right);
+    const Vec3f     light  = Vec3f(0.4f, -0.7f, 1.f).normalized();
+    const auto      seen   = [&](const Vec3f &v) { return Vec3f(v.dot(right), v.dot(up), v.dot(toward)); };
+
+    std::vector<TriangleMesh> meshes;
+    for (const ModelObject *object : model.objects)
+        meshes.push_back(object->mesh());
+
+    // Fit what is seen into the picture, with a margin.
+    constexpr float far = std::numeric_limits<float>::max();
+    Vec2f           lo(far, far), hi(-far, -far);
+    for (const TriangleMesh &mesh : meshes)
+        for (const Vec3f &v : mesh.its.vertices) {
+            const Vec2f at = seen(v).head<2>();
+            lo = lo.cwiseMin(at);
+            hi = hi.cwiseMax(at);
+        }
+    const float zoom  = 0.9f * std::min(w / std::max(hi.x() - lo.x(), 1e-3f), h / std::max(hi.y() - lo.y(), 1e-3f));
+    const Vec2f shift = Vec2f(w, h) / 2 - zoom * (lo + hi) / 2;
+
+    // Each sample keeps the nearest triangle over it and how brightly that one is lit.
+    const auto         edge = [](const Vec3f &a, const Vec3f &b, float x, float y) { return (b.x() - a.x()) * (y - a.y()) - (b.y() - a.y()) * (x - a.x()); };
+    std::vector<float> depth(size_t(w) * h, -far), shade(size_t(w) * h, 0.f);
+    for (const TriangleMesh &mesh : meshes)
+        for (const Vec3i &triangle : mesh.its.indices) {
+            const Vec3f &a = mesh.its.vertices[triangle(0)], &b = mesh.its.vertices[triangle(1)], &c = mesh.its.vertices[triangle(2)];
+            Vec3f        p[3] = {seen(a), seen(b), seen(c)};
+            for (Vec3f &point : p)
+                point.head<2>() = zoom * point.head<2>() + shift;
+            const float area = edge(p[0], p[1], p[2].x(), p[2].y());
+            if (std::abs(area) < 1e-6f)
+                continue;
+            Vec3f normal = (b - a).cross(c - a).normalized();
+            if (normal.dot(toward) < 0) // lit the same whichever way the triangle is wound
+                normal = -normal;
+            const float lit = 0.35f + 0.65f * std::max(0.f, normal.dot(light));
+
+            const int x0 = std::max(0, int(std::floor(std::min({p[0].x(), p[1].x(), p[2].x()}))));
+            const int x1 = std::min(w - 1, int(std::ceil(std::max({p[0].x(), p[1].x(), p[2].x()}))));
+            const int y0 = std::max(0, int(std::floor(std::min({p[0].y(), p[1].y(), p[2].y()}))));
+            const int y1 = std::min(h - 1, int(std::ceil(std::max({p[0].y(), p[1].y(), p[2].y()}))));
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x) {
+                    const float u = edge(p[1], p[2], x + 0.5f, y + 0.5f) / area, v = edge(p[2], p[0], x + 0.5f, y + 0.5f) / area;
+                    if (u < 0 || v < 0 || u + v > 1)
+                        continue;
+                    const float  z  = u * p[0].z() + v * p[1].z() + (1 - u - v) * p[2].z();
+                    const size_t at = size_t(y) * w + x;
+                    if (z > depth[at]) {
+                        depth[at] = z;
+                        shade[at] = lit;
+                    }
+                }
+        }
+
+    ThumbnailData picture;
+    picture.set(width, height);
+    for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x) {
+            float sum     = 0;
+            int   covered = 0;
+            for (int sy = 0; sy < samples; ++sy)
+                for (int sx = 0; sx < samples; ++sx) {
+                    const size_t at = size_t(y * samples + sy) * w + x * samples + sx;
+                    if (depth[at] > -far) {
+                        sum += shade[at];
+                        ++covered;
+                    }
+                }
+            unsigned char *pixel = &picture.pixels[4 * (size_t(y) * width + x)];
+            for (int k = 0; k < 3; ++k)
+                pixel[k] = covered ? static_cast<unsigned char>(colour[k] * sum / covered) : 0;
+            pixel[3] = static_cast<unsigned char>(255 * covered / (samples * samples));
+        }
+    return picture;
+}
+
 SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini, const std::string &output_path)
 {
     nb::gil_scoped_release release;
@@ -205,7 +301,14 @@ SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini,
         throw std::runtime_error("nothing to print: the object is not fully inside the print volume");
 
     print.process();
-    result.gcode_path = print.export_gcode(output_path, nullptr, nullptr);
+    // Asked for once per size in the printer's `thumbnails` setting, and not at all without it.
+    const ThumbnailsGeneratorCallback thumbnails = [&model](const ThumbnailsParams &params) {
+        ThumbnailsList pictures;
+        for (const Vec2d &size : params.sizes)
+            pictures.push_back(render_thumbnail(model, unsigned(size.x()), unsigned(size.y())));
+        return pictures;
+    };
+    result.gcode_path = print.export_gcode(output_path, nullptr, thumbnails);
 
     const PrintStatistics &stats = print.print_statistics();
     result.print_time  = stats.normal_print_time_seconds;
@@ -246,6 +349,45 @@ std::pair<nb::bytes, nb::bytes> mesh(const std::vector<Part> &parts, const std::
     }
     return {nb::bytes(reinterpret_cast<const char *>(vertices.data()), vertices.size() * sizeof(float)),
             nb::bytes(reinterpret_cast<const char *>(triangles.data()), triangles.size() * sizeof(uint32_t))};
+}
+
+// The extrusions in a G-code file, in the order they are printed, as PrusaSlicer's own
+// G-code reader finds them: for each, float32 x, y, z of its start and of its end, its
+// width and its height; a uint32 layer, counted from 0; and a uint8 index into
+// `extrusion_roles`. The z is the nozzle's, so the top of the extruded line.
+std::tuple<nb::bytes, nb::bytes, nb::bytes> toolpaths(const std::string &gcode_path)
+{
+    std::vector<float>    segments;
+    std::vector<uint32_t> layers;
+    std::vector<uint8_t>  roles;
+    {
+        nb::gil_scoped_release release;
+
+        GCodeProcessor processor;
+        processor.process_file(gcode_path);
+        const std::vector<GCodeProcessorResult::MoveVertex> &moves = processor.get_result().moves;
+        for (size_t i = 1; i < moves.size(); ++i) {
+            const GCodeProcessorResult::MoveVertex &move = moves[i];
+            const Vec3f &from = moves[i - 1].position, &to = move.position;
+            if (move.type != EMoveType::Extrude || from == to)
+                continue;
+            segments.insert(segments.end(), {from.x(), from.y(), from.z(), to.x(), to.y(), to.z(), move.width, move.height});
+            layers.push_back(move.layer_id);
+            roles.push_back(uint8_t(move.extrusion_role));
+        }
+    }
+    return {nb::bytes(reinterpret_cast<const char *>(segments.data()), segments.size() * sizeof(float)),
+            nb::bytes(reinterpret_cast<const char *>(layers.data()), layers.size() * sizeof(uint32_t)),
+            nb::bytes(reinterpret_cast<const char *>(roles.data()), roles.size())};
+}
+
+// PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them.
+std::vector<std::string> extrusion_roles()
+{
+    std::vector<std::string> names;
+    for (uint8_t role = 0; role < uint8_t(GCodeExtrusionRole::Count); ++role)
+        names.push_back(gcode_extrusion_role_to_string(GCodeExtrusionRole(role)));
+    return names;
 }
 
 using Settings = std::map<std::string, std::string>;
@@ -302,7 +444,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 3;
+    m.attr("API_VERSION") = 4;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -316,7 +458,8 @@ NB_MODULE(_engine, m)
           "Each part is (model file, scale, rotate, count): per-axis scale factors, degrees about\n"
           "X, Y and Z applied in that order after scaling, and the number of copies. The parts are\n"
           "dropped onto the bed and arranged on it. `config` is PrusaSlicer INI text; settings it\n"
-          "leaves out take PrusaSlicer's defaults.");
+          "leaves out take PrusaSlicer's defaults. A picture of the parts is written into the\n"
+          "G-code for each size in the `thumbnails` setting.");
 
     m.def("model_size", &model_size, "model"_a, nb::kw_only(),
           "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},
@@ -327,6 +470,15 @@ NB_MODULE(_engine, m)
     m.def("mesh", &mesh, "parts"_a, "config"_a,
           "The triangles of every part and copy, placed on the bed as `slice` places them: a pair\n"
           "of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
+
+    m.def("toolpaths", &toolpaths, "gcode"_a,
+          "The extrusions in a G-code file, in printing order: a triple of bytes. Per extrusion,\n"
+          "eight float32 (start x, y, z, end x, y, z, width, height), one uint32 layer counted\n"
+          "from 0, and one uint8 index into `extrusion_roles()`.\n\n"
+          "Raises RuntimeError when the file cannot be read.");
+
+    m.def("extrusion_roles", &extrusion_roles,
+          "PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them.");
 
     m.def("split_config", &split_config, "config"_a,
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"

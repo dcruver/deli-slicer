@@ -48,7 +48,7 @@ Do not reopen these without a reason.
 | Scaffold (`src/deli`, `tests`, `pyproject.toml`) | Done. `deli` only prints a hello line. |
 | `vendor/PrusaSlicer` | Shallow submodule pinned to `version_2.9.6`. |
 | `src/deli/orca.py` | Orca to PrusaSlicer converter. 28 tests pass. |
-| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 6 tests pass. See step 4. |
+| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 15 tests pass. See step 4. |
 | Dependency build in `build/deps` | Done. All 24 packages built with no patches. |
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
@@ -59,8 +59,8 @@ Do not reopen these without a reason.
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
 | `deli scale`, `deli rotate` (`src/deli/cli.py`) | Done. 19 tests pass. See step 5. |
 | `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
-| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 8 tests pass. See step 6. |
-| `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. Not tried on the real printer. See "Upload" below. |
+| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 12 tests pass. See step 6. |
+| `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. `deli send --print` has uploaded and started one real print on the Centauri Carbon (2026-10-03). See "Upload" below. |
 | `deli config` (`src/deli/config.py`) | Done. 15 tests pass. See step 5. |
 | `deli completion` (`src/deli/complete.py`) | Done. 10 tests pass. See step 5. |
 
@@ -181,7 +181,18 @@ Done. Start at step 5.
   only the package and the module, which needs no shared libraries beyond libc and
   libstdc++. Not done: a manylinux build, an sdist, licence notices for the bundled
   libraries, and any platform other than Linux x86_64.
-- Post-processing scripts (`post_process`) and thumbnails are not run by the module.
+- Post-processing scripts (`post_process`) are not run by the module.
+- Thumbnails: libslic3r only encodes the picture; PrusaSlicer draws it with OpenGL. So
+  `slice` hands `export_gcode` a callback, `render_thumbnail` in `_engine.cpp`: a small
+  z-buffer renderer that draws the arranged parts from the front right and above, in the
+  viewer's orange on a transparent background, at each size in the printer's `thumbnails`
+  setting (144x144 PNG for the Centauri Carbon). PrusaSlicer writes it as a
+  `; thumbnail begin` block near the top of the file. Not yet seen on the printer's
+  screen, and there is no Orca thumbnail here to compare the block with: Orca's command
+  line writes none (`build/orca-compare/orca-cube.gcode`).
+- `_engine.toolpaths(gcode)` reads a G-code file with PrusaSlicer's `GCodeProcessor` and
+  returns its extrusions for the viewer (step 6); `_engine.extrusion_roles()` names the
+  roles it numbers them by.
 
 ### 5. Commands, revision 1
 
@@ -379,12 +390,24 @@ Done. 8 tests pass.
   `deli scale` / `deli rotate` from another shell redrawing the page.
 - The viewer's files are in the wheel (checked with `uv build --wheel`; 25.7 MB, of
   which the unstripped `.so` is 65 MB before compression).
-- Shows every part and copy where arrange put them, and the bed outline with its cut-out corner. Not shown: G-code, supports.
+- Shows every part and copy where arrange put them, the bed outline with its cut-out corner, and the axes at the bed's origin, lying on the plate (x red, y green, z blue, the three.js/Blender convention; arrows about 23 mm long).
+- After `deli slice`, the page shows the G-code in place of the parts: `/state` names it in
+  `gcode` (with the engine's role names in `roles`) for as long as it is no older than
+  `deli.toml` and the parts' files, and `/toolpaths` is its extrusions from
+  `_engine.toolpaths`: a uint32 count, eight float32 each (start, end, width, height), a
+  uint32 layer each, a uint8 role each. The page draws one box per extrusion (an
+  `InstancedMesh`) in PrusaSlicer's preview colours, lists the roles in use, and has a
+  slider that draws the print up to a layer. Supports show as extrusions; so do the
+  start G-code's purge lines (role Custom). Travel moves are not drawn. G-code written
+  elsewhere with `slice -o` is not found.
+- Checked in Chrome on the Centauri Carbon bed with PrusaSlicer's `U_overhang.obj` at
+  500 % and supports on: the page went from the model to the toolpaths when `deli slice`
+  finished, and back when `deli scale` changed the print.
 
 ### Later
 
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
-per-part settings, a supports command, thumbnails, multi-filament, more host types.
+per-part settings, multi-filament, more host types.
 
 ## Second printer: Bambu Lab P1S
 
@@ -478,7 +501,8 @@ Open items, each a real behaviour difference from Orca:
   `Calibration_switch` (`--level`), `PrintPlatformType` 0 (textured PEI),
   `Tlp_Switch` 0; `Data.Ack` 0 means started. The websocket client is deli's own
   (RFC 6455, text frames only). All of this is tested against fake servers in
-  `tests/test_send.py` and **has not been tried on the real printer.**
+  `tests/test_send.py`, and `deli send --print` has uploaded and started one print on
+  the real Centauri Carbon (2026-10-03). Moonraker and OctoPrint are untried on real hosts.
   - The address is the chosen printer's `host` in `~/.config/deli/config.toml`, or
     `DELI_HOST`, which overrides it as git's environment variables override its config.
     Its scheme names the kind of host: `elegoo://`, `moonraker://`, `octoprint://`.
@@ -505,7 +529,8 @@ Open items, each a real behaviour difference from Orca:
 
 - Orca's CLI was the first plan and was dropped. `README.md` and `CLAUDE.md` are
   already updated; ignore any older notes that mention it.
-- Converted G-code has not been printed on the real printer. Step 3's comparison with
-  Orca passed, but the user has not yet approved a first print, and the fractional fan
-  values above are untested on the firmware. Do not send anything to the printer
-  without the user's say-so.
+- Converted G-code has been printed once on the real printer: a simple cube on the
+  Centauri Carbon, sent by the user with `deli send --print` on 2026-10-03, which printed
+  very well. The screen's progress and layer display and the fractional fan values
+  above were not checked during it. Do not send anything to the printer without the
+  user's say-so.
