@@ -246,6 +246,18 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
     `nozzle_high_flow`); `settings.kinds()` files each under the first.
   - `[settings]` is where `slice` will read overrides from; hand-written `true`/`false`
     and numbers are read as the engine's strings by `project.settings`.
+  - `deli supports [on|off|organic|snug|grid] [--angle N] [--buildplate-only|--everywhere]`
+    is a thin command over the `support_material*` settings: `on` sets
+    `support_material` and `support_material_auto`, a style sets
+    `support_material_style` too, the options set `support_material_threshold` and
+    `support_material_buildplate_only`; all through `settings.check`, so the engine
+    validates them, and `deli set`/`deli unset` see the same keys. Without arguments it
+    describes the effective state. `settings.effective` reads a setting from the print,
+    else the chosen profile, else `_engine.setting_default` (new, `API_VERSION` 3);
+    `deli set <key>` now names PrusaSlicer's default too. The converter already maps
+    Orca's support settings, including `support_type` tree → organic. Checked on
+    PrusaSlicer's `U_overhang.obj`: support material appears once supports are on.
+    6 tests.
   - Shell completion (`src/deli/complete.py`, `deli completion bash|zsh|fish`): one
     hidden `deli __complete INDEX WORDS...` answers from the parser (commands, options,
     choices), the library (printer/filament/process names), the print (part names,
@@ -373,6 +385,45 @@ Done. 8 tests pass.
 
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
 per-part settings, a supports command, thumbnails, multi-filament, more host types.
+
+## Second printer: Bambu Lab P1S
+
+Converted for a beta tester (2026-10-02): `Bambu Lab P1S 0.4 nozzle`, `0.20mm Standard
+@BBL X1C` (the process Orca pairs with the P1S) and `Bambu PLA Basic @BBL X1C`, now in
+`profiles/`. The same cube was sliced with Orca 2.4.2's command line
+(`build/orca-compare-p1s`, flattened presets with `"from": "system"`, `--curr-bed-type
+"Textured PEI Plate"`, absolute paths because the Flatpak cannot see `/tmp`).
+
+- Start block: 200 commands in both, identical apart from the AMS flush temperature
+  (`M620.1 ... T220` for Orca's T240, see below) and the bed-levelling area (`G29 A`:
+  Orca's rectangle is 2 mm larger each side, PrusaSlicer's `first_layer_print_min` is
+  the object alone). End block: 40 commands, identical. 100 layers in both.
+- Filament: deli 1303 mm (3.96 g) against Orca's 1220 mm (3.70 g), 7 % more. Not
+  chased; the infill pattern substitution below is the likely cause.
+- The purge line's feed rate matches to the last digit once Orca's
+  `outer_wall_volumetric_speed` is written out of PrusaSlicer's variables (below).
+- `deli send` cannot talk to a Bambu printer: LAN mode is FTPS plus MQTT with an
+  access code, cloud mode is Bambu's servers. The tester moves the G-code by hand
+  (SD card, or Bambu Studio's / Orca's send) until that is built.
+
+Converter changes it took, all general:
+
+- **`G92 E0` in the layer-change G-code.** PrusaSlicer refuses relative extrusion unless
+  `layer_gcode` or `before_layer_gcode` resets E, and looks for the text literally.
+  Orca never needs it, so most of its printers lack it (the Centauri happened to have
+  one). The converter now appends `G92 E0` to `layer_gcode` when neither has it, with a
+  note. This was the single biggest cause of the 233 slicing failures in the survey.
+- **Orca's computed variables.** `flush_volumetric_speeds[i]` and `flush_temperatures[i]`
+  are renamed to `filament_max_volumetric_speed[i]` and `temperature[i]`, which is what
+  Orca itself falls back to when the filament's flush settings are 0 (they ship as 0;
+  the temperature fallback is really `nozzle_temperature_range_high`, which PrusaSlicer
+  lacks, hence T220 for T240). `outer_wall_volumetric_speed` is replaced by Orca's own
+  formula in PrusaSlicer's template language: outer wall speed × line cross-section
+  (h·(w − h·(1 − π/4))), capped by the filament's maximum.
+- **`crosshatch` infill** (Orca's own 3D lattice) becomes `cubic` instead of falling to
+  PrusaSlicer's default `stars`.
+- **`default_bed_type`** missing from a machine (all of Bambu's) now means Textured PEI
+  Plate, as the filament conversion already assumed.
 
 ## Profile conversion: what is settled and what is open
 

@@ -98,8 +98,9 @@ is also the only way to convert presets you have edited or created in Orca, sinc
 GitHub has only the bundled ones.
 
 **Otherwise**, load a ready-made file. This repository ships the Elegoo Centauri Carbon
-(0.6 mm nozzle) in `profiles/`, and `deli load` takes a path, a `file://` URL or an
-`https://` URL, including a link to a file's page on GitHub:
+(0.6 mm nozzle) and the Bambu Lab P1S (0.4 mm nozzle) in `profiles/`, and `deli load`
+takes a path, a `file://` URL or an `https://` URL, including a link to a file's page
+on GitHub:
 
 ```
 deli load printer  https://github.com/dcruver/deli-slicer/blob/main/profiles/printers/elegoo-centauri-carbon-0.6-nozzle.ini
@@ -138,7 +139,7 @@ deli add bracket.stl                            # STL, OBJ, 3MF or AMF
 deli add bracket.stl --count 3                  # three more of it
 deli add lid.stl
 deli set infill 20%                             # or any PrusaSlicer setting by name
-deli set supports on
+deli supports organic                           # automatic supports; on, off, grid, snug, organic
 deli scale lid 110%                             # name the part when there is more than one
 deli rotate lid 45
 deli view                                       # shows the parts on the bed in your browser, live
@@ -146,8 +147,16 @@ deli slice                                      # writes the G-code next to deli
 deli send                                       # uploads it; add --print to start printing
 ```
 
-`deli printer`, `deli filament`, `deli process`, `deli set`, `deli scale` and
-`deli rotate` without arguments show what is chosen. `deli remove`, `deli unset` and
+Supports are PrusaSlicer's automatic ones. `deli supports on` uses the style the
+process came with (Orca's tuning carries over: organic for the P1S, grid for the
+Centauri); `organic`, `snug` or `grid` pick one and turn them on; `--angle 45` supports
+overhangs steeper than that, and `--buildplate-only` keeps them off the part itself.
+`deli supports` alone says what is in force and where it comes from. Underneath these
+are ordinary settings (`support_material`, `support_material_style`, ...), so
+`deli set` shows them and `deli unset supports` turns them off.
+
+`deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
+`deli scale` and `deli rotate` without arguments show what is chosen. `deli remove`, `deli unset` and
 `deli scale 100%` / `deli rotate 0` undo things. Everything is in `deli.toml`, which is
 plain TOML you can edit, comment and commit:
 
@@ -168,6 +177,8 @@ rotate = [0, 0, 45]
 [settings]
 fill_density = "20%"
 support_material = 1
+support_material_auto = 1
+support_material_style = "organic"
 ```
 
 The hash records which version of the printer the print was set up with; if the
@@ -187,6 +198,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli add <file> [--count N]` | add a model, or more copies of it |
 | `deli remove <part> [--count N]` | take a part, or some copies, out |
 | `deli set <setting> [value]` / `deli unset` | change a setting for this print |
+| `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli slice [-o FILE]` | slice to G-code |
@@ -211,14 +223,16 @@ Things that a user would notice, roughly in the order they matter:
   printer's screen may not show progress; the first layer's layer-change G-code is
   skipped; one bridge speed instead of two; no brim where Orca would add one
   automatically. `PLAN.md` has the full list with measurements.
-- **Other printers.** The Orca converter has been checked on the Centauri Carbon only.
-  Run over the 1,001 printers Orca ships, 400 slice, the rest fail for a handful of
-  reasons (untranslated G-code variables, thumbnail formats, multi-line values).
+- **Other printers.** The Orca converter has been checked against Orca's own output
+  on the Centauri Carbon and the Bambu Lab P1S (start and end blocks match command for
+  command). Other printers convert but have not been compared.
+- **Bambu printers can't be sent to.** `deli send` does not speak Bambu's LAN or cloud
+  protocols; copy the G-code over by hand (SD card, or another program's send).
 - **Wheels for Linux x86-64 only**, built on a very new glibc. No macOS or Windows
   builds yet, and no wheel for older distributions.
 - **Settings apply to the whole print**, not to one part.
-- **Supports** are PrusaSlicer's, set with `deli set supports on` and the engine's
-  own setting names; there is no `deli supports` command yet.
+- **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
+  elsewhere, which is untested.
 - **One filament per print.** Filament-change G-code is not converted.
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
 - **Hosts:** PrusaLink, Duet and the others PrusaSlicer knows are not supported by

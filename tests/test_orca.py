@@ -322,3 +322,35 @@ def test_machine_with_an_excluded_corner_gets_a_notched_bed():
     assert converted.settings["bed_shape"] == "0x0,246x0,246x20,256x20,256x256,0x256"
     assert "bed_exclude_area" not in converted.dropped
     assert any("cut out of bed_shape" in note for note in converted.notes)
+
+
+def test_layer_change_gcode_gets_the_extruder_reset_prusaslicer_requires():
+    without = orca.convert_machine({"layer_change_gcode": "; layer [layer_num]"})
+    assert without.settings["layer_gcode"] == r"; layer [layer_num]\nG92 E0\n"
+    assert any("G92 E0 added" in note for note in without.notes)
+
+    with_it = orca.convert_machine({"layer_change_gcode": ";LAYER\nG92 E0"})
+    assert with_it.settings["layer_gcode"] == r";LAYER\nG92 E0"
+    assert not any("G92 E0 added" in note for note in with_it.notes)
+
+    before = orca.convert_machine({"before_layer_change_gcode": "G92 E0", "layer_change_gcode": ";LAYER"})  # the Centauri's way
+    assert before.settings["layer_gcode"] == ";LAYER"
+
+    nothing = orca.convert_machine({})
+    assert nothing.settings["layer_gcode"] == r"G92 E0\n"
+
+
+def test_orcas_computed_gcode_variables_are_written_out_of_prusaslicers():
+    gcode = "M620.1 E F{flush_volumetric_speeds[initial_no_support_extruder]/2.4053*60} T{flush_temperatures[initial_no_support_extruder]}\nG0 X240 E15 F{outer_wall_volumetric_speed/(0.3*0.5) * 60}"
+
+    converted = orca.convert_machine({"machine_start_gcode": gcode}).settings["start_gcode"]
+
+    assert "F{filament_max_volumetric_speed[initial_extruder]/2.4053*60} T{temperature[initial_extruder]}" in converted
+    assert "F{(min(external_perimeter_speed * layer_height * (max(external_perimeter_extrusion_width, nozzle_diameter[initial_extruder]) - layer_height * 0.2146), filament_max_volumetric_speed[initial_extruder]))/(0.3*0.5) * 60}" in converted
+    assert "outer_wall_volumetric_speed" not in converted
+
+
+def test_crosshatch_infill_becomes_cubic():
+    converted = orca.convert_process({"sparse_infill_pattern": "crosshatch"}, 0.4)
+
+    assert converted.settings["fill_pattern"] == "cubic"

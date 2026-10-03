@@ -275,6 +275,15 @@ std::pair<std::map<std::string, Settings>, std::vector<std::string>> split_confi
     return {groups, unknown};
 }
 
+// PrusaSlicer's default for one setting, as it writes it.
+std::string setting_default(const std::string &key)
+{
+    const FullPrintConfig full;
+    if (!full.has(key))
+        throw std::invalid_argument("no setting named " + key);
+    return full.opt_serialize(key);
+}
+
 // Every setting PrusaSlicer keeps in a printer, a process and a filament preset.
 std::map<std::string, std::vector<std::string>> setting_names()
 {
@@ -293,7 +302,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 2;
+    m.attr("API_VERSION") = 3;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -323,6 +332,8 @@ NB_MODULE(_engine, m)
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"
           "Returns the groups, each a dict of setting name to value, and a list of the settings\n"
           "this version of PrusaSlicer does not know. Bad values raise ValueError.");
+
+    m.def("setting_default", &setting_default, "key"_a, "PrusaSlicer's default for a setting, as it writes it.");
 
     m.def("setting_names", &setting_names,
           "The names of the settings PrusaSlicer keeps in a 'printer', a 'process' and a 'filament'.");

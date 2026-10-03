@@ -367,10 +367,9 @@ def _set(args: argparse.Namespace) -> int:
     if args.value is None:
         if key in overrides:
             print(f"{key} = {overrides[key]}" + (f"  ({note})" if note else ""))
-        elif note:
-            print(f"{key} is not changed by this print; {note}")
         else:
-            print(f"{key} is not changed by this print")
+            value, source = settings.effective(doc, key)
+            print(f"{key} is not changed by this print; {source} has {value}")
         return 0
 
     chosen = [profile[1] for kind in library.KINDS if (profile := project.chosen_profile(doc, kind))]
@@ -379,6 +378,47 @@ def _set(args: argparse.Namespace) -> int:
     project.set_setting(doc, key, value)
     project.write(doc)
     print(f"{key} = {value}" + (f"  ({note})" if note else ""))
+    return 0
+
+
+SUPPORT_STYLES = ("grid", "snug", "organic")
+
+
+def _supports(args: argparse.Namespace) -> int:
+    """`deli supports`: PrusaSlicer's automatic supports, through the same settings `deli set` uses."""
+    doc = project.read()
+    wanted: dict[str, str] = {}
+    if args.mode in ("on", *SUPPORT_STYLES):
+        wanted["support_material"] = "1"
+        wanted["support_material_auto"] = "1"  # where overhangs need them, not only where painted
+    if args.mode in SUPPORT_STYLES:
+        wanted["support_material_style"] = args.mode
+    if args.mode == "off":
+        wanted["support_material"] = "0"
+    if args.angle is not None:
+        wanted["support_material_threshold"] = str(args.angle)
+    if args.buildplate_only is not None:
+        wanted["support_material_buildplate_only"] = "1" if args.buildplate_only else "0"
+
+    if wanted:
+        chosen = [profile[1] for kind in library.KINDS if (profile := project.chosen_profile(doc, kind))]
+        others = {name: value for part in chosen for name, value in part.items()} | project.settings(doc)
+        for key, value in wanted.items():
+            others[key] = settings.check(key, value, others)
+            project.set_setting(doc, key, others[key])
+        project.write(doc)
+
+    on, on_from = settings.effective(doc, "support_material")
+    if on != "1":
+        print(f"Supports are off ({on_from})")
+        return 0
+    style, _ = settings.effective(doc, "support_material_style")
+    angle, _ = settings.effective(doc, "support_material_threshold")
+    plate, _ = settings.effective(doc, "support_material_buildplate_only")
+    auto, _ = settings.effective(doc, "support_material_auto")
+    where = "overhangs" if auto == "1" else "painted areas only"
+    past = f" past {angle}°" if angle not in ("0", "") else ", where the slicer sees fit"
+    print(f"Supports are on ({on_from}): {style}, for {where}{past}, from {'the build plate only' if plate == '1' else 'anywhere'}")
     return 0
 
 
@@ -569,7 +609,7 @@ def _view(args: argparse.Namespace) -> int:
     return view.serve(args.port, open_browser=not args.no_browser)
 
 
-ENGINE_API = 2  # must match API_VERSION in _engine.cpp
+ENGINE_API = 3  # must match API_VERSION in _engine.cpp
 
 
 def _completion(args: argparse.Namespace) -> int:
@@ -641,6 +681,21 @@ def build_parser() -> argparse.ArgumentParser:
     set_.add_argument("setting", nargs="?", help="a setting's name, such as fill_density, or a short name, such as infill")
     set_.add_argument("value", nargs="?", help="its new value")
     set_.set_defaults(run=_set)
+
+    supports = commands.add_parser(
+        "supports",
+        help="turn automatic supports on or off for this print",
+        description="PrusaSlicer's automatic supports for this print. `deli supports on` uses the process's style; "
+        "`organic`, `snug` or `grid` pick one. Options narrow where they go. Without arguments, show what is set. "
+        "These are ordinary settings (support_material, support_material_style, ...), so `deli set` and `deli unset` "
+        "reach them too.",
+    )
+    supports.add_argument("mode", nargs="?", choices=["on", "off", *SUPPORT_STYLES])
+    supports.add_argument("--angle", type=int, metavar="DEGREES", help="support overhangs steeper than this (0: let the slicer decide)")
+    plate = supports.add_mutually_exclusive_group()
+    plate.add_argument("--buildplate-only", dest="buildplate_only", action="store_true", default=None, help="no supports resting on the part")
+    plate.add_argument("--everywhere", dest="buildplate_only", action="store_false", help="supports may rest on the part too")
+    supports.set_defaults(run=_supports)
 
     unset = commands.add_parser(
         "unset",

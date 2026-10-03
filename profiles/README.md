@@ -19,10 +19,14 @@ GitHub.
 | `printers/elegoo-centauri-carbon-0.6-nozzle.ini` | Elegoo Centauri Carbon 0.6 nozzle |
 | `processes/0.30mm-standard-elegoo-cc-0.6-nozzle.ini` | 0.30mm Standard @Elegoo CC 0.6 nozzle |
 | `filaments/elegoo-pla-ecc.ini` | Elegoo PLA @ECC |
+| `printers/bambu-lab-p1s-0.4-nozzle.ini` | Bambu Lab P1S 0.4 nozzle |
+| `processes/0.20mm-standard-bbl-x1c.ini` | 0.20mm Standard @BBL X1C (Orca's process for the P1S) |
+| `filaments/bambu-pla-basic-bbl-x1c.ini` | Bambu PLA Basic @BBL X1C |
 
-These three were checked together by slicing a 20 mm cube and comparing the G-code with
-OrcaSlicer's for the same cube: the start and end blocks match command for command.
-They have not been used for a real print yet. The `# note:` lines at the top of each
+Each printer's three were checked together by slicing a 20 mm cube and comparing the
+G-code with OrcaSlicer's for the same cube: the start and end blocks match command for
+command (the P1S's AMS flush temperature and bed-levelling area differ slightly; see
+`PLAN.md`). None has been used for a real print yet. The `# note:` lines at the top of each
 file, and the open items in `PLAN.md`, list what differs from OrcaSlicer; the largest
 is that the process's 0.97 flow ratio is not applied, so about 3 % more filament is
 extruded.

@@ -80,3 +80,18 @@ def check(key: str, value: str, others: dict[str, str]) -> str:
         except ValueError as err:
             errors.append(str(err).removeprefix(f"bad value for setting {key}: ").removeprefix("invalid configuration: "))
     raise SettingError(f"cannot set {key} to '{value}': {errors[0]}")
+
+
+def effective(doc, key: str) -> tuple[str, str]:
+    """What a setting is for this print and where that comes from: "this print", the chosen
+    profile ("the process 'x'"), or "PrusaSlicer's default"."""
+    from deli import project  # here to keep settings importable on its own
+
+    overrides = project.settings(doc)
+    if key in overrides:
+        return overrides[key], "this print"
+    kind = kinds()[key]
+    profile = project.chosen_profile(doc, kind)
+    if profile and key in profile[1]:
+        return profile[1][key], f"the {kind} '{profile[0]}'"
+    return _engine.setting_default(key), "PrusaSlicer's default"

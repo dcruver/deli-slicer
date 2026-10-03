@@ -1,5 +1,6 @@
 """The printer, process and filament files shipped in profiles/."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -28,9 +29,17 @@ def test_profile_loads_whole(path):
     assert loaded.settings.keys() == library.read_settings(path).keys()
 
 
-def test_centauri_carbon_profiles_slice_a_cube(tmp_path):
-    names = {"printer": "elegoo-centauri-carbon-0.6-nozzle", "process": "0.30mm-standard-elegoo-cc-0.6-nozzle",
-             "filament": "elegoo-pla-ecc"}  # fmt: skip
+TRIOS = {
+    "centauri": ({"printer": "elegoo-centauri-carbon-0.6-nozzle", "process": "0.30mm-standard-elegoo-cc-0.6-nozzle",
+                  "filament": "elegoo-pla-ecc"}, 67, "CC_START_GCODE"),  # 20 mm at 0.3 mm layers
+    "p1s": ({"printer": "bambu-lab-p1s-0.4-nozzle", "process": "0.20mm-standard-bbl-x1c",
+             "filament": "bambu-pla-basic-bbl-x1c"}, 100, "machine: P1S-0.4"),
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("trio", TRIOS, ids=list(TRIOS))
+def test_shipped_profiles_slice_a_cube(trio, tmp_path):
+    names, layers, banner = TRIOS[trio]
     folders = {kind: folder for folder, kind in FOLDERS.items()}
     config = "".join((ROOT / "profiles" / folders[kind] / f"{name}.ini").read_text() for kind, name in names.items())
 
@@ -38,5 +47,7 @@ def test_centauri_carbon_profiles_slice_a_cube(tmp_path):
     result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1)], config, str(out))
 
     assert result.warnings == []
-    assert out.read_text().count(";LAYER_CHANGE") == 67  # 20 mm at 0.3 mm layers
-    assert "CC_START_GCODE" in out.read_text()
+    gcode = out.read_text()
+    assert gcode.count(";LAYER_CHANGE") == layers
+    assert banner in gcode
+    assert not re.search(r"^[GMT][^;\n]*\{", gcode, re.M)  # every template expression in a command was evaluated

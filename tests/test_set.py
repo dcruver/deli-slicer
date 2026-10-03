@@ -111,6 +111,9 @@ def test_setting_alone_shows_it(project, capsys):
     main(["set", "walls"])
     assert capsys.readouterr().out == f"perimeters is not changed by this print; the process '{PROCESS}' has 2\n"
 
+    main(["set", "temperature"])  # no filament chosen
+    assert capsys.readouterr().out == "temperature is not changed by this print; PrusaSlicer's default has 200\n"
+
     main(["set", "walls", "4"])
     capsys.readouterr()
     main(["set", "walls"])

@@ -116,7 +116,19 @@ GCODE_RENAMES = {
     "outer_wall_acceleration": "external_perimeter_acceleration",
     "printable_height": "max_print_height",
     "filament_name": "filament_type[0]",
+    # Orca computes these two per filament at slice time; with the filament's flush
+    # settings at 0, as they ship, it falls back to exactly these.
+    "flush_volumetric_speeds": "filament_max_volumetric_speed",
+    "flush_temperatures": "temperature",
 }
+
+# Orca's outer_wall_volumetric_speed: the outer wall's speed times its line's cross-section
+# (a rectangle with semicircular ends: h * (w - h * (1 - pi/4))), capped by the filament's
+# maximum. Written out of PrusaSlicer's own template variables.
+OUTER_WALL_VOLUMETRIC_SPEED = (
+    "min(external_perimeter_speed * layer_height * (max(external_perimeter_extrusion_width, nozzle_diameter[initial_extruder]) "
+    "- layer_height * 0.2146), filament_max_volumetric_speed[initial_extruder])"
+)
 
 # The pressure-advance block reads filament settings PrusaSlicer does not have.
 # It is removed from the printer G-code and re-emitted per filament instead.
@@ -350,12 +362,18 @@ def convert_machine(machine: Orca) -> Converted:
         out["bed_shape"] = _joined(machine["printable_area"])
         handled.add("printable_area")
 
-    bed_name = BED_TYPES.get(_first(machine.get("default_bed_type", "")), ("", "unknown"))[1]
-    literals = {"curr_bed_type": f'"{bed_name}"'}
+    bed_name = BED_TYPES.get(_first(machine.get("default_bed_type", "4")), ("", "unknown"))[1]
+    literals = {"curr_bed_type": f'"{bed_name}"', "outer_wall_volumetric_speed": f"({OUTER_WALL_VOLUMETRIC_SPEED})"}
     for old, new in MACHINE_GCODE.items():
         if old in machine:
             out[new] = _escape(convert_gcode(_first(machine[old]), literals))
             handled.add(old)
+    # PrusaSlicer refuses relative extrusion unless every layer change resets E, which it
+    # looks for literally in layer_gcode. Orca does not need it, so most of its printers lack it.
+    layer = _first(machine.get("layer_change_gcode", ""))
+    if "G92 E0" not in layer and "G92 E0" not in _first(machine.get("before_layer_change_gcode", "")):
+        out["layer_gcode"] = _escape((convert_gcode(layer, literals).rstrip("\n") + "\nG92 E0\n").lstrip("\n"))
+        result.notes.append("G92 E0 added to the layer-change G-code; PrusaSlicer requires it with relative extrusion.")
 
     if "thumbnails" in machine:
         fmt = _first(machine.get("thumbnails_format", "PNG"))
@@ -493,6 +511,7 @@ INFILL_PATTERNS = {
     "hilbertcurve": "hilbertcurve", "archimedeanchords": "archimedeanchords",
     "octagramspiral": "octagramspiral", "adaptivecubic": "adaptivecubic",
     "supportcubic": "supportcubic", "lightning": "lightning",
+    "crosshatch": "cubic",  # Orca's own 3D lattice; PrusaSlicer's nearest
 }  # fmt: skip
 
 PROCESS_PATTERNS = {
