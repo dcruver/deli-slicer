@@ -135,12 +135,14 @@ printer right now and `process` the usual process: `deli printer` uses both as
 defaults for a new print, and `deli send --print` refuses a print sliced for a
 filament other than the loaded one. Update `filament` when you change spools.
 
-The three `--default` lines write the config's `printer`, and that printer's `filament`
-and `process` (the same keys `deli config printers.<printer>.filament` sets). A print
-started in a new directory, with `deli add` say, takes all three, written into its
-`deli.toml` like any other choice. A print that wants something else chooses it with
-`deli printer`, `deli filament` or `deli process` as usual, and changing a default
-later leaves the prints you already have alone.
+The three `--default` lines write the config's `printer` key (`deli config printer
+<name>` sets the same one), and that printer's `filament` and `process` (the keys
+`deli config printers.<printer>.filament` and `.process` set). A print started in a
+new directory, with `deli add` say, takes all three, written into its `deli.toml` like
+any other choice. A print that wants something else chooses it with `deli printer`,
+`deli filament` or `deli process` as usual, and changing a default later leaves the
+prints you already have alone. `deli printer` marks your default in its list, and
+`deli config` shows everything that is set.
 
 ## Print something
 
@@ -156,6 +158,7 @@ deli supports organic                           # automatic supports; on, off, g
 deli scale lid 110%                             # name the part when there is more than one
 deli rotate lid 45
 deli move lid 60 80                             # put it there; the other parts are arranged around it
+deli pause 30                                   # pause once layer 30 is done: drop in a magnet, or change the filament
 deli view                                       # shows the parts on the bed in your browser, live; the shell stays free
 deli slice                                      # writes the G-code next to deli.toml; the view then shows it, layer by layer
 deli send                                       # uploads it; add --print to start printing
@@ -169,12 +172,40 @@ overhangs steeper than that, and `--buildplate-only` keeps them off the part its
 are ordinary settings (`support_material`, `support_material_style`, ...), so
 `deli set` shows them and `deli unset supports` turns them off.
 
+Parts are arranged on the bed for you, a single part in the middle. `deli move lid 60 80`
+puts the middle of a part at x 60, y 80 instead, in millimetres from the bed's origin
+(the axes `deli view` draws), and the parts you have not moved are arranged around it.
+`deli move z -0.25` sinks a part a quarter of a millimetre into the bed, which is what
+a part resting on an edge or a lip needs to get a first layer; what is below the bed
+is not printed. `deli move auto` gives the placing back, and `deli translate` is the
+same command under another name. A part with copies cannot be given a place.
+
+`deli pause 30` has the printer pause once layer 30 is done, to drop in a magnet or a
+nut, or to change the filament: deli has no separate colour-change command, because a
+pause is where you change it. What is written is the printer's own pause G-code (on
+the Centauri Carbon that is `M600`, the filament-change command itself; `deli set
+pause_print_gcode` changes it). Layers are counted as the slider in `deli view` counts
+them, so slide to the last layer you want printed before the pause and use that
+number. `deli slice` reports each pause with its height, and refuses a pause after a
+layer the print does not have.
+
+`deli view` opens a page in your browser and gives the shell straight back; the page
+follows the print as you change it. After `deli slice` it shows the G-code instead of
+the parts: every extrusion, supports included, coloured by what it is for, with a
+slider to go through the layers. It goes back to the parts as soon as the print
+changes. The page is served in the background until it has been closed for ten
+minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
+`deli slice` draws one into the G-code for the printer's screen.
+
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
-`deli scale`, `deli rotate` and `deli move` without arguments show what is chosen. `deli remove`, `deli unset` and
-`deli scale 100%` / `deli rotate 0` / `deli move auto` undo things. Everything is in `deli.toml`, which is
-plain TOML you can edit, comment and commit:
+`deli scale`, `deli rotate`, `deli move` and `deli pause` without arguments show what
+is chosen. `deli remove`, `deli unset`, `deli scale 100%`, `deli rotate 0`,
+`deli move auto` and `deli pause off` undo things. Everything is in `deli.toml`, which
+is plain TOML you can edit, comment and commit:
 
 ```toml
+pause = [30]
+
 [printer]
 name = "elegoo-centauri-carbon-0.6-nozzle"
 sha256 = "9510435c7c2100a23514b823aaab26fc37e9efe6a7e8031c1a2e03ecb687192c"
@@ -187,6 +218,7 @@ count = 4
 file = "lid.stl"
 scale = [1.1, 1.1, 1.1]
 rotate = [0, 0, 45]
+at = [60, 80]
 
 [settings]
 fill_density = "20%"
@@ -195,9 +227,9 @@ support_material_auto = 1
 support_material_style = "organic"
 ```
 
-The hash records which version of the printer the print was set up with; if the
-printer in your library changes, `deli slice` says so and `deli printer <name>`
-accepts the new version.
+The filament and the process have tables like the printer's. The hash records which
+version of the printer the print was set up with; if the printer in your library
+changes, `deli slice` says so and `deli printer <name>` accepts the new version.
 
 Before a first real print: `deli send` without `--print` only uploads, so you can
 check the file arrived and start it from the printer's own screen.
@@ -216,6 +248,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli move [part] <x> <y>` | where the part's middle goes on the bed; `z -0.25` sinks it, `auto` has it arranged again. `deli translate` is the same command |
+| `deli pause [off] [layer ...]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
 | `deli slice [-o FILE]` | slice to G-code |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
 | `deli send [FILE] [--print]` | upload to the printer in your config |
@@ -247,7 +280,12 @@ Things that a user would notice, roughly in the order they matter:
 - **Settings apply to the whole print**, not to one part.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.
-- **One filament per print.** Filament-change G-code is not converted.
+- **One filament per print.** A change by hand at a `deli pause` is the only kind;
+  filament-change G-code for multi-material printers is not converted.
+- **Pauses are untried on a printer.** The G-code carries the printer's pause command
+  at the right layer; nobody has yet watched a printer stop there.
+- **Parts you place yourself are not checked against each other**, only against the
+  bed, so two moved parts can overlap.
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
 - **Hosts:** PrusaLink, Duet and the others PrusaSlicer knows are not supported by
   `deli send`; the Centauri Carbon 2's newer protocol is not either.

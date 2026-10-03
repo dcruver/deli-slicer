@@ -68,6 +68,9 @@ def test_parts_and_axes():
     assert complete("move") == ["auto", "cube", "cube.stl", "x", "y", "z"]
     assert complete("move", "cube") == ["auto", "x", "y", "z"]
     assert complete("translate") == complete("move")
+    assert complete("pause") == ["off"]
+    main(["pause", "3", "7"])
+    assert complete("pause", "off") == ["3", "7"]
 
     main(["add", "other.stl"])
     assert complete("scale") == ["cube", "cube.stl", "other", "other.stl"]  # a part must be named first

@@ -35,10 +35,12 @@
 #include "libslic3r/BuildVolume.hpp"
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/Config.hpp"
+#include "libslic3r/CustomGCode.hpp"
 #include "libslic3r/ExtrusionRole.hpp"
 #include "libslic3r/FileReader.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
 #include "libslic3r/GCode/ThumbnailData.hpp"
+#include "libslic3r/Layer.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/MultipleBeds.hpp"
 #include "libslic3r/Preset.hpp"
@@ -61,6 +63,7 @@ struct SliceResult
     double                   filament_mm;
     double                   filament_g;
     std::vector<std::string> warnings;
+    std::vector<std::pair<int, double>> pauses; // the layer each pause comes after, and how high the print is by then
 };
 
 // The settings in `ini` as given, with names from older PrusaSlicer versions updated.
@@ -325,7 +328,23 @@ ThumbnailData render_thumbnail(const Model &model, unsigned width, unsigned heig
     return picture;
 }
 
-SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini, const std::string &output_path)
+// The heights the print's layers reach, lowest first: one for every height at which a
+// layer of a part or of its supports is laid, which is how the G-code counts its layers.
+std::vector<double> layer_tops(const Print &print)
+{
+    std::vector<double> tops;
+    for (const PrintObject *object : print.objects()) {
+        for (const Layer *layer : object->layers())
+            tops.push_back(layer->print_z);
+        for (const SupportLayer *layer : object->support_layers())
+            tops.push_back(layer->print_z);
+    }
+    std::sort(tops.begin(), tops.end());
+    tops.erase(std::unique(tops.begin(), tops.end(), [](double a, double b) { return b - a < EPSILON; }), tops.end());
+    return tops;
+}
+
+SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini, const std::string &output_path, std::vector<int> pauses)
 {
     nb::gil_scoped_release release;
 
@@ -349,6 +368,26 @@ SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini,
         throw std::runtime_error("nothing to print: the object is not fully inside the print volume");
 
     print.process();
+    if (!pauses.empty()) {
+        // PrusaSlicer keeps pauses by height and writes each before the first layer at or
+        // above it. The heights are only known now, so the pauses go into the model here and
+        // the print is told again; that redoes the last steps only, not the slicing.
+        if (config.opt_bool("complete_objects"))
+            throw std::runtime_error("a print cannot pause at a layer when its parts are printed one after another (complete_objects)");
+        const std::vector<double> tops = layer_tops(print);
+        std::sort(pauses.begin(), pauses.end());
+        CustomGCode::Info &custom = model.custom_gcode_per_print_z();
+        custom.mode = CustomGCode::SingleExtruder;
+        for (int layer : pauses) {
+            if (layer < 1 || size_t(layer) >= tops.size())
+                throw std::runtime_error("the print cannot pause after layer " + std::to_string(layer) + ": it has " +
+                                         std::to_string(tops.size()) + " layers, and a pause comes between two of them");
+            custom.gcodes.push_back({tops[layer], CustomGCode::PausePrint, 1, "", ""});
+            result.pauses.emplace_back(layer, tops[layer - 1]);
+        }
+        MultipleBedsUtils::with_single_bed_model_fff(model, 0, [&]() { print.apply(model, config); });
+        print.process();
+    }
     // Asked for once per size in the printer's `thumbnails` setting, and not at all without it.
     const ThumbnailsGeneratorCallback thumbnails = [&model](const ThumbnailsParams &params) {
         ThumbnailsList pictures;
@@ -492,16 +531,17 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 5;
+    m.attr("API_VERSION") = 6;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
         .def_ro("print_time", &SliceResult::print_time, "Estimated print time in seconds.")
         .def_ro("filament_mm", &SliceResult::filament_mm, "Filament used, in millimetres.")
         .def_ro("filament_g", &SliceResult::filament_g, "Filament used, in grams.")
-        .def_ro("warnings", &SliceResult::warnings, "Warnings PrusaSlicer raised while validating the print.");
+        .def_ro("warnings", &SliceResult::warnings, "Warnings PrusaSlicer raised while validating the print.")
+        .def_ro("pauses", &SliceResult::pauses, "For each pause, the layer it comes after and the height of the print by then, in mm.");
 
-    m.def("slice", &slice, "parts"_a, "config"_a, "output"_a,
+    m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{},
           "Slice the parts of a print and write G-code to `output`.\n\n"
           "Each part is (model file, scale, rotate, count, place, height): per-axis scale factors,\n"
           "degrees about X, Y and Z applied in that order after scaling, the number of copies, the\n"
@@ -509,7 +549,9 @@ NB_MODULE(_engine, m)
           "is above the bed (negative sinks it). The parts are dropped onto the bed and those\n"
           "without a place are arranged on it. `config` is PrusaSlicer INI text; settings it\n"
           "leaves out take PrusaSlicer's defaults. A picture of the parts is written into the\n"
-          "G-code for each size in the `thumbnails` setting.");
+          "G-code for each size in the `thumbnails` setting. `pauses` are layers, counted from 1\n"
+          "as the G-code's layer changes count them, after which the printer's pause G-code\n"
+          "(`pause_print_gcode`) is written.");
 
     m.def("model_size", &model_size, "model"_a, nb::kw_only(),
           "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},

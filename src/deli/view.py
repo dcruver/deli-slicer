@@ -96,7 +96,7 @@ def _config(doc) -> str:
 
 def state() -> dict:
     """What the page needs to describe the print: the bed, the parts and their transforms."""
-    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "parts": [], "gcode": None}
+    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "parts": [], "gcode": None, "pauses": []}
     try:
         doc = project.read()
         result["bed"], result["height"], result["printer"] = _bed(doc)
@@ -110,6 +110,7 @@ def state() -> dict:
             except RuntimeError as err:
                 result["error"] = f"cannot read {part['file']}: {err}"
             result["parts"].append(described)
+        result["pauses"] = project.pauses(doc)
         if gcode := _gcode(doc):
             result["gcode"] = gcode.name
             result["roles"] = _engine.extrusion_roles()

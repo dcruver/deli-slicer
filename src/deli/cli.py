@@ -446,6 +446,40 @@ def _move(args: argparse.Namespace) -> int:
     return 0
 
 
+def _layers(layers: list[int]) -> str:
+    """'layer 30' or 'layers 30, 45 and 60'."""
+    if len(layers) == 1:
+        return f"layer {layers[0]}"
+    return "layers " + ", ".join(str(n) for n in layers[:-1]) + f" and {layers[-1]}"
+
+
+def _pause(args: argparse.Namespace) -> int:
+    doc = project.read()
+    pauses = project.pauses(doc)
+    if not args.args:
+        print(f"This print pauses after {_layers(pauses)}" if pauses else "This print does not pause. Add a pause with: deli pause <layer>")
+        return 0
+
+    removing = args.args[0].lower() == "off"
+    try:
+        layers = [int(text) for text in args.args[removing:]]
+    except ValueError:
+        raise CommandError("usage: deli pause [off] [LAYER ...]; a layer is a number, as `deli view` counts them") from None
+    if any(layer < 1 for layer in layers):
+        raise CommandError("layers are counted from 1")
+    if removing:
+        if missing := [layer for layer in layers if layer not in pauses]:
+            raise CommandError(f"this print does not pause after {_layers(missing)}")
+        pauses = [layer for layer in pauses if layer not in layers] if layers else []
+    else:
+        pauses = sorted({*pauses, *layers})
+    project.set_pauses(doc, pauses)
+    _start(doc)
+    project.write(doc)
+    print(f"This print now pauses after {_layers(pauses)}" if pauses else "This print no longer pauses")
+    return 0
+
+
 def _profile_note(doc, key: str) -> str:
     """What the chosen profile has for a setting, to print under the print's own value."""
     kind = settings.kinds()[key]
@@ -585,7 +619,7 @@ def _slice(args: argparse.Namespace) -> int:
     ini = "".join(f"{key} = {value}\n" for key, value in config.items())
     what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
     try:
-        result = _engine.slice(project.engine_parts(doc), ini, str(output))
+        result = _engine.slice(project.engine_parts(doc), ini, str(output), pauses=project.pauses(doc))
     except ValueError as err:
         raise CommandError(f"the settings of this print cannot be used: {err}") from None
     except RuntimeError as err:
@@ -596,6 +630,8 @@ def _slice(args: argparse.Namespace) -> int:
     if result.filament_g:
         used += f", {result.filament_g:.1f} g"
     print(f"  {_duration(result.print_time)}, {used}")
+    for layer, height in result.pauses:
+        print(f"  pauses after layer {layer}, at {round(height, 2):g} mm")
     for warning in result.warnings:
         print(f"  warning: {warning}")
     return 0
@@ -740,7 +776,7 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
-ENGINE_API = 5  # must match API_VERSION in _engine.cpp
+ENGINE_API = 6  # must match API_VERSION in _engine.cpp
 
 
 def _completion(args: argparse.Namespace) -> int:
@@ -879,6 +915,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     move.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     move.set_defaults(run=_move)
+
+    pause = commands.add_parser(
+        "pause",
+        help="pause the print after a layer, or show where it pauses",
+        usage="deli pause [off] [LAYER ...]",
+        description="Have the printer pause once LAYER is finished, to drop in a magnet or a nut or to change the "
+        "filament: the printer's pause G-code (the setting pause_print_gcode) is written before the layer after it. "
+        "Layers are counted from 1, as the slider in `deli view` counts them, so move the slider to the last layer "
+        "you want printed before the pause. `off` with layers removes those pauses, and alone removes them all. "
+        "Without arguments, show where the print pauses.",
+    )
+    pause.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    pause.set_defaults(run=_pause)
 
     slice_ = commands.add_parser(
         "slice",

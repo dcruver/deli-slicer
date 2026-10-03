@@ -48,7 +48,7 @@ Do not reopen these without a reason.
 | Scaffold (`src/deli`, `tests`, `pyproject.toml`) | Done. `deli` only prints a hello line. |
 | `vendor/PrusaSlicer` | Shallow submodule pinned to `version_2.9.6`. |
 | `src/deli/orca.py` | Orca to PrusaSlicer converter. 28 tests pass. |
-| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 20 tests pass. See step 4. |
+| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 22 tests pass. See step 4. |
 | Dependency build in `build/deps` | Done. All 24 packages built with no patches. |
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
@@ -59,6 +59,7 @@ Do not reopen these without a reason.
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
 | `deli scale`, `deli rotate`, `deli move` (`src/deli/cli.py`) | Done. 32 tests pass. See step 5. |
 | `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
+| `deli pause` (`src/deli/cli.py`) | Done. 8 tests pass. See step 5. |
 | `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 17 tests pass. See step 6. |
 | `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. `deli send --print` has uploaded and started one real print on the Centauri Carbon (2026-10-03). See "Upload" below. |
 | `deli config` (`src/deli/config.py`) | Done. 27 tests pass. See step 5. |
@@ -306,6 +307,24 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
     lip, 0.25 mm proud of the wall, so the first layer was empty; `deli move z -0.25`
     puts the wall on the bed.
   - `deli translate` is an alias of `deli move` (argparse `aliases`).
+- **Pauses.** `deli pause LAYER...` records `pause = [..]` at the top of `deli.toml`;
+  `deli pause off [LAYER...]` removes some or all. A pause comes after its layer. The
+  layers are the G-code's: one per height at which a part or its supports lay something,
+  which is what the viewer's slider counts, so the slider is how to find the number.
+  PrusaSlicer keeps pauses by height (`Model::custom_gcode_per_print_z`, type
+  `PausePrint`) and writes each before the first layer at or above it, and the heights
+  are only known after slicing. So `_engine.slice(..., pauses=)` processes the print,
+  reads the layer heights (`layer_tops`), gives each pause the height of the layer after
+  its own, applies the model again and processes again, which redoes only the last
+  steps. It returns each pause's layer and the height printed by then; `slice` prints
+  them. A layer that is not there, or the last one, is an error at `slice`, not a pause
+  silently dropped. It cannot be combined with `complete_objects`. What is written is
+  `;PAUSE_PRINT` and the printer's `pause_print_gcode`, after the move up to the next
+  layer: `M600` on the Centauri Carbon, `M400 U1` on the P1S, PrusaSlicer's `M601`
+  when the printer has none. Decided with the user on 2026-10-03: no separate
+  colour-change command, since a pause is where the filament is changed and the
+  Centauri's pause is `M600` itself; a printer that needs another command for it can
+  set `pause_print_gcode`. Not tried on the printer.
 - **Defaults for new prints.** The config's top-level `printer` names the default
   printer; its filament and process are that printer's `filament` and `process`, as
   before. They are set with `deli printer|filament|process NAME --default`, which writes
@@ -448,6 +467,26 @@ Done. 8 tests pass.
 
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
 per-part settings, multi-filament, more host types.
+
+**Painting (idea, not started; the user's direction of 2026-10-03).** Not "paint-on
+supports" but painting in general: the browser only lets the user paint areas of a part
+and reports them, knowing nothing of what they are for; deli commands then take a
+painted area for whatever they do (supports first). This would end "the viewer only
+displays". Found while sizing it up:
+
+- libslic3r has the painting engine outside the GUI: `TriangleSelector` (`select_patch`
+  with a sphere cursor, serialize/deserialize) and, per `ModelVolume`, four kinds of
+  paint the slicer already reads: `supported_facets`, `seam_facets`,
+  `mm_segmentation_facets`, `fuzzy_skin_facets`. A general paint maps onto each of those;
+  anything else (per-region settings, say) would need modifier volumes, not paint.
+- A likely shape: the page sends brush strokes (centre, radius) in the model's own
+  coordinates, the engine replays them, and they are stored beside `deli.toml`, tied to
+  the model file's hash.
+- Still open: how a command names a painted area, the write endpoint and guarding it
+  from other web pages, telling a paint drag from an orbit drag, undo, and mapping a hit
+  on the merged `/mesh` back to a part and its original triangle.
+- Cheaper for supports alone: enforcer and blocker volumes (`ModelVolumeType::
+  SUPPORT_ENFORCER` / `SUPPORT_BLOCKER`), set by a command and only shown by the viewer.
 
 ## Second printer: Bambu Lab P1S
 

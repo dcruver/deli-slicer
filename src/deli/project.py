@@ -158,6 +158,22 @@ def set_part_transform(part: dict, key: str, values: list[float]) -> None:
         part[key] = [int(v) if v == int(v) else v for v in values]
 
 
+def pauses(doc: tomlkit.TOMLDocument) -> list[int]:
+    """The layers after which the print pauses, lowest first."""
+    layers = doc.get("pause", [])
+    if not isinstance(layers, list) or not all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in layers):
+        raise ProjectError(f"{FILE}: 'pause' should be a list of layer numbers, each 1 or more")
+    return sorted(set(layers))
+
+
+def set_pauses(doc: tomlkit.TOMLDocument, layers: list[int]) -> None:
+    """Record the layers the print pauses after, leaving nothing behind when there are none."""
+    if layers:
+        doc["pause"] = sorted(set(layers))
+    else:
+        doc.pop("pause", None)
+
+
 def _number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 

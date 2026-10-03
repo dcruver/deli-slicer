@@ -219,3 +219,20 @@ def test_a_place_off_the_bed_is_an_error(tmp_path):
 def test_copies_cannot_share_a_place():
     with pytest.raises(RuntimeError, match="copies"):
         _engine.mesh(part(place=(50, 50), count=2), CONFIG)
+
+
+def test_pauses_count_the_layers_of_supports_too(tmp_path):
+    overhang = ROOT / "vendor/PrusaSlicer/tests/data/U_overhang.obj"
+    out = tmp_path / "overhang.gcode"
+    result = _engine.slice([(str(overhang), (1, 1, 1), (0, 0, 0), 1, None, 0)], CONFIG + "support_material = 1\n", str(out), pauses=[20])
+
+    gcode = out.read_text()
+    assert gcode.count(";LAYER_CHANGE") > 55  # more than the part's own 55 layers: supports have some of their own
+    assert gcode.split(";PAUSE_PRINT")[0].count(";LAYER_CHANGE") == 21
+    ((layer, height),) = result.pauses
+    assert layer == 20 and height < 20 * 0.2  # lower than twenty layers of the part alone
+
+
+def test_pauses_cannot_be_combined_with_printing_parts_one_by_one(tmp_path):
+    with pytest.raises(RuntimeError, match="one after another"):
+        _engine.slice(part(count=2), CONFIG + "complete_objects = 1\n", str(tmp_path / "x.gcode"), pauses=[5])

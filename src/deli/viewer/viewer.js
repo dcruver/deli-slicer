@@ -190,6 +190,7 @@ function describe(state) {
   if (!state.parts.length) lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
   lines.push(state.printer ? `<span class="dim">printer</span> ${state.printer}`
                            : '<span class="dim">No printer chosen: deli printer &lt;name&gt;</span>');
+  if (state.pauses.length) lines.push(`<span class="dim">pauses after layer</span> ${state.pauses.join(', ')}`);
   if (state.gcode) lines.push(`<span class="dim">sliced</span> ${state.gcode}`);
   if (state.error) lines.push(`<span class="error">${state.error}</span>`);
   info.innerHTML = lines.join('<br>');

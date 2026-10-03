@@ -85,6 +85,8 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
         if position == 1 and typed[0] in parts:
             return ["x", "y", "z"]
         return []
+    if command == "pause":
+        return ["off"] if position == 0 else [str(layer) for layer in _quiet(lambda: project.pauses(project.read()), [])] if typed[0] == "off" else []
     if command in ("move", "translate"):
         parts = _part_names()
         if position == 0:
