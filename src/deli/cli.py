@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import textwrap
+import webbrowser
 
 from deli import _engine, config, library, orca_install, project, send, settings, view
 
@@ -70,6 +71,58 @@ def _load(args: argparse.Namespace) -> int:
     return 0
 
 
+def _config_fills(doc, starting: bool) -> list[str]:
+    """Choose for the print what it has not chosen and the config has a default for: your
+    default printer when the print is only now being started, and the filament and process
+    of the print's printer. Returns a line saying so for each."""
+    lines = []
+
+    def choose(kind: str, name: str, missing: str, why: str) -> None:
+        try:
+            path = library.find(kind, name)
+        except library.LibraryError:
+            lines.append(f"your config names the {kind} '{name}' {missing}, but it is not in your library")
+            return
+        project.select(doc, kind, name, library.fingerprint(path))
+        lines.append(f"{kind.capitalize()} set to '{name}', {why}")
+
+    if starting and not project.selected(doc, "printer").get("name") and (default := config.default_printer()):
+        choose("printer", default, "as your default", "your default")
+    if printer := project.selected(doc, "printer").get("name"):
+        about = config.printer(printer)
+        for other in ("filament", "process"):
+            default = about.get(other)
+            if default and not project.selected(doc, other).get("name"):
+                choose(other, default, "for this printer", "from your config for this printer")
+    return lines
+
+
+def _start(doc) -> None:
+    """Called before a print is written by a command that may be the first in its directory:
+    a print that is only now being started takes the config's defaults."""
+    if not project.FILE.exists():
+        for line in _config_fills(doc, starting=True):
+            print(line)
+
+
+def _make_default(doc, kind: str, name: str) -> int:
+    """`deli printer|filament|process NAME --default`: record it in the config, not in the print."""
+    if kind == "printer":
+        config.set_value(config.DEFAULT_PRINTER, name)
+        print(f"Your default printer is now '{name}': new prints start with it")
+        return 0
+    printer = project.selected(doc, "printer").get("name") or config.default_printer()
+    if not printer:
+        raise CommandError(
+            f"a default {kind} belongs to a printer, and neither this print nor your config names one; "
+            "set your default printer first with: deli printer <name> --default"
+        )
+    config.set_value(f"printers.{printer}.{kind}", name)
+    loaded = ", the one loaded in it" if kind == "filament" else ""
+    print(f"The default {kind} for '{printer}' is now '{name}'{loaded}: new prints on that printer start with it")
+    return 0
+
+
 def _choose(args: argparse.Namespace) -> int:
     """`deli printer`, `deli filament` and `deli process`: choose one from the library, or list them."""
     kind = args.command
@@ -77,6 +130,8 @@ def _choose(args: argparse.Namespace) -> int:
     current = project.selected(doc, kind)
     loaded = library.names(kind)
 
+    if args.name is None and args.default:
+        raise CommandError(f"name the {kind} to make the default: deli {kind} <name> --default")
     if args.name is None:
         # Like `git branch`: list what there is and mark the one in use.
         if not loaded and not current:
@@ -89,6 +144,8 @@ def _choose(args: argparse.Namespace) -> int:
                     notes.append("not in your library")
                 elif library.fingerprint(library.find(kind, name)) != current.get("sha256"):
                     notes.append(f"changed in your library since it was chosen; accept with: deli {kind} {name}")
+            if kind == "printer" and name == config.default_printer():
+                notes.append("your default")
             if name == about.get("filament"):
                 notes.append("loaded in the printer")
             elif name in about.get("filaments", []):
@@ -99,23 +156,17 @@ def _choose(args: argparse.Namespace) -> int:
 
     name = library.slug(args.name)
     path = library.find(kind, name)
+    if args.default:
+        return _make_default(doc, kind, name)
+    starting = not project.FILE.exists()
     project.select(doc, kind, name, library.fingerprint(path))
     print(f"{kind.capitalize()} set to '{name}'")
     if summary := _SUMMARIES[kind](library.read_settings(path)):
         print(f"  {summary}")
-    if kind == "printer":
-        # The config's defaults for this printer fill in what the print has not chosen yet.
-        about = config.printer(name)
-        for other in ("filament", "process"):
-            default = about.get(other)
-            if default and not project.selected(doc, other).get("name"):
-                try:
-                    other_path = library.find(other, default)
-                except library.LibraryError:
-                    print(f"  your config names the {other} '{default}' for this printer, but it is not in your library")
-                    continue
-                project.select(doc, other, default, library.fingerprint(other_path))
-                print(f"  {other.capitalize()} set to '{default}', from your config for this printer")
+    if kind == "printer" or starting:
+        # The config's defaults fill in what the print has not chosen yet.
+        for line in _config_fills(doc, starting):
+            print(f"  {line}")
     project.write(doc)
     return 0
 
@@ -144,6 +195,11 @@ def _add(args: argparse.Namespace) -> int:
 
     if existing := next((part for part in parts if part["file"] == stored), None):
         # Adding a part again adds copies of it.
+        if project.part_place(existing):
+            raise CommandError(
+                f"{stored} has been moved to a place of its own, and copies are placed automatically; "
+                f"give that up first with: deli move {Path(stored).stem} auto"
+            )
         count = project.part_count(existing) + args.count
         existing["count"] = count
         project.write(doc)
@@ -156,6 +212,7 @@ def _add(args: argparse.Namespace) -> int:
 
     others = len(parts)  # `parts` is the live list in the document and grows below
     project.add_part(doc, stored, args.count)
+    _start(doc)
     project.write(doc)
     print(f"Added {stored}{_copies(args.count)}")
     print(f"  {_size_text(size)}")
@@ -340,6 +397,55 @@ def _rotate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _mm(text: str) -> float:
+    try:
+        return float(text.strip().lower().removesuffix("mm"))
+    except ValueError:
+        raise CommandError(f"'{text}' is not a distance; write it in millimetres, such as 50") from None
+
+
+def _placed(part: dict) -> str:
+    at, z = project.part_place(part), project.part_height(part)
+    where = f"at {at[0]:g}, {at[1]:g} mm" if at else "placed automatically"
+    if z:
+        where += f", sunk {-z:g} mm into the bed" if z < 0 else f", raised {z:g} mm off the bed"
+    return where
+
+
+def _move(args: argparse.Namespace) -> int:
+    doc = project.read()
+    part, args.args = _transform_target(doc, args.args, "move")
+    if part is None:
+        for each in project.parts(doc):
+            print(f"{each['file']}{_copies(project.part_count(each))} is {_placed(each)}")
+        return 0
+    at, z = project.part_place(part), project.part_height(part)
+
+    if not args.args:
+        print(f"{part['file']}{_copies(project.part_count(part))} is {_placed(part)}")
+        return 0
+    elif args.args == ["auto"]:
+        at, z = None, 0.0
+    elif len(args.args) == 2 and args.args[0].lower() in AXES:
+        axis, value = _axis(args.args[0]), _mm(args.args[1])
+        if axis == 2:
+            z = value
+        elif at is None:
+            raise CommandError(f"{part['file']} is placed automatically, so give both x and y: deli move X Y")
+        else:
+            at[axis] = value
+    elif len(args.args) == 2:
+        at = [_mm(args.args[0]), _mm(args.args[1])]
+    else:
+        raise CommandError("usage: deli move [PART] X Y | x|y|z MM | auto")
+    if at and project.part_count(part) > 1:
+        raise CommandError(f"{part['file']} has {project.part_count(part)} copies, which are placed automatically; only a part without copies can be given a place")
+    project.set_part_place(part, at, z)
+    project.write(doc)
+    print(f"{part['file']} is now {_placed(part)}")
+    return 0
+
+
 def _profile_note(doc, key: str) -> str:
     """What the chosen profile has for a setting, to print under the print's own value."""
     kind = settings.kinds()[key]
@@ -376,6 +482,7 @@ def _set(args: argparse.Namespace) -> int:
     others = {name: value for part in chosen for name, value in part.items()} | overrides
     value = settings.check(key, args.value, others)
     project.set_setting(doc, key, value)
+    _start(doc)
     project.write(doc)
     print(f"{key} = {value}" + (f"  ({note})" if note else ""))
     return 0
@@ -406,6 +513,7 @@ def _supports(args: argparse.Namespace) -> int:
         for key, value in wanted.items():
             others[key] = settings.check(key, value, others)
             project.set_setting(doc, key, others[key])
+        _start(doc)
         project.write(doc)
 
     on, on_from = settings.effective(doc, "support_material")
@@ -592,6 +700,10 @@ def _config(args: argparse.Namespace) -> int:
         value = config.get(args.key)
         print(shown(value) if value is not None else f"{args.key} is not set")
         return 0
+    if args.key == config.DEFAULT_PRINTER:
+        library.find("printer", library.slug(args.value))  # must be in the library
+        config.set_value(args.key, library.slug(args.value))
+        return 0
     name, field = config.split_key(args.key)
     kinds = {"filament": "filament", "filaments": "filament", "process": "process"}
     if field in kinds:
@@ -606,10 +718,29 @@ def _config(args: argparse.Namespace) -> int:
 
 
 def _view(args: argparse.Namespace) -> int:
-    return view.serve(args.port, open_browser=not args.no_browser)
+    if args.serve is not None:
+        return view.serve(args.serve)
+    if args.stop:
+        print("Stopped the viewer for this directory" if view.stop() else "No viewer is running for this directory")
+        return 0
+
+    found = view.running()
+    try:
+        port = found[1] if found else view.start(args.port)
+    except OSError as err:
+        raise CommandError(f"cannot start the viewer: {err}") from None
+    url = f"http://127.0.0.1:{port}/"
+    if found:
+        print(f"Already viewing the print in this directory at {url}")
+    else:
+        print(f"Viewing the print in this directory at {url}")
+        print("  it stops ten minutes after its page is closed, or with: deli view --stop")
+    if not args.no_browser:
+        webbrowser.open(url)
+    return 0
 
 
-ENGINE_API = 4  # must match API_VERSION in _engine.cpp
+ENGINE_API = 5  # must match API_VERSION in _engine.cpp
 
 
 def _completion(args: argparse.Namespace) -> int:
@@ -647,9 +778,15 @@ def build_parser() -> argparse.ArgumentParser:
         choose = commands.add_parser(
             kind,
             help=f"choose the {kind} for this print, or list the loaded {plural}",
-            description=f"Choose a loaded {kind} for the print in this directory. Without a name, list the loaded {plural}.",
+            description=f"Choose a loaded {kind} for the print in this directory. Without a name, list the loaded {plural}. "
+            + (
+                "With --default, make it the printer new prints start with instead."
+                if kind == "printer"
+                else f"With --default, make it the {kind} that new prints on this print's printer, or on your default printer, start with instead."
+            ),
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library")
+        choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
         choose.set_defaults(run=_choose)
 
     add = commands.add_parser(
@@ -729,6 +866,20 @@ def build_parser() -> argparse.ArgumentParser:
     rotate.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     rotate.set_defaults(run=_rotate)
 
+    move = commands.add_parser(
+        "move",
+        aliases=["translate"],
+        help="move the part on the bed, or show where it is",
+        usage="deli move [PART] [X Y | x|y|z MM | auto]",
+        description="Put the middle of the part at X, Y on the bed, in millimetres from the bed's origin, instead of "
+        "having it arranged; the parts that were not moved are arranged around it. `x`, `y` or `z` with a distance "
+        "changes one of them: z is how far the part's underside is above the bed, so `deli move z -0.25` sinks it "
+        "0.25 mm, and what is below the bed is not printed. `auto` has it arranged again, on the bed. "
+        "Name the part when the print has more than one. Without a place, show where the parts are.",
+    )
+    move.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    move.set_defaults(run=_move)
+
     slice_ = commands.add_parser(
         "slice",
         help="slice the print to G-code",
@@ -742,10 +893,14 @@ def build_parser() -> argparse.ArgumentParser:
         "view",
         help="show the part on the bed in your browser",
         description="Open a page that shows the part on the printer's bed, placed as `deli slice` places it. "
-        "The page follows deli.toml: changes made in the shell appear in it. Runs until Ctrl-C.",
+        "The page follows deli.toml: changes made in the shell appear in it, and once the print is sliced "
+        "it shows the G-code. The page is served in the background, so the shell is free; it stops by "
+        "itself ten minutes after the page is closed.",
     )
     view_.add_argument("--port", type=int, default=0, help="port to serve on (default: any free one)")
     view_.add_argument("--no-browser", action="store_true", help="print the address instead of opening a browser")
+    view_.add_argument("--stop", action="store_true", help="stop serving the page for this directory")
+    view_.add_argument("--serve", type=int, metavar="FD", help=argparse.SUPPRESS)  # the background process: see view.start
     view_.set_defaults(run=_view)
 
     import_ = commands.add_parser(

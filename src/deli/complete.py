@@ -53,7 +53,7 @@ def _overridden() -> list[str]:
 def _config_keys() -> list[str]:
     names = _quiet(lambda: library.names("printer"), [])
     names += [key.split(".")[1] for key, _ in _quiet(config.entries, [])]
-    return sorted({f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS})
+    return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS)})
 
 
 def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str]) -> list[str]:
@@ -85,6 +85,13 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
         if position == 1 and typed[0] in parts:
             return ["x", "y", "z"]
         return []
+    if command in ("move", "translate"):
+        parts = _part_names()
+        if position == 0:
+            return parts + ["auto", "x", "y", "z"] if len(_parts()) <= 1 else parts
+        if position == 1 and typed[0] in parts:
+            return ["auto", "x", "y", "z"]
+        return []
     if command == "set":
         return sorted([*settings.ALIASES, *settings.kinds()]) if position == 0 else []
     if command == "unset":
@@ -96,6 +103,8 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
             return _quiet(lambda: library.names("filament"), [])
         if position == 1 and typed[0].endswith(".process"):
             return _quiet(lambda: library.names("process"), [])
+        if position == 1 and typed[0] == config.DEFAULT_PRINTER:
+            return _quiet(lambda: library.names("printer"), [])
         return []
     return []
 

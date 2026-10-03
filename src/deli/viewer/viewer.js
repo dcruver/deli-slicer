@@ -184,6 +184,8 @@ function describe(state) {
     if (s.some(f => f !== 1)) lines.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
     const turns = ['x', 'y', 'z'].map((a, i) => r[i] ? `${r[i]}° about ${a}` : null).filter(Boolean);
     if (turns.length) lines.push(`<span class="dim">rotate</span> ${turns.join(', ')}`);
+    if (part.at) lines.push(`<span class="dim">at</span> ${part.at.map(mm).join(', ')} mm`);
+    if (part.z) lines.push(`<span class="dim">${part.z < 0 ? 'sunk' : 'raised'}</span> ${mm(Math.abs(part.z))} mm`);
   }
   if (!state.parts.length) lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
   lines.push(state.printer ? `<span class="dim">printer</span> ${state.printer}`
@@ -203,7 +205,8 @@ async function refresh() {
       await (state.gcode ? drawToolpaths(state.roles) : drawPart());
     }
   } catch (err) {
-    info.innerHTML = `<span class="error">${err.message || 'deli view has stopped'}</span>`;
+    // A fetch that cannot reach the server at all fails with a TypeError: the viewer has gone.
+    info.innerHTML = `<span class="error">${err instanceof TypeError ? 'The viewer has stopped. Run <b>deli view</b> again.' : err.message}</span>`;
   }
 }
 

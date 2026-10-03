@@ -122,8 +122,9 @@ in your config (below).
 
 ```
 deli config printers.elegoo-centauri-carbon-0.6-nozzle.host elegoo://192.168.1.50
-deli config printers.elegoo-centauri-carbon-0.6-nozzle.filament elegoo-petg-cf-ecc
-deli config printers.elegoo-centauri-carbon-0.6-nozzle.process 0.30mm-standard-elegoo-cc-0.6-nozzle
+deli printer elegoo-centauri-carbon-0.6-nozzle --default        # the printer new prints start with
+deli filament elegoo-petg-cf-ecc --default                      # the spool loaded in it
+deli process 0.30mm-standard-elegoo-cc-0.6-nozzle --default     # its usual process
 ```
 
 This writes `~/.config/deli/config.toml`, which you can also edit by hand. `host` is
@@ -134,20 +135,28 @@ printer right now and `process` the usual process: `deli printer` uses both as
 defaults for a new print, and `deli send --print` refuses a print sliced for a
 filament other than the loaded one. Update `filament` when you change spools.
 
+The three `--default` lines write the config's `printer`, and that printer's `filament`
+and `process` (the same keys `deli config printers.<printer>.filament` sets). A print
+started in a new directory, with `deli add` say, takes all three, written into its
+`deli.toml` like any other choice. A print that wants something else chooses it with
+`deli printer`, `deli filament` or `deli process` as usual, and changing a default
+later leaves the prints you already have alone.
+
 ## Print something
 
 In a new directory:
 
 ```
-deli printer elegoo-centauri-carbon-0.6-nozzle   # chooses filament and process too, from your config
-deli add bracket.stl                            # STL, OBJ, 3MF or AMF
+deli add bracket.stl                            # STL, OBJ, 3MF or AMF; the print starts with your default printer, filament and process
+deli printer bambu-lab-p1s-0.4-nozzle           # or choose another printer for this print
 deli add bracket.stl --count 3                  # three more of it
 deli add lid.stl
 deli set infill 20%                             # or any PrusaSlicer setting by name
 deli supports organic                           # automatic supports; on, off, grid, snug, organic
 deli scale lid 110%                             # name the part when there is more than one
 deli rotate lid 45
-deli view                                       # shows the parts on the bed in your browser, live
+deli move lid 60 80                             # put it there; the other parts are arranged around it
+deli view                                       # shows the parts on the bed in your browser, live; the shell stays free
 deli slice                                      # writes the G-code next to deli.toml; the view then shows it, layer by layer
 deli send                                       # uploads it; add --print to start printing
 ```
@@ -161,8 +170,8 @@ are ordinary settings (`support_material`, `support_material_style`, ...), so
 `deli set` shows them and `deli unset supports` turns them off.
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
-`deli scale` and `deli rotate` without arguments show what is chosen. `deli remove`, `deli unset` and
-`deli scale 100%` / `deli rotate 0` undo things. Everything is in `deli.toml`, which is
+`deli scale`, `deli rotate` and `deli move` without arguments show what is chosen. `deli remove`, `deli unset` and
+`deli scale 100%` / `deli rotate 0` / `deli move auto` undo things. Everything is in `deli.toml`, which is
 plain TOML you can edit, comment and commit:
 
 ```toml
@@ -199,17 +208,18 @@ check the file arrived and start it from the printer's own screen.
 |---|---|
 | `deli import orca <kind> "<name>" [--github]` | convert an OrcaSlicer preset into your library |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
-| `deli printer\|filament\|process [name]` | choose one for this print, or list them |
+| `deli printer\|filament\|process [name]` | choose one for this print, or list them; `--default` makes it the default for new prints instead |
 | `deli add <file> [--count N]` | add a model, or more copies of it |
 | `deli remove <part> [--count N]` | take a part, or some copies, out |
 | `deli set <setting> [value]` / `deli unset` | change a setting for this print |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
+| `deli move [part] <x> <y>` | where the part's middle goes on the bed; `z -0.25` sinks it, `auto` has it arranged again. `deli translate` is the same command |
 | `deli slice [-o FILE]` | slice to G-code |
-| `deli view` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer |
+| `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
 | `deli send [FILE] [--print]` | upload to the printer in your config |
-| `deli config [key] [value]` | your printers' addresses and loaded filaments |
+| `deli config [key] [value]` | your default printer, and your printers' addresses and loaded filaments |
 | `deli completion bash\|zsh\|fish` | shell completion |
 
 `deli <command> --help` has the details.

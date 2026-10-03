@@ -190,3 +190,125 @@ def test_print_for_a_filament_other_than_the_loaded_one_is_refused(home, capsys)
     assert main(["send"]) == 1  # without --print it goes on (and fails to reach the fake address)
     out, err = capsys.readouterr()
     assert "note: this print is for" in out and "cannot reach" in err
+
+
+def chosen() -> dict:
+    """The names of the printer, filament and process the print in this directory has chosen."""
+    data = tomllib.loads(Path("deli.toml").read_text())
+    return {kind: data[kind]["name"] for kind in library.KINDS if kind in data}
+
+
+def test_default_printer_is_kept_in_the_config_not_the_print(home, capsys):
+    assert main(["printer", MK3, "--default"]) == 0
+
+    assert capsys.readouterr().out == f"Your default printer is now '{MK3}': new prints start with it\n"
+    assert tomllib.loads((home / "config.toml").read_text()) == {"printer": MK3}
+    assert not Path("deli.toml").exists()
+
+    main(["config", "printer"])
+    assert capsys.readouterr().out == f"{MK3}\n"
+    main(["printer"])
+    assert f"  {MK3} (your default)" in capsys.readouterr().out
+
+
+def test_default_filament_and_process_belong_to_the_printer(home, capsys):
+    main(["printer", MK3, "--default"])
+
+    assert main(["filament", "spare-pla", "--default"]) == 0
+    assert main(["process", QUALITY, "--default"]) == 0
+
+    assert "The default filament for 'original-prusa-i3-mk3' is now 'spare-pla', the one loaded in it" in capsys.readouterr().out
+    assert tomllib.loads((home / "config.toml").read_text()) == {"printer": MK3, "printers": {MK3: {"filament": "spare-pla", "process": QUALITY}}}
+    assert not Path("deli.toml").exists()
+
+
+def test_default_filament_without_any_printer_is_refused(home, capsys):
+    assert main(["filament", ABS, "--default"]) == 1
+
+    assert "deli printer <name> --default" in capsys.readouterr().err
+    assert not (home / "config.toml").exists()
+
+
+def test_a_default_must_be_in_the_library(home, capsys):
+    assert main(["printer", "no-such-printer", "--default"]) == 1
+    assert main(["config", "printer", "no-such-printer"]) == 1
+    assert main(["printer", "--default"]) == 1
+
+    assert not (home / "config.toml").exists()
+
+
+def test_a_new_print_starts_with_the_defaults(home, capsys):
+    main(["printer", MK3, "--default"])
+    main(["filament", "spare-pla", "--default"])
+    main(["process", QUALITY, "--default"])
+    capsys.readouterr()
+
+    assert main(["add", "cube.stl"]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"Printer set to '{MK3}', your default",
+        "Filament set to 'spare-pla', from your config for this printer",
+        f"Process set to '{QUALITY}', from your config for this printer",
+        "Added cube.stl",
+        "  20 x 20 x 20 mm",
+    ]
+    assert chosen() == {"printer": MK3, "filament": "spare-pla", "process": QUALITY}
+    assert "sha256" in tomllib.loads(Path("deli.toml").read_text())["printer"]
+    assert main(["slice"]) == 0
+
+
+def test_a_print_can_choose_something_else(home, capsys):
+    main(["printer", MK3, "--default"])
+    main(["filament", "spare-pla", "--default"])
+    main(["add", "cube.stl"])
+
+    main(["filament", ABS])
+
+    assert chosen()["filament"] == ABS
+    assert config.printer(MK3)["filament"] == "spare-pla"  # the default is as it was
+
+
+def test_a_print_already_started_is_left_alone(home, capsys):
+    main(["add", "cube.stl"])
+    main(["printer", MK3, "--default"])
+    capsys.readouterr()
+
+    main(["add", "cube.stl"])
+    main(["scale", "110%"])
+
+    assert "your default" not in capsys.readouterr().out
+    assert chosen() == {}
+
+
+def test_choosing_a_filament_first_starts_the_print_with_the_default_printer(home, capsys):
+    main(["printer", MK3, "--default"])
+    capsys.readouterr()
+
+    main(["filament", ABS])
+
+    assert f"  Printer set to '{MK3}', your default" in capsys.readouterr().out
+    assert chosen() == {"printer": MK3, "filament": ABS}
+
+
+def test_default_printer_missing_from_the_library_is_noted(home, capsys):
+    main(["printer", MK3, "--default"])
+    library.find("printer", MK3).unlink()
+    capsys.readouterr()
+
+    assert main(["add", "cube.stl"]) == 0
+
+    assert f"your config names the printer '{MK3}' as your default, but it is not in your library" in capsys.readouterr().out
+    assert chosen() == {}
+
+
+def test_default_printer_is_listed_and_unset(home, capsys):
+    main(["config", "printer", MK3])
+    main(["config", HOST, "elegoo://mk3.local"])
+    capsys.readouterr()
+
+    main(["config"])
+    assert capsys.readouterr().out == f"printer = {MK3}\n{HOST} = elegoo://mk3.local\n"
+
+    main(["config", "--unset", "printer"])
+    assert config.default_printer() is None
+    assert config.printer(MK3) == {"host": "elegoo://mk3.local"}

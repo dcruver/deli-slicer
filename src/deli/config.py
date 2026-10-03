@@ -1,6 +1,9 @@
 """The per-user configuration, `~/.config/deli/config.toml`, in the spirit of `~/.gitconfig`.
 
-It says what each printer in the library is connected to and what is loaded in it:
+It names the printer a new print starts with, and says what each printer in the library
+is connected to and what is loaded in it:
+
+    printer = "elegoo-centauri-carbon-0.6-nozzle"   # the default printer for new prints
 
     [printers.elegoo-centauri-carbon-0.6-nozzle]
     host = "elegoo://centauri.local"      # where `deli send` sends (DELI_HOST overrides)
@@ -21,6 +24,7 @@ from tomlkit.exceptions import TOMLKitError
 
 from deli import library
 
+DEFAULT_PRINTER = "printer"  # the top-level key that names the printer new prints start with
 # The keys a printer's table may hold, and whether each is a list.
 PRINTER_KEYS = {"host": False, "api_key": False, "filament": False, "process": False, "filaments": True}
 
@@ -66,21 +70,36 @@ def printer(name: str, doc: tomlkit.TOMLDocument | None = None) -> dict:
     return dict(table)
 
 
+def default_printer(doc: tomlkit.TOMLDocument | None = None) -> str | None:
+    """The printer a new print starts with, if the configuration names one."""
+    name = (read() if doc is None else doc).get(DEFAULT_PRINTER)
+    if name is not None and not isinstance(name, str):
+        raise ConfigError(f"{path()}: '{DEFAULT_PRINTER}' should be the name of a printer")
+    return name
+
+
 def split_key(key: str) -> tuple[str, str]:
     """A dotted key `printers.<name>.<key>` into the printer's name and the key."""
     parts = key.split(".")
     # A printer's name may itself hold dots: printers.elegoo-centauri-carbon-0.6-nozzle.host
     if len(parts) < 3 or parts[0] != "printers" or parts[-1] not in PRINTER_KEYS:
-        raise ConfigError(f"'{key}' is not a key deli knows; keys look like printers.<printer name>.<" + "|".join(PRINTER_KEYS) + ">")
+        raise ConfigError(f"'{key}' is not a key deli knows; the keys are {DEFAULT_PRINTER} and printers.<printer name>.<" + "|".join(PRINTER_KEYS) + ">")
     return library.slug(".".join(parts[1:-1])), parts[-1]
 
 
 def get(key: str) -> str | list[str] | None:
+    if key == DEFAULT_PRINTER:
+        return default_printer()
     name, field = split_key(key)
     return printer(name).get(field)
 
 
 def set_value(key: str, value: str) -> None:
+    if key == DEFAULT_PRINTER:
+        doc = read()
+        doc[DEFAULT_PRINTER] = value
+        write(doc)
+        return
     name, field = split_key(key)
     doc = read()
     printer(name, doc)  # validates what is there
@@ -92,6 +111,13 @@ def set_value(key: str, value: str) -> None:
 
 def unset(key: str) -> bool:
     """Remove a key; True if it was there."""
+    if key == DEFAULT_PRINTER:
+        doc = read()
+        if DEFAULT_PRINTER not in doc:
+            return False
+        del doc[DEFAULT_PRINTER]
+        write(doc)
+        return True
     name, field = split_key(key)
     doc = read()
     table = doc.get("printers", {}).get(name, {})
@@ -110,6 +136,8 @@ def entries() -> list[tuple[str, str | list[str]]]:
     """Every key and value, in file order, as `deli config` lists them."""
     doc = read()
     found = []
+    if default := default_printer(doc):
+        found.append((DEFAULT_PRINTER, default))
     printers = doc.get("printers", {})
     if not isinstance(printers, dict):
         raise ConfigError(f"{path()}: 'printers' should be a table with one table per printer")

@@ -6,15 +6,28 @@ as `slice` would place them, and `/toolpaths`, the extrusions in the G-code `sli
 wrote, supports included, for as long as nothing has changed since. The page asks for
 `/state` regularly and redraws when its `version` changes, so an edit or a slice in
 the shell shows up in the browser.
+
+The server runs in the background, so `deli view` gives the shell back at once: `start`
+opens the listening socket and hands it to a detached process, which `serve`s it until
+the page has been closed for a while or `stop` ends it. A small record in the runtime
+directory says which process and port serve which directory.
 """
 
 from __future__ import annotations
 
 import hashlib
+import http.client
 import http.server
 import json
+import os
+import signal
+import socket
 import struct
-import webbrowser
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
 from pathlib import Path
 
 from deli import _engine, project
@@ -22,6 +35,7 @@ from deli import _engine, project
 PAGES = Path(__file__).parent / "viewer"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
+IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
 
 
 def _version() -> str:
@@ -90,6 +104,7 @@ def state() -> dict:
             scale = project.part_transform(part, "scale")
             rotate = project.part_transform(part, "rotate")
             described = {"file": part["file"], "scale": scale, "rotate": rotate, "count": project.part_count(part)}
+            described |= {"at": project.part_place(part), "z": project.part_height(part)}
             try:
                 described["size"] = list(_engine.model_size(part["file"], scale=scale, rotate=rotate))
             except RuntimeError as err:
@@ -133,9 +148,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass  # the shell is the user's, not a request log
 
     def do_GET(self):
+        self.server.asked = time.monotonic()
         path = self.path.split("?")[0]
         try:
-            if path == "/state":
+            if path == "/directory":  # which print this viewer shows, for `running`
+                self._send(200, "text/plain; charset=utf-8", str(Path.cwd()).encode())
+            elif path == "/state":
                 self._send(200, "application/json", json.dumps(state()).encode())
             elif path == "/mesh":
                 self._send(200, "application/octet-stream", mesh())
@@ -167,14 +185,69 @@ def server(port: int = 0) -> http.server.ThreadingHTTPServer:
     return http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
 
 
-def serve(port: int = 0, open_browser: bool = True) -> int:
+def _record() -> Path:
+    """Where the viewer running for this directory is noted: its process and its port."""
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / "deli"
+    return runtime / f"view-{hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:16]}.json"
+
+
+def running() -> tuple[int, int] | None:
+    """The process and port of the viewer running in the background for this directory, if
+    there is one. The viewer itself is asked, so a record left behind by one that died, whose
+    port something else may have taken since, does not count."""
+    try:
+        record = json.loads(_record().read_text())
+        with urllib.request.urlopen(f"http://127.0.0.1:{record['port']}/directory", timeout=2) as response:
+            if response.read().decode() == str(Path.cwd()):
+                return record["pid"], record["port"]
+    except (OSError, ValueError, KeyError, http.client.HTTPException):
+        pass
+    return None
+
+
+def start(port: int = 0) -> int:
+    """Start a viewer for this directory in the background and return its port. The socket is
+    opened and listening before this returns, so a port that is taken is an error here and
+    the page can be opened straight away; a detached process is handed the socket to serve."""
     with server(port) as httpd:
-        url = f"http://127.0.0.1:{httpd.server_address[1]}/"
-        print(f"Viewing the print in this directory at {url} (Ctrl-C to stop)", flush=True)
-        if open_browser:
-            webbrowser.open(url)
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print()
+        port = httpd.server_address[1]
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import sys; from deli.cli import main; sys.exit(main())", "view", "--serve", str(httpd.fileno())],
+            pass_fds=[httpd.fileno()],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    record = _record()
+    record.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    record.write_text(json.dumps({"pid": child.pid, "port": port}))
+    return port
+
+
+def stop() -> bool:
+    """Stop the viewer running in the background for this directory; whether there was one."""
+    found = running()
+    _record().unlink(missing_ok=True)
+    if found:
+        os.kill(found[0], signal.SIGTERM)
+    return found is not None
+
+
+def serve(fd: int, idle: float = IDLE) -> int:
+    """Serve the viewer on the listening socket `start` handed over, until nothing has asked
+    for `idle` seconds: the page has been closed."""
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler, bind_and_activate=False)
+    httpd.socket.close()
+    httpd.socket = socket.socket(fileno=fd)
+    httpd.timeout = 1  # how long to wait for a request before looking at the clock again
+    httpd.asked = time.monotonic()
+    with httpd:
+        while time.monotonic() - httpd.asked < idle:
+            httpd.handle_request()
+    try:
+        if json.loads(_record().read_text())["pid"] == os.getpid():  # not if another viewer has taken over
+            _record().unlink()
+    except (OSError, ValueError, KeyError):
+        pass
     return 0

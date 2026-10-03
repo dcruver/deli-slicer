@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -23,6 +25,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
@@ -43,6 +46,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include <arrange-wrapper/Arrange.hpp>
 #include <arrange-wrapper/ModelArrange.hpp>
+#include <arrange-wrapper/SceneBuilder.hpp>
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -123,8 +127,10 @@ DynamicPrintConfig complete_config(DynamicPrintConfig config)
 }
 
 // A part of a print: a model file, per-axis scale factors, angles in degrees about X, Y
-// and Z (applied in that order after scaling), and how many copies to print.
-using Part = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int>;
+// and Z (applied in that order after scaling), how many copies to print, where on the bed
+// its middle is to be (x and y in millimetres; left out, it is arranged), and how far its
+// underside is above the bed (negative: sunk into it, and what is below is not printed).
+using Part = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int, std::optional<std::array<double, 2>>, double>;
 
 // The model in a file, scaled by per-axis factors and then turned about X, Y and Z, in
 // that order, by angles in degrees; every object of it is then dropped onto the bed.
@@ -147,10 +153,10 @@ Model load_transformed(const std::string &model_path, const std::array<double, 3
 // Whether every copy of every object stands within the bed's outline. PrusaSlicer's own
 // test uses the outline's convex hull, which cannot see a cut-out corner, so this one
 // clips each footprint against the outline itself.
-bool on_the_bed(const Model &model, const Points &bed)
+bool on_the_bed(const ModelObjectPtrs &objects, const Points &bed)
 {
     const Polygons outline{Polygon(bed)};
-    for (const ModelObject *object : model.objects)
+    for (const ModelObject *object : objects)
         for (size_t i = 0; i < object->instances.size(); ++i) {
             const BoundingBoxf3 box = object->instance_bounding_box(i);
             const BoundingBox footprint(Point::new_scale(box.min.x(), box.min.y()), Point::new_scale(box.max.x(), box.max.y()));
@@ -160,29 +166,71 @@ bool on_the_bed(const Model &model, const Points &bed)
     return true;
 }
 
+// Which copies PrusaSlicer's arrange places: those of the parts that were not given a place
+// of their own. The others stay where they are, and what is arranged keeps clear of them.
+struct Unplaced : arr2::SelectionMask
+{
+    std::vector<std::vector<bool>> copies; // per object, per copy
+
+    std::vector<bool> selected_objects() const override
+    {
+        std::vector<bool> objects;
+        for (const std::vector<bool> &object : copies)
+            objects.push_back(std::find(object.begin(), object.end(), true) != object.end());
+        return objects;
+    }
+    std::vector<bool> selected_instances(int object) const override { return object < int(copies.size()) ? copies[object] : std::vector<bool>{}; }
+    bool              is_wipe_tower_selected(int) const override { return false; }
+};
+
 // All the parts of a print in one model, each transformed, then arranged on the bed as
 // PrusaSlicer's command line would: spread out with the process's spacing, and a single
-// object centred. The bed may be any polygon, so a printer's unusable corner can be cut
-// out of its bed_shape and the parts keep clear of it.
+// object centred. A part that was given a place stays there, and the others are arranged
+// around it. The bed may be any polygon, so a printer's unusable corner can be cut out of
+// its bed_shape and the parts keep clear of it.
 Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &config)
 {
-    Model model;
-    for (const auto &[path, scale, rotate, count] : parts) {
-        Model one = load_transformed(path, scale, rotate, count);
-        for (const ModelObject *object : one.objects)
-            model.add_object(*object);
-    }
-    arr2::ArrangeSettings arrange;
-    arrange.set_distance_from_objects(min_object_distance(config));
     const Points bed = get_bed_shape(config);
+    Model        model;
+    Unplaced     unplaced;
+    bool         any_unplaced = false;
+    for (const auto &[path, scale, rotate, count, place, height] : parts) {
+        if (place && count > 1)
+            throw std::runtime_error(path + " has a place of its own on the bed, which a part with copies cannot have");
+        Model one = load_transformed(path, scale, rotate, count);
+        // A file is moved as a whole, so that its objects stay as they are to each other.
+        Vec3d shift(0, 0, height);
+        if (place) {
+            const Vec3d middle = one.bounding_box_exact().center();
+            shift += Vec3d((*place)[0] - middle.x(), (*place)[1] - middle.y(), 0);
+        }
+        for (ModelObject *object : one.objects)
+            for (ModelInstance *copy : object->instances)
+                copy->set_offset(copy->get_offset() + shift);
+        if (place && !on_the_bed(one.objects, bed))
+            throw std::runtime_error(path + " is not on the bed where it has been moved to");
+        for (const ModelObject *object : one.objects) {
+            model.add_object(*object);
+            unplaced.copies.emplace_back(object->instances.size(), !place);
+        }
+        any_unplaced |= !place;
+    }
+    if (!any_unplaced)
+        return model;
+
+    arr2::ArrangeSettings settings;
+    settings.set_distance_from_objects(min_object_distance(config));
+    const auto arrange_on = [&](const arr2::ArrangeBed &on) {
+        arr2::arrange(arr2::SceneBuilder{}.set_bed(on).set_arrange_settings(settings).set_model(model).set_selection(&unplaced));
+    };
 
     // On a rectangle PrusaSlicer centres what it arranges; on any other polygon it packs
     // towards an edge. So arrange on the bed's rectangle first, and only when something
     // then lands outside the real outline (in a cut-out corner) arrange on the outline.
-    arrange_objects(model, arr2::ArrangeBed{arr2::RectangleBed{BoundingBox(bed), Vec2crd{0, 0}}}, arrange);
-    if (!on_the_bed(model, bed)) {
-        arrange_objects(model, arr2::to_arrange_bed(bed, Vec2crd{0, 0}), arrange);
-        if (!on_the_bed(model, bed))
+    arrange_on(arr2::ArrangeBed{arr2::RectangleBed{BoundingBox(bed), Vec2crd{0, 0}}});
+    if (!on_the_bed(model.objects, bed)) {
+        arrange_on(arr2::to_arrange_bed(bed, Vec2crd{0, 0}));
+        if (!on_the_bed(model.objects, bed))
             throw std::runtime_error("the parts do not fit on the bed, keeping clear of the part of it that cannot be printed on");
     }
     return model;
@@ -444,7 +492,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 4;
+    m.attr("API_VERSION") = 5;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -455,9 +503,11 @@ NB_MODULE(_engine, m)
 
     m.def("slice", &slice, "parts"_a, "config"_a, "output"_a,
           "Slice the parts of a print and write G-code to `output`.\n\n"
-          "Each part is (model file, scale, rotate, count): per-axis scale factors, degrees about\n"
-          "X, Y and Z applied in that order after scaling, and the number of copies. The parts are\n"
-          "dropped onto the bed and arranged on it. `config` is PrusaSlicer INI text; settings it\n"
+          "Each part is (model file, scale, rotate, count, place, height): per-axis scale factors,\n"
+          "degrees about X, Y and Z applied in that order after scaling, the number of copies, the\n"
+          "x and y of its middle on the bed or None to have it arranged, and how far its underside\n"
+          "is above the bed (negative sinks it). The parts are dropped onto the bed and those\n"
+          "without a place are arranged on it. `config` is PrusaSlicer INI text; settings it\n"
           "leaves out take PrusaSlicer's defaults. A picture of the parts is written into the\n"
           "G-code for each size in the `thumbnails` setting.");
 

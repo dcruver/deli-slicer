@@ -92,9 +92,12 @@ def part_count(part: dict) -> int:
     return count
 
 
-def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple[str, list[float], list[float], int]]:
+def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple[str, list[float], list[float], int, list[float] | None, float]]:
     """The parts as `_engine.slice` and `_engine.mesh` take them."""
-    return [(p["file"], part_transform(p, "scale"), part_transform(p, "rotate"), part_count(p)) for p in parts(doc)]
+    return [
+        (p["file"], part_transform(p, "scale"), part_transform(p, "rotate"), part_count(p), part_place(p), part_height(p))
+        for p in parts(doc)
+    ]
 
 
 def gcode_name(doc: tomlkit.TOMLDocument) -> str:
@@ -153,6 +156,41 @@ def set_part_transform(part: dict, key: str, values: list[float]) -> None:
         part.pop(key, None)
     else:
         part[key] = [int(v) if v == int(v) else v for v in values]
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def part_place(part: dict) -> list[float] | None:
+    """Where on the bed the middle of a part was moved to, x and y; None when it is left to be arranged."""
+    if "at" not in part:
+        return None
+    at = part["at"]
+    if not isinstance(at, list) or len(at) != 2 or not all(_number(v) for v in at):
+        raise ProjectError(f"{FILE}: a part's 'at' should be two numbers, x and y")
+    return [float(v) for v in at]
+
+
+def part_height(part: dict) -> float:
+    """How far a part's underside is above the bed; negative when it is sunk into it."""
+    z = part.get("z", 0)
+    if not _number(z):
+        raise ProjectError(f"{FILE}: a part's 'z' should be a number")
+    return float(z)
+
+
+def set_part_place(part: dict, at: list[float] | None, z: float) -> None:
+    """Record where a part was moved to, leaving nothing behind for a part that is arranged, on the bed."""
+    whole = lambda v: int(v) if v == int(v) else v  # noqa: E731
+    if at is None:
+        part.pop("at", None)
+    else:
+        part["at"] = [whole(v) for v in at]
+    if z:
+        part["z"] = whole(z)
+    else:
+        part.pop("z", None)
 
 
 def chosen_profile(doc: tomlkit.TOMLDocument, kind: str) -> tuple[str, dict[str, str]] | None:

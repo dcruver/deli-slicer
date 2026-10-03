@@ -1,7 +1,10 @@
 import json
+import os
 import shutil
+import socket
 import struct
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -59,6 +62,8 @@ def test_state_has_the_part_and_the_printers_bed(url):
     main(["add", "cube.stl"])
     main(["scale", "z", "200%"])
     main(["rotate", "45"])
+    main(["move", "60", "70"])
+    main(["move", "z", "-1"])
 
     state = json.loads(get(url + "/state")[2])
 
@@ -70,6 +75,7 @@ def test_state_has_the_part_and_the_printers_bed(url):
     assert part["scale"] == [1, 1, 2]
     assert part["rotate"] == [0, 0, 45]
     assert part["count"] == 1
+    assert part["at"] == [60, 70] and part["z"] == -1
     assert part["size"] == pytest.approx([28.28, 28.28, 40], abs=0.01)
 
 
@@ -186,3 +192,75 @@ def test_broken_project_file_is_reported_not_fatal(url, job):
     assert status == 200
     assert "not valid TOML" in json.loads(body)["error"]
     assert get(url + "/mesh")[0] == 500
+
+
+@pytest.fixture
+def background(tmp_path, monkeypatch):
+    """The records of running viewers kept in a directory of the test's own, and no viewer left running."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    yield
+    view.stop()
+
+
+def test_view_serves_in_the_background_and_returns(background, job, capsys):
+    assert main(["view", "--no-browser"]) == 0
+
+    first, hint = capsys.readouterr().out.splitlines()
+    address = first.removeprefix("Viewing the print in this directory at ")
+    assert address.startswith("http://127.0.0.1:") and "deli view --stop" in hint
+    assert get(address + "directory")[2].decode() == str(job)
+    assert json.loads(get(address + "state")[2])["parts"] == []
+
+
+def test_view_again_finds_the_viewer_already_running(background, capsys):
+    main(["view", "--no-browser"])
+    address = capsys.readouterr().out.splitlines()[0].split()[-1]
+
+    assert main(["view", "--no-browser"]) == 0
+
+    assert capsys.readouterr().out == f"Already viewing the print in this directory at {address}\n"
+
+
+def test_view_stop_ends_the_viewer(background, capsys):
+    main(["view", "--no-browser"])
+    port = view.running()[1]
+    capsys.readouterr()
+
+    assert main(["view", "--stop"]) == 0
+
+    assert capsys.readouterr().out == "Stopped the viewer for this directory\n"
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            time.sleep(0.05)
+        except OSError:
+            break
+    else:
+        pytest.fail("the viewer is still answering")
+    assert view.running() is None
+
+    assert main(["view", "--stop"]) == 0
+    assert capsys.readouterr().out == "No viewer is running for this directory\n"
+
+
+def test_viewer_stops_by_itself_when_nothing_asks(background):
+    listening = view.server()
+    fd = os.dup(listening.fileno())
+    listening.server_close()
+    started = time.monotonic()
+
+    assert view.serve(fd, idle=0.2) == 0
+
+    assert time.monotonic() - started < 5
+
+
+def test_a_taken_port_is_an_error(background, capsys):
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+
+        assert main(["view", "--no-browser", "--port", str(taken.getsockname()[1])]) != 0
+
+    assert "cannot start the viewer" in capsys.readouterr().err
+    assert view.running() is None

@@ -48,7 +48,7 @@ Do not reopen these without a reason.
 | Scaffold (`src/deli`, `tests`, `pyproject.toml`) | Done. `deli` only prints a hello line. |
 | `vendor/PrusaSlicer` | Shallow submodule pinned to `version_2.9.6`. |
 | `src/deli/orca.py` | Orca to PrusaSlicer converter. 28 tests pass. |
-| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 15 tests pass. See step 4. |
+| `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 20 tests pass. See step 4. |
 | Dependency build in `build/deps` | Done. All 24 packages built with no patches. |
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
@@ -57,11 +57,11 @@ Do not reopen these without a reason.
 | `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
 | `deli add` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 11 tests pass. See step 5. |
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
-| `deli scale`, `deli rotate` (`src/deli/cli.py`) | Done. 19 tests pass. See step 5. |
+| `deli scale`, `deli rotate`, `deli move` (`src/deli/cli.py`) | Done. 32 tests pass. See step 5. |
 | `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
-| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 12 tests pass. See step 6. |
+| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 17 tests pass. See step 6. |
 | `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. `deli send --print` has uploaded and started one real print on the Centauri Carbon (2026-10-03). See "Upload" below. |
-| `deli config` (`src/deli/config.py`) | Done. 15 tests pass. See step 5. |
+| `deli config` (`src/deli/config.py`) | Done. 27 tests pass. See step 5. |
 | `deli completion` (`src/deli/complete.py`) | Done. 10 tests pass. See step 5. |
 
 Everything above is committed on `main`. There is no remote.
@@ -286,6 +286,37 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   about z. Each command prints the part's size afterwards, from
   `_engine.model_size(file, scale=, rotate=)`, which transforms the model exactly as
   `slice` does (`load_transformed` in `_engine.cpp`), so what is shown is what slices.
+- `deli move [PART] X Y` records `at = [x, y]` in the `[[part]]` table: where the middle
+  of the part's bounding box goes on the bed, in bed coordinates. `deli move x|y|z MM`
+  changes one coordinate (x or y only once the part has a place); `z` is recorded as
+  `z`, how far the part's underside is above the bed, and does not give the part a
+  place. A negative `z` sinks the part: PrusaSlicer prints it from the bed up and leaves
+  out what is below (checked: a 20 mm cube sunk 5 mm gives 75 layers, top at 15 mm). A
+  positive `z` needs supports, or PrusaSlicer refuses the empty first layer. `deli move
+  auto` drops both keys. A part with copies cannot have a place (`move` refuses, `add`
+  refuses more copies of a placed part, and the engine refuses a hand-edited file).
+  The place is not checked against the bed when it is given, since the printer may not
+  be chosen yet; `slice` and `view` say so when it is off the bed.
+  - In the engine a part is `(file, scale, rotate, count, place, height)` (API_VERSION
+    5). `load_arranged` shifts a placed file as a whole, then arranges with a selection
+    mask (`Unplaced`) so PrusaSlicer's arrange moves only the parts without a place and
+    treats the others as obstacles. It packs the arranged parts next to a placed one
+    rather than centring them. Two placed parts are not checked against each other.
+  - The case that prompted `z`: a Gridfinity bin lying on its side rests on the base's
+    lip, 0.25 mm proud of the wall, so the first layer was empty; `deli move z -0.25`
+    puts the wall on the bed.
+  - `deli translate` is an alias of `deli move` (argparse `aliases`).
+- **Defaults for new prints.** The config's top-level `printer` names the default
+  printer; its filament and process are that printer's `filament` and `process`, as
+  before. They are set with `deli printer|filament|process NAME --default`, which writes
+  the config and leaves the print alone (`filament`/`process` go to the print's printer,
+  or the default one), or with `deli config`. Decided with the user on 2026-10-03: the
+  defaults are copied into `deli.toml` when a print is started, not looked up at slice
+  time, so `deli.toml` stays complete and hash-pinned and changing a default leaves
+  existing prints alone; and they are only set explicitly, never by an ordinary choice.
+  "Started" means the command is about to write a `deli.toml` that does not exist yet
+  (`_start` and `_config_fills` in `cli.py`, called by `add`, `set`, `supports` and the
+  three choosing commands). A default that is not in the library is said so and skipped.
 - `slice` has everything it needs in `deli.toml`: `[[part]]` with `file`, `scale` and
   `rotate`; `[printer]`, `[filament]`, `[process]` with names and hashes;
   `[settings]` with overrides. `cli._profile` and `project.settings` read them.
@@ -400,6 +431,15 @@ Done. 8 tests pass.
   slider that draws the print up to a layer. Supports show as extrusions; so do the
   start G-code's purge lines (role Custom). Travel moves are not drawn. G-code written
   elsewhere with `slice -o` is not found.
+- `deli view` does not hold the shell. `view.start` opens the listening socket, so a taken
+  port is reported at once and the browser can connect straight away, and hands it
+  (`pass_fds`) to a detached process running the hidden `deli view --serve FD`. That
+  process stops when nothing has asked for ten minutes (`view.IDLE`; an open page asks
+  twice a second, and at least once a minute when its tab is hidden) or on
+  `deli view --stop`. `$XDG_RUNTIME_DIR/deli/view-<hash of the directory>.json` records
+  its pid and port; a later `deli view` reads it, asks that port for `/directory` to make
+  sure it is still this directory's viewer, and opens the same page instead of starting
+  another. Linux and macOS only (it passes a file descriptor to the child).
 - Checked in Chrome on the Centauri Carbon bed with PrusaSlicer's `U_overhang.obj` at
   500 % and supports on: the page went from the model to the toolpaths when `deli slice`
   finished, and back when `deli scale` changed the print.

@@ -1,4 +1,4 @@
-"""`deli scale` and `deli rotate`."""
+"""`deli scale`, `deli rotate` and `deli move`."""
 
 import shutil
 import tomllib
@@ -182,3 +182,95 @@ def test_with_several_parts_the_part_is_named_first(job, capsys):
     main(["scale"])
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "cube.stl is not scaled" and out[2] == "other.stl is scaled to 110%"
+
+
+def test_a_part_is_placed_automatically_until_it_is_moved(job, capsys):
+    capsys.readouterr()
+
+    assert main(["move"]) == 0
+
+    assert capsys.readouterr().out == "cube.stl is placed automatically\n"
+
+
+def test_moving_puts_the_part_at_a_place_on_the_bed(job, capsys):
+    capsys.readouterr()
+
+    assert main(["move", "50", "60.5mm"]) == 0
+
+    assert part(job)["at"] == [50, 60.5]
+    assert capsys.readouterr().out == "cube.stl is now at 50, 60.5 mm\n"
+
+
+def test_translate_is_another_name_for_move(job, capsys):
+    capsys.readouterr()
+
+    assert main(["translate", "50", "60"]) == 0
+
+    assert part(job)["at"] == [50, 60]
+    assert capsys.readouterr().out == "cube.stl is now at 50, 60 mm\n"
+
+
+def test_moving_along_one_axis(job, capsys):
+    main(["move", "50", "60"])
+    capsys.readouterr()
+
+    assert main(["move", "cube", "y", "80"]) == 0
+
+    assert part(job)["at"] == [50, 80]
+    assert capsys.readouterr().out == "cube.stl is now at 50, 80 mm\n"
+
+
+def test_one_axis_of_a_part_placed_automatically_is_refused(job, capsys):
+    assert main(["move", "x", "50"]) == 1
+
+    assert "give both x and y" in capsys.readouterr().err
+    assert "at" not in part(job)
+
+
+def test_sinking_a_part_leaves_it_placed_automatically(job, capsys):
+    capsys.readouterr()
+
+    assert main(["move", "z", "-0.25"]) == 0
+
+    assert part(job)["z"] == -0.25 and "at" not in part(job)
+    assert capsys.readouterr().out == "cube.stl is now placed automatically, sunk 0.25 mm into the bed\n"
+
+    main(["move", "z", "0"])
+    assert "z" not in part(job)
+
+
+def test_auto_gives_up_the_place_and_the_height(job, capsys):
+    main(["move", "50", "60"])
+    main(["move", "z", "2"])
+    capsys.readouterr()
+
+    assert main(["move", "auto"]) == 0
+
+    assert part(job) == {"file": "cube.stl"}
+    assert capsys.readouterr().out == "cube.stl is now placed automatically\n"
+
+
+def test_a_part_with_copies_cannot_be_given_a_place(job, capsys):
+    main(["add", "cube.stl"])
+
+    assert main(["move", "50", "60"]) == 1
+    assert "2 copies" in capsys.readouterr().err
+
+    assert main(["move", "z", "-1"]) == 0  # every copy can be sunk
+
+
+def test_a_part_with_a_place_cannot_be_given_copies(job, capsys):
+    main(["move", "50", "60"])
+
+    assert main(["add", "cube.stl"]) == 1
+
+    assert "deli move cube auto" in capsys.readouterr().err
+    assert "count" not in part(job)
+
+
+@pytest.mark.parametrize(("args", "message"), [(["far", "50"], "not a distance"), (["1", "2", "3"], "usage"), (["50"], "usage")])
+def test_bad_moves_are_refused(job, capsys, args, message):
+    assert main(["move", *args]) == 1
+
+    assert message in capsys.readouterr().err
+    assert "at" not in part(job)

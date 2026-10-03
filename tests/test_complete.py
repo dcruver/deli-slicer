@@ -65,6 +65,9 @@ def test_parts_and_axes():
     assert complete("scale") == ["cube", "cube.stl", "x", "y", "z"]
     assert complete("rotate", "cube.stl") == ["x", "y", "z"]
     assert complete("remove") == ["cube", "cube.stl"]
+    assert complete("move") == ["auto", "cube", "cube.stl", "x", "y", "z"]
+    assert complete("move", "cube") == ["auto", "x", "y", "z"]
+    assert complete("translate") == complete("move")
 
     main(["add", "other.stl"])
     assert complete("scale") == ["cube", "cube.stl", "other", "other.stl"]  # a part must be named first
@@ -91,6 +94,8 @@ def test_config_keys_and_values():
         f"printers.original-prusa-i3-mk3.{field}" for field in ("api_key", "filament", "filaments", "host", "process")
     ]
     assert complete("config", "printers.original-prusa-i3-mk3.filament") == ["generic-abs"]
+    assert complete("config", "printer", new_word=False)[0] == "printer"
+    assert complete("config", "printer") == ["original-prusa-i3-mk3"]
     main(["config", "printers.original-prusa-i3-mk3.host", "elegoo://mk3.local"])
     assert complete("config", "--unset") == ["printers.original-prusa-i3-mk3.host"]
 
