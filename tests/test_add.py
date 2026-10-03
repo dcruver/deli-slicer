@@ -63,40 +63,68 @@ def test_file_that_is_not_a_model_is_an_error(name, job, capsys):
     assert not (job / "deli.toml").exists()
 
 
-def test_adding_the_same_model_again_changes_nothing(job, capsys):
+def test_the_same_model_by_another_path_is_the_same_part(job, capsys):
     main(["add", "cube.stl"])
-    before = (job / "deli.toml").read_text()
 
     assert main(["add", "./cube.stl"]) == 0
 
-    assert "already in this print" in capsys.readouterr().out
-    assert (job / "deli.toml").read_text() == before
+    assert parts(job) == [{"file": "cube.stl", "count": 2}]
 
 
-def test_second_model_is_refused(job, capsys):
+def test_second_model_is_added_alongside(job, capsys):
     main(["add", "cube.stl"])
+    capsys.readouterr()
 
-    assert main(["add", "models/seam.3mf"]) == 1
+    assert main(["add", "models/seam.3mf"]) == 0
 
-    err = capsys.readouterr().err
-    assert "already has a part, cube.stl" in err
-    assert "deli add --replace models/seam.3mf" in err
+    assert parts(job) == [{"file": "cube.stl"}, {"file": "models/seam.3mf"}]
+    assert "2 parts in this print" in capsys.readouterr().out
+
+
+def test_copies_are_a_count_on_the_part_and_adding_again_adds_more(job, capsys):
+    assert main(["add", "cube.stl", "--count", "4"]) == 0
+    assert parts(job) == [{"file": "cube.stl", "count": 4}]
+    assert "Added cube.stl x 4" in capsys.readouterr().out
+
+    assert main(["add", "cube.stl"]) == 0
+    assert parts(job) == [{"file": "cube.stl", "count": 5}]
+    assert "Added 1 more of cube.stl: now x 5" in capsys.readouterr().out
+    assert main(["add", "cube.stl", "--count", "3"]) == 0
+    assert parts(job) == [{"file": "cube.stl", "count": 8}]
+
+    assert main(["add", "cube.stl", "--count", "0"]) == 1
+    assert "--count must be 1 or more" in capsys.readouterr().err
+
+
+def test_remove_can_take_only_some_copies(job, capsys):
+    main(["add", "cube.stl", "--count", "5"])
+    capsys.readouterr()
+
+    assert main(["remove", "cube.stl", "--count", "2"]) == 0
+    assert parts(job) == [{"file": "cube.stl", "count": 3}]
+    assert "Removed 2 of cube.stl: now x 3" in capsys.readouterr().out
+
+    main(["remove", "cube.stl", "--count", "2"])
     assert parts(job) == [{"file": "cube.stl"}]
 
+    main(["remove", "cube.stl", "--count", "7"])  # more than there are: the part goes
+    assert "part" not in tomllib.loads((job / "deli.toml").read_text())
 
-def test_replace_swaps_the_model_and_drops_its_transforms(job, capsys):
-    (job / "deli.toml").write_text(
-        '# my bracket\n\n[[part]]\nfile = "cube.stl"\nscale = [1.1, 1.0, 1.0]\n\n[printer]\nname = "mk3"\nsha256 = "0"\n'
-    )
 
-    assert main(["add", "--replace", "models/seam.3mf"]) == 0
+def test_remove_takes_a_part_out(job, capsys):
+    main(["add", "cube.stl"])
+    main(["add", "models/seam.3mf"])
+    capsys.readouterr()
 
-    text = (job / "deli.toml").read_text()
-    assert text.startswith("# my bracket\n")
-    data = tomllib.loads(text)
-    assert data["part"] == [{"file": "models/seam.3mf"}]
-    assert data["printer"] == {"name": "mk3", "sha256": "0"}
-    assert "Replaced cube.stl with models/seam.3mf\n  60 x 31 x 48 mm" in capsys.readouterr().out
+    assert main(["remove", "seam"]) == 0  # by its name without the extension
+    assert parts(job) == [{"file": "cube.stl"}]
+    assert "Removed models/seam.3mf" in capsys.readouterr().out
+
+    assert main(["remove", "bracket.stl"]) == 1
+    assert "no part named 'bracket.stl' in this print; the parts are: cube.stl" in capsys.readouterr().err
+
+    main(["remove", "cube.stl"])
+    assert "part" not in tomllib.loads((job / "deli.toml").read_text())
 
 
 def test_rest_of_the_project_file_is_kept(job):

@@ -1,4 +1,4 @@
-.PHONY: install reinstall uninstall
+.PHONY: install reinstall uninstall wheel
 
 # Put `deli` on the PATH (in ~/.local/bin), pointing at this checkout.
 # Changes to the Python sources take effect without reinstalling.
@@ -11,3 +11,8 @@ reinstall:
 
 uninstall:
 	uv tool uninstall deli
+
+# Build a wheel in dist/ with the engine inside, to hand to someone on the same kind of
+# Linux (it needs the glibc this machine has, or newer).
+wheel:
+	uv build --wheel

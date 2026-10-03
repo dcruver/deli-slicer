@@ -31,6 +31,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from deli import config
+
 KINDS = ("elegoo", "moonraker", "octoprint")
 # PrusaSlicer's host_type values that deli can send to.
 HOST_TYPES = {"octoprint": "octoprint", "moonraker": "moonraker"}
@@ -55,11 +57,21 @@ class Host:
         return urllib.parse.urlsplit(self.url).hostname or ""
 
 
-def host_from_env(host_type: str = "") -> Host:
-    """The printer in DELI_HOST. A plain http(s) URL needs `host_type` from the chosen printer."""
+def host_for(printer: str | None, host_type: str = "") -> Host:
+    """The printer's address: DELI_HOST if set, else the config's `host` for the chosen printer."""
     value = os.environ.get("DELI_HOST", "").strip()
+    where = "DELI_HOST"
+    if not value and printer:
+        value = str(config.printer(printer).get("host", "")).strip()
+        where = f"printers.{printer}.host"
     if not value:
-        raise SendError("DELI_HOST is not set; set it to the printer's address, such as elegoo://centauri.local")
+        hint = f"deli config printers.{printer}.host elegoo://centauri.local" if printer else "deli config printers.<printer>.host ..."
+        raise SendError(f"no address for the printer; set one with: {hint}  (or set DELI_HOST)")
+    return parse_host(value, host_type, where)
+
+
+def parse_host(value: str, host_type: str = "", where: str = "DELI_HOST") -> Host:
+    """A host from its address. A plain http(s) URL needs `host_type` from the chosen printer."""
     if "://" not in value:
         value = "http://" + value
     url = urllib.parse.urlsplit(value)
@@ -68,19 +80,25 @@ def host_from_env(host_type: str = "") -> Host:
         kind = HOST_TYPES.get(host_type, "")
         if not kind:
             schemes = ", ".join(f"{k}://" for k in KINDS)
-            raise SendError(f"DELI_HOST={value} does not say what kind of host the printer is; start it with one of {schemes}")
+            raise SendError(f"{where}={value} does not say what kind of host the printer is; start it with one of {schemes}")
         scheme = url.scheme
     elif kind in KINDS:
         scheme = "http"
     else:
-        raise SendError(f"DELI_HOST starts with {url.scheme}://, which deli does not know; use one of " + ", ".join(f"{k}://" for k in KINDS))
+        raise SendError(f"{where} starts with {url.scheme}://, which deli does not know; use one of " + ", ".join(f"{k}://" for k in KINDS))
     if not url.hostname:
-        raise SendError(f"DELI_HOST={value} has no host name")
+        raise SendError(f"{where}={value} has no host name")
     return Host(kind, f"{scheme}://{url.netloc}" + url.path.rstrip("/"))
 
 
+_printer_name: str | None = None  # the chosen printer, for its api_key in the config
+
+
 def api_key() -> str:
-    return os.environ.get("DELI_API_KEY", "")
+    key = os.environ.get("DELI_API_KEY", "")
+    if not key and _printer_name:
+        key = str(config.printer(_printer_name).get("api_key", ""))
+    return key
 
 
 # ---------------------------------------------------------------- HTTP
@@ -314,8 +332,12 @@ def _octoprint_upload(host: Host, path: Path, start: bool, progress: Progress) -
 # ---------------------------------------------------------------- entry point
 
 
-def send(host: Host, path: Path, start: bool = False, level: bool = False, progress: Progress = lambda sent, total: None) -> None:
-    """Upload `path` to the printer and, if `start`, begin printing it."""
+def send(host: Host, path: Path, start: bool = False, level: bool = False, progress: Progress = lambda sent, total: None,
+         printer: str | None = None) -> None:
+    """Upload `path` to the printer and, if `start`, begin printing it. `printer` is the chosen
+    printer's name, for the API key the config may hold for it."""
+    global _printer_name
+    _printer_name = printer
     if host.kind == "elegoo":
         _elegoo_check(host)
         _elegoo_upload(host, path, progress)

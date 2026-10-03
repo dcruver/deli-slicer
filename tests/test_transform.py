@@ -161,3 +161,24 @@ def test_rest_of_the_part_and_file_is_kept(job):
     assert text.startswith("# bracket\n") and "# the model" in text
     assert part(job) == {"file": "cube.stl", "rotate": [0, 0, 45], "scale": [1.1, 1.1, 1.1]}
     assert tomllib.loads(text)["printer"]["name"] == "mk3"
+
+
+def test_with_several_parts_the_part_is_named_first(job, capsys):
+    shutil.copy(CUBE, job / "other.stl")
+    main(["add", "other.stl"])
+    capsys.readouterr()
+
+    assert main(["scale", "110%"]) == 1
+    assert "this print has 2 parts; say which: deli scale <part> ..." in capsys.readouterr().err
+
+    assert main(["scale", "other", "110%"]) == 0
+    assert main(["rotate", "other.stl", "x", "90"]) == 0
+    assert main(["rotate", "cube.stl", "45"]) == 0
+    data = tomllib.loads((job / "deli.toml").read_text())["part"]
+    assert data[0] == {"file": "cube.stl", "rotate": [0, 0, 45]}
+    assert data[1] == {"file": "other.stl", "scale": [1.1, 1.1, 1.1], "rotate": [90, 0, 0]}
+
+    capsys.readouterr()
+    main(["scale"])
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "cube.stl is not scaled" and out[2] == "other.stl is scaled to 110%"

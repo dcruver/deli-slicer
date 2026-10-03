@@ -150,3 +150,17 @@ def test_part_that_does_not_fit_is_an_error(job, capsys):
     assert main(["slice"]) == 1
 
     assert "cannot slice cube.stl" in capsys.readouterr().err
+
+
+def test_several_parts_slice_together_into_a_file_named_after_the_directory(job, capsys):
+    main(["add", "cube.stl", "--count", "2"])
+    shutil.copy(CUBE, job / "other.stl")
+    main(["add", "other.stl"])
+    capsys.readouterr()
+
+    assert main(["slice"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Sliced cube.stl x 3, other.stl to job.gcode" in out  # the fixture added one, the test two more
+    gcode = (job / "job.gcode").read_text()
+    assert len(set(re.findall(r"; printing object .*", gcode))) == 4  # three cubes and the other part

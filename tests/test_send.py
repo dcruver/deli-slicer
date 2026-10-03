@@ -184,27 +184,27 @@ def elegoo(monkeypatch):
 
 def test_host_comes_from_the_environment_with_its_kind_in_the_scheme(monkeypatch):
     monkeypatch.setenv("DELI_HOST", "elegoo://centauri.local/")
-    host = send.host_from_env()
+    host = send.host_for(None)
 
     assert (host.kind, host.url, host.hostname) == ("elegoo", "http://centauri.local", "centauri.local")
 
     monkeypatch.setenv("DELI_HOST", "moonraker://voron.local:7125")
-    assert send.host_from_env().url == "http://voron.local:7125"
+    assert send.host_for(None).url == "http://voron.local:7125"
 
 
 def test_plain_http_host_needs_the_printers_host_type(monkeypatch):
     monkeypatch.setenv("DELI_HOST", "http://ender.local")
 
-    assert send.host_from_env("octoprint").kind == "octoprint"
+    assert send.host_for(None, "octoprint").kind == "octoprint"
     with pytest.raises(send.SendError, match="does not say what kind of host"):
-        send.host_from_env("")
+        send.host_for(None, "")
     with pytest.raises(send.SendError, match="does not say what kind of host"):
-        send.host_from_env("duet")  # PrusaSlicer knows it; deli cannot send to it
+        send.host_for(None, "duet")  # PrusaSlicer knows it; deli cannot send to it
 
 
 def test_unset_or_unknown_host_is_an_error(monkeypatch, capsys):
     assert main(["send"]) == 1
-    assert "DELI_HOST is not set" in capsys.readouterr().err
+    assert "no address for the printer" in capsys.readouterr().err
 
     monkeypatch.setenv("DELI_HOST", "ftp://printer")
     assert main(["send"]) == 1

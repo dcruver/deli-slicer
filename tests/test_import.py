@@ -82,7 +82,7 @@ def test_broken_inherits_is_an_error(tmp_path):
 
 def test_convert_each_kind(presets):
     printer = presets.convert("printer", MACHINE)
-    assert printer.converted.settings["bed_shape"] == "0x0,256x0,256x256,0x256"
+    assert printer.converted.settings["bed_shape"] == "0x0,246x0,246x20,256x20,256x256,0x256"  # the unusable corner cut out
     assert printer.printer_name is None
 
     process = presets.convert("process", "mine")
@@ -151,6 +151,85 @@ def test_bundled_centauri_profiles_match_the_shipped_ones(home):
     for kind, name in [("printer", MACHINE), ("process", PROCESS), ("filament", "Elegoo PLA @ECC")]:
         loaded = orca_install.into_library(presets.convert(kind, name))
         expected = library.read_settings(ROOT / "profiles" / f"{shipped[kind]}.ini")
-        assert loaded.settings.keys() - {library.ID_KEYS[kind]} == expected.keys()
+        assert loaded.settings.keys() - {library.ID_KEYS[kind]} == expected.keys() - {library.ID_KEYS[kind]}
         differing = {k for k in expected if loaded.settings[k] != expected[k]}
         assert differing <= {"first_layer_extrusion_width"}  # 0.80 in the file, 0.8 once through the engine
+
+
+# ---------------------------------------------------------------- from GitHub
+
+
+@pytest.fixture
+def github(monkeypatch):
+    """OrcaSlicer's repository as `--github` sees it, served from tests/data/orca: a vendor
+    listing, a vendor index, and the preset files. Records what was fetched."""
+    vendor = "Elegoo"
+    paths = {}
+    index = {f"{kind}_list": [] for kind in ("machine", "process", "filament")}
+    for kind in ("machine", "process", "filament"):
+        for file in sorted((FIXTURE / kind).glob("*.json")):
+            name = json.loads(file.read_text())["name"]
+            index[f"{kind}_list"].append({"name": name, "sub_path": f"{kind}/{file.name}"})
+            paths[f"{vendor}/{kind}/{file.name}"] = file.read_text()
+    pages = {
+        orca_install._LISTING.format(repo=orca_install.REPOSITORY, ref="main"): json.dumps(
+            [{"name": "Elegoo.json", "type": "file"}, {"name": "Elegoo", "type": "dir"}, {"name": "BBL.json", "type": "file"}]
+        ),
+        orca_install._RAW.format(repo=orca_install.REPOSITORY, ref="main", path="Elegoo.json"): json.dumps(index),
+        orca_install._RAW.format(repo=orca_install.REPOSITORY, ref="main", path="BBL.json"): json.dumps({"machine_list": [{"name": "Bambu Lab X1 Carbon", "sub_path": "machine/x1c.json"}]}),
+    }
+    for path, text in paths.items():
+        pages[orca_install._RAW.format(repo=orca_install.REPOSITORY, ref="main", path=__import__("urllib.parse").parse.quote(path))] = text
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        if url not in pages:
+            raise library.LibraryError(f"cannot read {url}: HTTP Error 404")
+        return pages[url]
+
+    monkeypatch.setattr(orca_install, "_fetch", fetch)
+    return fetched
+
+
+def test_github_lists_vendors_and_their_presets(github):
+    presets = orca_install.Presets(github="main")
+
+    assert list(presets.vendors) == ["BBL", "Elegoo"]
+    assert presets.names("printer") == ["Bambu Lab X1 Carbon", MACHINE]
+    assert presets.names("process") == [PROCESS, f"{PROCESS} - Mine"]  # fdm_process_base left out
+
+
+def test_github_fetches_only_the_files_a_preset_needs(github):
+    presets = orca_install.Presets(github="main")
+
+    imported = presets.convert("process", "mine")
+
+    assert imported.converted.settings["perimeters"] == "3"
+    assert imported.source == f"https://github.com/SoftFever/OrcaSlicer/blob/main/resources/profiles/Elegoo/process/mine.json"
+    files = [url for url in github if url.endswith(".json") and "/Elegoo/" in url]
+    assert len(files) == 3  # mine.json, its parent, and the machine it fits; not the filament or the base
+
+
+def test_github_import_records_the_page_as_the_source(github, home, capsys):
+    assert main(["import", "orca", "printer", MACHINE, "--github"]) == 0
+
+    stored = library.find("printer", "elegoo-centauri-carbon-0.6-nozzle").read_text()
+    assert "# source: https://github.com/SoftFever/OrcaSlicer/blob/main/resources/profiles/Elegoo/machine/centauri-0.6.json" in stored
+    assert "Imported printer" in capsys.readouterr().out
+    assert not any("BBL.json" in url for url in github)  # the name begins with the vendor's, so only its index was read
+
+
+def test_github_vendor_narrows_the_search(github):
+    presets = orca_install.Presets(github="main", vendor="Elegoo")
+
+    assert list(presets.vendors) == ["Elegoo"]
+    assert presets.find("printer", "carbon") == MACHINE
+    assert not any("api.github.com" in url for url in github)  # no listing needed
+
+
+def test_github_missing_preset_is_an_error(github):
+    presets = orca_install.Presets(github="main")
+
+    with pytest.raises(orca_install.OrcaError, match="no printer named or containing 'voron'"):
+        presets.find("printer", "voron")

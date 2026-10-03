@@ -48,7 +48,7 @@ def test_state_describes_an_empty_directory(url):
 
     assert status == 200
     state = json.loads(body)
-    assert state["part"] is None
+    assert state["parts"] == []
     assert state["printer"] is None
     assert state["bed"] == view.DEFAULT_BED
 
@@ -65,10 +65,12 @@ def test_state_has_the_part_and_the_printers_bed(url):
     assert state["printer"] == "original-prusa-i3-mk3"
     assert state["bed"] == [[0, 0], [250, 0], [250, 210], [0, 210]]
     assert state["height"] == 210
-    assert state["part"]["file"] == "cube.stl"
-    assert state["part"]["scale"] == [1, 1, 2]
-    assert state["part"]["rotate"] == [0, 0, 45]
-    assert state["part"]["size"] == pytest.approx([28.28, 28.28, 40], abs=0.01)
+    (part,) = state["parts"]
+    assert part["file"] == "cube.stl"
+    assert part["scale"] == [1, 1, 2]
+    assert part["rotate"] == [0, 0, 45]
+    assert part["count"] == 1
+    assert part["size"] == pytest.approx([28.28, 28.28, 40], abs=0.01)
 
 
 def test_version_changes_when_the_print_does(url):
@@ -96,6 +98,15 @@ def test_mesh_is_the_part_centred_on_the_bed(url):
     assert (min(vertices[2::3]), max(vertices[2::3])) == (0, 20)  # resting on the bed
     indices = struct.unpack_from(f"<{n_triangles * 3}I", body, 8 + n_vertices * 12)
     assert max(indices) == 7
+
+
+def test_mesh_has_every_copy_of_every_part(url):
+    main(["add", "cube.stl", "--count", "3"])
+
+    status, _, body = get(url + "/mesh")
+
+    assert status == 200
+    assert struct.unpack_from("<II", body) == (24, 36)
 
 
 def test_mesh_without_a_part_is_empty(url):

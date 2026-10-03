@@ -27,12 +27,19 @@ Do not reopen these without a reason.
 - **Packaging:** `scikit-build-core` builds the extension and nanobind binds it, using
   Python's stable ABI. Chosen with distribution in mind: users get one prebuilt wheel
   per platform with the engine inside, and only wheel builders need `build/deps`.
+  `make wheel` builds it. `requires-python` is 3.12, matching the `cp312-abi3` tag
+  (it said 3.13 until the wheel was tried in a 3.12 venv). The wheel from this machine
+  needs glibc 2.43 (Ubuntu 26.04) because that is what it was linked against; a
+  wheel for older distributions needs a manylinux container build, and there is no
+  Docker or Podman here. Checked: the wheel installs into a clean 3.12 venv and
+  slices.
 - **Profiles:** PrusaSlicer INI. Orca JSON is converted on import. The first target is
   the user's Elegoo Centauri Carbon with the **0.6 mm nozzle**.
 - **Viewer:** one pane that shows the part on the bed, opened by `deli view`. It only
   displays. Planned as a local three.js page that redraws when `deli.toml` changes.
-- **Revision 1 scope:** a single object. Multi-object selection and bed arrangement
-  come later.
+- **Parts:** a print holds any number of parts, each with copies, arranged on the bed
+  by PrusaSlicer's arrange. Settings apply to the whole print; per-part settings are
+  not built.
 
 ## What exists
 
@@ -54,6 +61,8 @@ Do not reopen these without a reason.
 | `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
 | `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 8 tests pass. See step 6. |
 | `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. Not tried on the real printer. See "Upload" below. |
+| `deli config` (`src/deli/config.py`) | Done. 15 tests pass. See step 5. |
+| `deli completion` (`src/deli/complete.py`) | Done. 10 tests pass. See step 5. |
 
 Everything above is committed on `main`. There is no remote.
 
@@ -237,7 +246,14 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
     `nozzle_high_flow`); `settings.kinds()` files each under the first.
   - `[settings]` is where `slice` will read overrides from; hand-written `true`/`false`
     and numbers are read as the engine's strings by `project.settings`.
-  - Not built: shell completion over setting names.
+  - Shell completion (`src/deli/complete.py`, `deli completion bash|zsh|fish`): one
+    hidden `deli __complete INDEX WORDS...` answers from the parser (commands, options,
+    choices), the library (printer/filament/process names), the print (part names,
+    changed settings), the settings list with short names, the config keys, and Orca's
+    preset names for `import`. `__files__` tells the script to complete file names. The
+    bash script quotes answers with `printf %q`; zsh uses it through `bashcompinit`;
+    fish has its own. Checked in bash by driving `_deli` by hand; zsh and fish are not
+    installed here. 10 tests.
 - `deli scale [x|y|z] FACTOR` and `deli rotate [x|y|z] DEGREES` record `scale` and
   `rotate` in the `[[part]]` table, three numbers each, as `_engine.slice` takes them.
   Both are absolute: a scale is of the model in its file, so `deli scale 100%` undoes
@@ -257,13 +273,43 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   prints the estimated time, filament length and weight, and the engine's warnings.
   With the Centauri Carbon profiles it writes the same G-code as step 3, apart from
   the object name.
+- **Config file** (`~/.config/deli/config.toml`, `src/deli/config.py`, `deli config`):
+  per-printer `host`, `api_key`, `filament` (the spool loaded now, and the default for
+  new prints), `process` (default), `filaments` (on hand). Keys are dotted,
+  `printers.<name>.<key>`, and a printer's name may hold dots. `deli printer X` fills in
+  the config's filament and process when the print has none; `deli filament` marks
+  "loaded in the printer" and "on hand"; `deli send --print` refuses when the print's
+  filament is not the loaded one (and notes it without `--print`), which is the mistake
+  it exists to catch: a print sliced for PLA with PETG-CF in the printer. Values set
+  with `deli config` are checked: filaments and processes must be in the library, a
+  host's scheme must be one deli knows. 15 tests.
 - **Decided:** `slice` refuses when a chosen profile is not in the library, has no hash
   in `deli.toml`, or has changed in the library since it was chosen, and says how to
   accept the new version (`deli printer NAME`). All three kinds must be chosen. A
   print is physical, so the settings it runs with are the ones that were looked at.
 - `slice` writes nothing to `deli.toml`.
-- The excluded bed corner (below) is not enforced; a single centred object never
-  reaches it. It matters once parts can be placed.
+- **Several parts and copies.** `deli add` appends, and adding a file already in the
+  print adds copies (`count` on the part; `--count N` adds N). `deli remove <part>`
+  takes it out, `--count N` only some copies. `scale` and `rotate` take the part's name
+  first (file with or without extension) when there is more than one, and list every
+  part when given nothing. `_engine.slice` and `_engine.mesh` take a list of
+  (file, scale, rotate, count); copies are instances of one object. The G-code is
+  named after the part when there is one, after the directory otherwise
+  (`project.gcode_name`), and `send` uses the same name.
+- **Placement** (`load_arranged` in `_engine.cpp`): PrusaSlicer's arrange with the
+  process's spacing. On a rectangular bed it centres; on any other polygon it packs
+  towards an edge, so deli arranges on the bed's rectangle first and only falls back
+  to the real outline when something lands outside it. PrusaSlicer's own
+  inside-the-bed test uses the outline's convex hull (its comment says so), so it
+  cannot see a cut-out corner; `on_the_bed` clips each footprint against the outline
+  with Clipper. If even the fallback leaves something outside, `slice` refuses.
+- **The Centauri's unusable corner** (246–256 × 0–20 mm, Orca's `bed_exclude_area`)
+  is now cut out of the converted `bed_shape`: `orca.bed_without` turns a rectangular
+  bed minus a rectangle at its edge or corner into one polygon
+  (`0x0,246x0,246x20,256x20,256x256,0x256`); an island or a cut right across is left
+  as a note. The shipped printer profile was regenerated with it, so its hash changed.
+  A single centred part never reaches the corner, so step 3's G-code is unchanged
+  apart from the `bed_shape` line in its settings block.
 - The files in `profiles/` were written by a one-off script from Orca's stock presets
   (not the user's copy, which only adds the printer's network address). They produce
   the same G-code as the files validated in step 3.
@@ -285,6 +331,18 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
     vendor it reaches. Indexing everything together gave the Centauri process a
     different vendor's base (3 walls, other speeds) and was the first bug found.
   - Presets with `instantiation = false` (the bases) are not listed or matched.
+  - `--github [REF]` (default `main`) reads the same files from OrcaSlicer's repository
+    instead: the vendor list from GitHub's contents API (60 requests an hour without a
+    token, and it answers with a 301 that must be followed), each vendor's index
+    `resources/profiles/<Vendor>.json` (name → `sub_path`), and preset files on demand
+    through `library.fetch`. `GitHubVendor` and `LocalVendor` share an interface; the
+    user's own presets are not read with `--github`. Vendors whose name begins the
+    preset's are tried first, so "Elegoo ..." costs one index fetch; `--vendor` skips
+    the listing. Bases are recognised by their `fdm_` prefix, since the index does not
+    carry `instantiation`. The library records the file's GitHub page as the source.
+    Checked against the real repository: the Centauri trio imports in a few seconds
+    and matches the shipped profiles apart from `silent_mode`, which Orca's main
+    branch no longer sets. Tests use a fake repository built from `tests/data/orca`.
   - Importing the bundled Centauri Carbon presets gives the shipped `profiles/`
     exactly, apart from `0.80` being written `0.8`.
 
@@ -309,11 +367,12 @@ Done. 8 tests pass.
   `deli scale` / `deli rotate` from another shell redrawing the page.
 - The viewer's files are in the wheel (checked with `uv build --wheel`; 25.7 MB, of
   which the unstripped `.so` is 65 MB before compression).
-- Not shown: G-code, supports, the excluded bed corner, more than one part.
+- Shows every part and copy where arrange put them, and the bed outline with its cut-out corner. Not shown: G-code, supports.
 
 ### Later
 
-Multi-object selection, bed arrangement, thumbnails.
+The list under "Not done yet" in `README.md` is the one to keep current. In short:
+per-part settings, a supports command, thumbnails, multi-filament, more host types.
 
 ## Profile conversion: what is settled and what is open
 
@@ -331,8 +390,8 @@ Source profiles on this machine:
 
 Open items, each a real behaviour difference from Orca:
 
-- **Excluded bed corner.** Orca keeps parts out of 246–256 × 0–20 mm. PrusaSlicer has
-  no such setting, so deli must enforce it when placing parts.
+- **Excluded bed corner.** Done: Orca's 246–256 × 0–20 mm is cut out of the converted
+  `bed_shape`, and the engine keeps parts off it (see step 5, "Placement").
 - **Flow.** Orca's process has `print_flow_ratio` 0.97 on top of the filament's 0.98.
   It is not applied. Decide whether deli multiplies it into `extrusion_multiplier` when
   it merges the three profiles. Measured on the test cube: deli extrudes 1489.8 mm of
@@ -369,10 +428,12 @@ Open items, each a real behaviour difference from Orca:
   `Tlp_Switch` 0; `Data.Ack` 0 means started. The websocket client is deli's own
   (RFC 6455, text frames only). All of this is tested against fake servers in
   `tests/test_send.py` and **has not been tried on the real printer.**
-  - The address comes from `DELI_HOST`, whose scheme names the kind of host:
-    `elegoo://`, `moonraker://`, `octoprint://`. Plain `http://` works when the chosen
-    printer's `host_type` is one deli can send to (moonraker, octoprint). `DELI_API_KEY`
-    holds the key OctoPrint needs and Moonraker may. Moonraker (`POST
+  - The address is the chosen printer's `host` in `~/.config/deli/config.toml`, or
+    `DELI_HOST`, which overrides it as git's environment variables override its config.
+    Its scheme names the kind of host: `elegoo://`, `moonraker://`, `octoprint://`.
+    Plain `http://` works when the chosen printer's `host_type` is one deli can send to
+    (moonraker, octoprint). The key OctoPrint needs and Moonraker may is the printer's
+    `api_key` in the config, or `DELI_API_KEY`. Moonraker (`POST
     /server/files/upload`, `root=gcodes`, `print=`) and OctoPrint (`POST
     /api/files/local`, `select=`, `print=`, `X-Api-Key`) are written from their API
     documentation and tested against fakes only.

@@ -4,6 +4,7 @@
 // the settings of an INI file into printer, process and filament, and one that lists
 // the settings of each of those kinds.
 
+#include <algorithm>
 #include <array>
 #include <map>
 #include <sstream>
@@ -20,10 +21,12 @@
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/BuildVolume.hpp"
+#include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/FileReader.hpp"
 #include "libslic3r/Model.hpp"
@@ -112,10 +115,14 @@ DynamicPrintConfig complete_config(DynamicPrintConfig config)
     return config;
 }
 
+// A part of a print: a model file, per-axis scale factors, angles in degrees about X, Y
+// and Z (applied in that order after scaling), and how many copies to print.
+using Part = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int>;
+
 // The model in a file, scaled by per-axis factors and then turned about X, Y and Z, in
 // that order, by angles in degrees; every object of it is then dropped onto the bed.
 Model load_transformed(const std::string &model_path, const std::array<double, 3> &scale,
-                       const std::array<double, 3> &rotate)
+                       const std::array<double, 3> &rotate, int count = 1)
 {
     Model model = FileReader::load_model(model_path);
     for (ModelObject *object : model.objects) {
@@ -123,23 +130,63 @@ Model load_transformed(const std::string &model_path, const std::array<double, 3
         object->rotate(Geometry::deg2rad(rotate[0]), X);
         object->rotate(Geometry::deg2rad(rotate[1]), Y);
         object->rotate(Geometry::deg2rad(rotate[2]), Z);
+        for (int copy = 1; copy < count; ++copy)
+            object->add_instance(*object->instances.front());
         object->ensure_on_bed();
     }
     return model;
 }
 
-SliceResult slice(const std::string &model_path, const std::string &config_ini, const std::string &output_path,
-                  std::array<double, 3> scale, std::array<double, 3> rotate)
+// Whether every copy of every object stands within the bed's outline. PrusaSlicer's own
+// test uses the outline's convex hull, which cannot see a cut-out corner, so this one
+// clips each footprint against the outline itself.
+bool on_the_bed(const Model &model, const Points &bed)
+{
+    const Polygons outline{Polygon(bed)};
+    for (const ModelObject *object : model.objects)
+        for (size_t i = 0; i < object->instances.size(); ++i) {
+            const BoundingBoxf3 box = object->instance_bounding_box(i);
+            const BoundingBox footprint(Point::new_scale(box.min.x(), box.min.y()), Point::new_scale(box.max.x(), box.max.y()));
+            if (!diff_ex(Polygons{footprint.polygon()}, outline).empty())
+                return false;
+        }
+    return true;
+}
+
+// All the parts of a print in one model, each transformed, then arranged on the bed as
+// PrusaSlicer's command line would: spread out with the process's spacing, and a single
+// object centred. The bed may be any polygon, so a printer's unusable corner can be cut
+// out of its bed_shape and the parts keep clear of it.
+Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &config)
+{
+    Model model;
+    for (const auto &[path, scale, rotate, count] : parts) {
+        Model one = load_transformed(path, scale, rotate, count);
+        for (const ModelObject *object : one.objects)
+            model.add_object(*object);
+    }
+    arr2::ArrangeSettings arrange;
+    arrange.set_distance_from_objects(min_object_distance(config));
+    const Points bed = get_bed_shape(config);
+
+    // On a rectangle PrusaSlicer centres what it arranges; on any other polygon it packs
+    // towards an edge. So arrange on the bed's rectangle first, and only when something
+    // then lands outside the real outline (in a cut-out corner) arrange on the outline.
+    arrange_objects(model, arr2::ArrangeBed{arr2::RectangleBed{BoundingBox(bed), Vec2crd{0, 0}}}, arrange);
+    if (!on_the_bed(model, bed)) {
+        arrange_objects(model, arr2::to_arrange_bed(bed, Vec2crd{0, 0}), arrange);
+        if (!on_the_bed(model, bed))
+            throw std::runtime_error("the parts do not fit on the bed, keeping clear of the part of it that cannot be printed on");
+    }
+    return model;
+}
+
+SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini, const std::string &output_path)
 {
     nb::gil_scoped_release release;
 
     DynamicPrintConfig config = complete_config(parse_config(config_ini));
-    Model              model  = load_transformed(model_path, scale, rotate);
-
-    // Same placement as PrusaSlicer's command line: arranged on the bed, which centres a single object.
-    arr2::ArrangeSettings arrange;
-    arrange.set_distance_from_objects(min_object_distance(config));
-    arrange_objects(model, arr2::to_arrange_bed(get_bed_shape(config), Vec2crd{0, 0}), arrange);
+    Model              model  = load_arranged(parts, config);
 
     Print print;
     print.set_status_silent();
@@ -177,22 +224,18 @@ std::array<double, 3> model_size(const std::string &model_path, std::array<doubl
     return {size.x(), size.y(), size.z()};
 }
 
-// The triangles of a model scaled, turned and dropped onto the bed as `slice` does, then
-// centred over a point of the bed. Vertices are float32 x, y, z; triangles are three
-// uint32 vertex indices each.
-std::pair<nb::bytes, nb::bytes> mesh(const std::string &model_path, std::array<double, 3> scale,
-                                     std::array<double, 3> rotate, std::array<double, 2> centre)
+// The triangles of every part, every copy, placed on the bed exactly as `slice` places
+// them. Vertices are float32 x, y, z; triangles are three uint32 vertex indices each.
+std::pair<nb::bytes, nb::bytes> mesh(const std::vector<Part> &parts, const std::string &config_ini)
 {
     std::vector<float>    vertices;
     std::vector<uint32_t> triangles;
     {
         nb::gil_scoped_release release;
 
-        Model       model  = load_transformed(model_path, scale, rotate);
-        const Vec3d middle = model.bounding_box_exact().center();
-        const Vec3d offset(centre[0] - middle.x(), centre[1] - middle.y(), 0.);
-        for (ModelObject *object : model.objects) {
-            object->translate_instances(offset);
+        const DynamicPrintConfig config = complete_config(parse_config(config_ini));
+        const Model              model  = load_arranged(parts, config);
+        for (const ModelObject *object : model.objects) {
             const TriangleMesh m    = object->mesh();
             const uint32_t     base = uint32_t(vertices.size() / 3);
             for (const Vec3f &v : m.its.vertices)
@@ -248,6 +291,9 @@ NB_MODULE(_engine, m)
 {
     m.doc() = "In-process slicing with PrusaSlicer's libslic3r.";
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
+    // Bumped whenever a call's signature changes, so that Python run against an older
+    // build of this module (an editable install after a C++ change) says so plainly.
+    m.attr("API_VERSION") = 2;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -256,12 +302,12 @@ NB_MODULE(_engine, m)
         .def_ro("filament_g", &SliceResult::filament_g, "Filament used, in grams.")
         .def_ro("warnings", &SliceResult::warnings, "Warnings PrusaSlicer raised while validating the print.");
 
-    m.def("slice", &slice, "model"_a, "config"_a, "output"_a, nb::kw_only(),
-          "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},
-          "Slice one model file and write G-code to `output`.\n\n"
-          "`config` is PrusaSlicer INI text; settings it leaves out take PrusaSlicer's defaults.\n"
-          "`scale` holds per-axis factors and `rotate` degrees about X, Y and Z, applied in that\n"
-          "order after scaling. The object is then dropped onto the bed and centred.");
+    m.def("slice", &slice, "parts"_a, "config"_a, "output"_a,
+          "Slice the parts of a print and write G-code to `output`.\n\n"
+          "Each part is (model file, scale, rotate, count): per-axis scale factors, degrees about\n"
+          "X, Y and Z applied in that order after scaling, and the number of copies. The parts are\n"
+          "dropped onto the bed and arranged on it. `config` is PrusaSlicer INI text; settings it\n"
+          "leaves out take PrusaSlicer's defaults.");
 
     m.def("model_size", &model_size, "model"_a, nb::kw_only(),
           "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},
@@ -269,11 +315,9 @@ NB_MODULE(_engine, m)
           "`rotate` are applied as `slice` applies them.\n\n"
           "Raises RuntimeError when the file cannot be read as a model.");
 
-    m.def("mesh", &mesh, "model"_a, nb::kw_only(),
-          "scale"_a = std::array<double, 3>{1., 1., 1.}, "rotate"_a = std::array<double, 3>{0., 0., 0.},
-          "centre"_a = std::array<double, 2>{0., 0.},
-          "The triangles of a model after `scale` and `rotate`, resting on z = 0 and centred over\n"
-          "`centre`: a pair of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
+    m.def("mesh", &mesh, "parts"_a, "config"_a,
+          "The triangles of every part and copy, placed on the bed as `slice` places them: a pair\n"
+          "of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
 
     m.def("split_config", &split_config, "config"_a,
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"

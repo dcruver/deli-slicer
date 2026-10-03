@@ -284,6 +284,59 @@ def _finish(result: Converted, source: Orca, handled: set[str], why: str) -> Con
     return result
 
 
+def _rectangle(points: list[str]) -> tuple[float, float, float, float] | None:
+    """The bounds of four Orca points ("0x0", ...) when they are an axis-aligned rectangle."""
+    pts = {tuple(float(n) for n in point.split("x")) for point in points}
+    xs, ys = {x for x, _ in pts}, {y for _, y in pts}
+    if len(pts) != 4 or len(xs) != 2 or len(ys) != 2:
+        return None
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _turn(points: list[tuple[float, float]], quarters: int) -> list[tuple[float, float]]:
+    """Points turned by quarter turns anticlockwise about the origin."""
+    for _ in range(quarters % 4):
+        points = [(-y, x) for x, y in points]
+    return points
+
+
+def bed_without(printable_area: list[str], exclude: list[str]) -> list[str] | None:
+    """Orca's printable_area with its bed_exclude_area cut out, as one polygon in PrusaSlicer's
+    bed_shape form, when the excluded rectangle bites into an edge or a corner of a
+    rectangular bed. None when it cannot be one polygon (an island, or a cut right across)."""
+    bed, cut = _rectangle(printable_area), _rectangle(exclude)
+    if bed is None or cut is None:
+        return None
+    bx0, by0, bx1, by1 = bed
+    ex0, ey0, ex1, ey1 = max(cut[0], bx0), max(cut[1], by0), min(cut[2], bx1), min(cut[3], by1)
+    if ex0 >= ex1 or ey0 >= ey1:
+        return list(printable_area)  # nothing of it is on the bed
+
+    def bounds(x0, y0, x1, y1, quarters):
+        turned = _turn([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], quarters)
+        return min(x for x, _ in turned), min(y for _, y in turned), max(x for x, _ in turned), max(y for _, y in turned)
+
+    for quarters in range(4):
+        # Turn the picture until the cut touches the bottom edge, and the right edge if it touches two.
+        bx0, by0, bx1, by1 = bounds(*bed, quarters)
+        ex0, ey0, ex1, ey1 = bounds(*cut, quarters)
+        touches = {"bottom": ey0 <= by0, "right": ex1 >= bx1, "top": ey1 >= by1, "left": ex0 <= bx0}
+        sides = [side for side, touched in touches.items() if touched]
+        if len(sides) not in (1, 2) or sides in (["bottom", "top"], ["right", "left"]):
+            return None
+        if sides == ["bottom"]:
+            outline = [(bx0, by0), (ex0, by0), (ex0, ey1), (ex1, ey1), (ex1, by0), (bx1, by0), (bx1, by1), (bx0, by1)]
+        elif sides == ["bottom", "right"]:
+            outline = [(bx0, by0), (ex0, by0), (ex0, ey1), (bx1, ey1), (bx1, by1), (bx0, by1)]
+        else:
+            continue
+        outline = _turn(outline, -quarters)
+        start = outline.index(min(outline, key=lambda p: (p[1], p[0])))  # begin at the front-left corner
+        outline = outline[start:] + outline[:start]
+        return [f"{x:g}x{y:g}" for x, y in outline]
+    return None
+
+
 def convert_machine(machine: Orca) -> Converted:
     result = Converted()
     out, handled = result.settings, set()
@@ -316,10 +369,18 @@ def convert_machine(machine: Orca) -> Converted:
     out["machine_limits_usage"] = "time_estimate_only"
 
     if machine.get("bed_exclude_area"):
-        result.notes.append(
-            "bed_exclude_area " + _joined(machine["bed_exclude_area"]) + " is not enforced: "
-            "PrusaSlicer has no excluded bed region, so keep parts out of it by hand."
-        )
+        # PrusaSlicer has no excluded bed region, but its bed may be any polygon: cut the
+        # region out of the bed, and parts are kept off it when they are arranged.
+        cut = bed_without(machine.get("printable_area", []), machine["bed_exclude_area"])
+        if cut:
+            out["bed_shape"] = ",".join(cut)
+            handled.add("bed_exclude_area")
+            result.notes.append("bed_exclude_area " + _joined(machine["bed_exclude_area"]) + " is cut out of bed_shape, so parts are kept off it.")
+        else:
+            result.notes.append(
+                "bed_exclude_area " + _joined(machine["bed_exclude_area"]) + " is not enforced: "
+                "it cannot be cut out of bed_shape as one polygon, so keep parts out of it by hand."
+            )
     if "change_filament_gcode" in machine:
         result.notes.append("change_filament_gcode was not converted: single-filament prints only.")
     if machine.get("host_type"):

@@ -64,10 +64,12 @@ def stored_path(path: Path) -> str:
         return path.as_posix()
 
 
-def add_part(doc: tomlkit.TOMLDocument, file: str) -> None:
+def add_part(doc: tomlkit.TOMLDocument, file: str, count: int = 1) -> None:
     parts(doc)
     part = tomlkit.table()
     part["file"] = file
+    if count > 1:
+        part["count"] = count
     if "part" not in doc:
         if doc:
             doc.add(tomlkit.nl())  # a blank line after whatever the file already holds
@@ -75,10 +77,32 @@ def add_part(doc: tomlkit.TOMLDocument, file: str) -> None:
     doc["part"].append(part)
 
 
-def replace_part(part: dict, file: str) -> None:
-    """Put another model in a part's place. Its scaling and rotation belonged to the old model and go."""
-    part.clear()
-    part["file"] = file
+def remove_part(doc: tomlkit.TOMLDocument, part: dict) -> None:
+    found = doc["part"]
+    del found[next(i for i, p in enumerate(found) if p is part)]
+    if not found:
+        del doc["part"]
+
+
+def part_count(part: dict) -> int:
+    """How many copies of a part to print."""
+    count = part.get("count", 1)
+    if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+        raise ProjectError(f"{FILE}: a part's 'count' should be a whole number of copies, 1 or more")
+    return count
+
+
+def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple[str, list[float], list[float], int]]:
+    """The parts as `_engine.slice` and `_engine.mesh` take them."""
+    return [(p["file"], part_transform(p, "scale"), part_transform(p, "rotate"), part_count(p)) for p in parts(doc)]
+
+
+def gcode_name(doc: tomlkit.TOMLDocument) -> str:
+    """Where `slice` writes: named after the part when there is one, after the directory otherwise."""
+    found = parts(doc)
+    if len(found) == 1:
+        return Path(found[0]["file"]).with_suffix(".gcode").name
+    return f"{Path.cwd().resolve().name}.gcode"
 
 
 def settings(doc: tomlkit.TOMLDocument) -> dict[str, str]:

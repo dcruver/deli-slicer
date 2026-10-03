@@ -8,7 +8,7 @@ from pathlib import Path
 
 import textwrap
 
-from deli import _engine, library, orca_install, project, send, settings, view
+from deli import _engine, config, library, orca_install, project, send, settings, view
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -81,23 +81,42 @@ def _choose(args: argparse.Namespace) -> int:
         # Like `git branch`: list what there is and mark the one in use.
         if not loaded and not current:
             print(f"No {kind} is loaded. Add one with: deli load {kind} <source>")
+        about = config.printer(project.selected(doc, "printer").get("name", "")) if kind == "filament" else {}
         for name in sorted({*loaded, *filter(None, [current.get("name")])}):
-            note = ""
+            notes = []
             if name == current.get("name"):
                 if name not in loaded:
-                    note = " (not in your library)"
+                    notes.append("not in your library")
                 elif library.fingerprint(library.find(kind, name)) != current.get("sha256"):
-                    note = f" (changed in your library since it was chosen; accept with: deli {kind} {name})"
+                    notes.append(f"changed in your library since it was chosen; accept with: deli {kind} {name}")
+            if name == about.get("filament"):
+                notes.append("loaded in the printer")
+            elif name in about.get("filaments", []):
+                notes.append("on hand")
+            note = f" ({'; '.join(notes)})" if notes else ""
             print(f"{'*' if name == current.get('name') else ' '} {name}{note}")
         return 0
 
     name = library.slug(args.name)
     path = library.find(kind, name)
     project.select(doc, kind, name, library.fingerprint(path))
-    project.write(doc)
     print(f"{kind.capitalize()} set to '{name}'")
     if summary := _SUMMARIES[kind](library.read_settings(path)):
         print(f"  {summary}")
+    if kind == "printer":
+        # The config's defaults for this printer fill in what the print has not chosen yet.
+        about = config.printer(name)
+        for other in ("filament", "process"):
+            default = about.get(other)
+            if default and not project.selected(doc, other).get("name"):
+                try:
+                    other_path = library.find(other, default)
+                except library.LibraryError:
+                    print(f"  your config names the {other} '{default}' for this printer, but it is not in your library")
+                    continue
+                project.select(doc, other, default, library.fingerprint(other_path))
+                print(f"  {other.capitalize()} set to '{default}', from your config for this printer")
+    project.write(doc)
     return 0
 
 
@@ -109,47 +128,87 @@ def _size_text(size) -> str:
     return " x ".join(f"{round(side, 2):g}" for side in size) + " mm"
 
 
+def _copies(count: int) -> str:
+    return f" x {count}" if count > 1 else ""
+
+
 def _add(args: argparse.Namespace) -> int:
     doc = project.read()
     parts = project.parts(doc)
     path = Path(args.file).expanduser()
     if not path.is_file():
         raise project.ProjectError(f"no such file: {args.file}")
+    if args.count < 1:
+        raise CommandError("--count must be 1 or more")
     stored = project.stored_path(path)
 
-    if any(part["file"] == stored for part in parts):
-        print(f"{stored} is already in this print")
+    if existing := next((part for part in parts if part["file"] == stored), None):
+        # Adding a part again adds copies of it.
+        count = project.part_count(existing) + args.count
+        existing["count"] = count
+        project.write(doc)
+        print(f"Added {args.count} more of {stored}: now x {count}")
         return 0
-    # Revision 1 prints a single part.
-    if parts and not args.replace:
-        raise project.ProjectError(
-            f"this print already has a part, {parts[0]['file']}, and deli prints one part at a time for now; "
-            f"to print this one instead: deli add --replace {args.file}"
-        )
     try:
         size = _engine.model_size(str(path))
     except RuntimeError as err:
         raise project.ProjectError(f"cannot read {args.file} as a model: {err}") from None
 
-    if parts:
-        print(f"Replaced {parts[0]['file']} with {stored}")
-        project.replace_part(parts[0], stored)
-    else:
-        print(f"Added {stored}")
-        project.add_part(doc, stored)
+    others = len(parts)  # `parts` is the live list in the document and grows below
+    project.add_part(doc, stored, args.count)
     project.write(doc)
+    print(f"Added {stored}{_copies(args.count)}")
     print(f"  {_size_text(size)}")
+    if others:
+        print(f"  {others + 1} parts in this print")
     return 0
 
 
 AXES = "xyz"
 
 
-def _the_part(doc) -> dict:
+def _parts_of(doc) -> list[dict]:
     parts = project.parts(doc)
     if not parts:
         raise CommandError("this print has no part yet; add one with: deli add <file>")
+    return parts
+
+
+def _matches(part: dict, name: str) -> bool:
+    """A part can be named by its file as stored, its file name, or that without the extension."""
+    return name in (part["file"], Path(part["file"]).name, Path(part["file"]).stem)
+
+
+def _part_named(parts: list[dict], name: str) -> dict:
+    found = [part for part in parts if _matches(part, name)]
+    if not found:
+        raise CommandError(f"no part named '{name}' in this print; the parts are: " + ", ".join(p["file"] for p in parts))
+    return found[0]
+
+
+def _one_part(parts: list[dict], command: str) -> dict:
+    """The only part, for a command that did not name one."""
+    if len(parts) > 1:
+        raise CommandError(f"this print has {len(parts)} parts; say which: deli {command} <part> ...  (" + ", ".join(p["file"] for p in parts) + ")")
     return parts[0]
+
+
+def _remove(args: argparse.Namespace) -> int:
+    doc = project.read()
+    part = _part_named(_parts_of(doc), args.part)
+    count = project.part_count(part)
+    if args.count is not None and 0 < args.count < count:
+        left = count - args.count
+        if left > 1:
+            part["count"] = left
+        else:
+            part.pop("count", None)
+        print(f"Removed {args.count} of {part['file']}: now{_copies(left) or ' one'}")
+    else:
+        project.remove_part(doc, part)
+        print(f"Removed {part['file']}{_copies(count)}")
+    project.write(doc)
+    return 0
 
 
 def _size(part: dict, scale: list[float], rotate: list[float]):
@@ -190,29 +249,49 @@ def _percent(factors: list[float]) -> str:
     return " x ".join(f"{factor * 100:g}%" for factor in factors)
 
 
+def _transform_target(doc, args: list[str], command: str) -> tuple[dict | None, list[str]]:
+    """The part a scale or rotate command is about, and the rest of its arguments. With no
+    arguments at all there is no target: every part is shown."""
+    parts = _parts_of(doc)
+    if not args:
+        return None, []
+    if any(_matches(part, args[0]) for part in parts):
+        return _part_named(parts, args[0]), args[1:]
+    return _one_part(parts, command), args
+
+
+def _show_scale(part: dict) -> None:
+    scale = project.part_transform(part, "scale")
+    state = f"is scaled to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "is not scaled"
+    print(f"{part['file']}{_copies(project.part_count(part))} {state}")
+    print(f"  {_size_text(_size(part, scale, project.part_transform(part, 'rotate')))}")
+
+
 def _scale(args: argparse.Namespace) -> int:
     doc = project.read()
-    part = _the_part(doc)
+    part, args.args = _transform_target(doc, args.args, "scale")
+    if part is None:
+        for each in project.parts(doc):
+            _show_scale(each)
+        return 0
     scale = project.part_transform(part, "scale")
     rotate = project.part_transform(part, "rotate")
 
     if len(args.args) > 2:
-        raise CommandError("usage: deli scale [x|y|z] FACTOR")
+        raise CommandError("usage: deli scale [PART] [x|y|z] FACTOR")
     if not args.args:
-        state = f"is scaled to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "is not scaled"
-        print(f"{part['file']} {state}")
+        _show_scale(part)
+        return 0
     elif len(args.args) == 1:
         scale = [_factor(args.args[0], None)] * 3
     else:
         axis = _axis(args.args[0])
         scale[axis] = _factor(args.args[1], _size(part, project.IDENTITY["scale"], project.IDENTITY["rotate"])[axis])
-    if args.args:
-        done = f"to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "back to its size in the file"
-        print(f"Scaled {part['file']} {done}")
+    done = f"to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "back to its size in the file"
+    print(f"Scaled {part['file']} {done}")
     size = _size(part, scale, rotate)
-    if args.args:
-        project.set_part_transform(part, "scale", scale)
-        project.write(doc)
+    project.set_part_transform(part, "scale", scale)
+    project.write(doc)
     print(f"  {_size_text(size)}")
     return 0
 
@@ -228,26 +307,35 @@ def _turned(rotate: list[float]) -> str:
     return ", ".join(f"{angle:g}° about {axis}" for axis, angle in zip(AXES, rotate) if angle)
 
 
+def _show_rotation(part: dict) -> None:
+    rotate = project.part_transform(part, "rotate")
+    state = f"is rotated {_turned(rotate)}" if rotate != project.IDENTITY["rotate"] else "is not rotated"
+    print(f"{part['file']}{_copies(project.part_count(part))} {state}")
+    print(f"  {_size_text(_size(part, project.part_transform(part, 'scale'), rotate))}")
+
+
 def _rotate(args: argparse.Namespace) -> int:
     doc = project.read()
-    part = _the_part(doc)
+    part, args.args = _transform_target(doc, args.args, "rotate")
+    if part is None:
+        for each in project.parts(doc):
+            _show_rotation(each)
+        return 0
     scale = project.part_transform(part, "scale")
     rotate = project.part_transform(part, "rotate")
 
     if len(args.args) > 2:
-        raise CommandError("usage: deli rotate [x|y|z] DEGREES")
+        raise CommandError("usage: deli rotate [PART] [x|y|z] DEGREES")
     if not args.args:
-        state = f"is rotated {_turned(rotate)}" if rotate != project.IDENTITY["rotate"] else "is not rotated"
-        print(f"{part['file']} {state}")
-    else:
-        # Without an axis, turn the part on the bed: about z.
-        axis = _axis(args.args[0]) if len(args.args) == 2 else 2
-        rotate[axis] = _degrees(args.args[-1])
-        print(f"Rotated {part['file']} {_turned(rotate) or 'back to how it lies in the file'}")
+        _show_rotation(part)
+        return 0
+    # Without an axis, turn the part on the bed: about z.
+    axis = _axis(args.args[0]) if len(args.args) == 2 else 2
+    rotate[axis] = _degrees(args.args[-1])
+    print(f"Rotated {part['file']} {_turned(rotate) or 'back to how it lies in the file'}")
     size = _size(part, scale, rotate)
-    if args.args:
-        project.set_part_transform(part, "rotate", rotate)
-        project.write(doc)
+    project.set_part_transform(part, "rotate", rotate)
+    project.write(doc)
     print(f"  {_size_text(size)}")
     return 0
 
@@ -339,24 +427,23 @@ def _duration(seconds: float) -> str:
 
 def _slice(args: argparse.Namespace) -> int:
     doc = project.read()
-    part = _the_part(doc)
-    scale = project.part_transform(part, "scale")
-    rotate = project.part_transform(part, "rotate")
+    parts = _parts_of(doc)
     config: dict[str, str] = {}
     for kind in library.KINDS:
         config |= _accepted_profile(doc, kind)
     config |= project.settings(doc)
 
-    output = Path(args.output) if args.output else Path(part["file"]).with_suffix(".gcode").name
+    output = Path(args.output) if args.output else Path(project.gcode_name(doc))
     ini = "".join(f"{key} = {value}\n" for key, value in config.items())
+    what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
     try:
-        result = _engine.slice(part["file"], ini, str(output), scale=scale, rotate=rotate)
+        result = _engine.slice(project.engine_parts(doc), ini, str(output))
     except ValueError as err:
         raise CommandError(f"the settings of this print cannot be used: {err}") from None
     except RuntimeError as err:
-        raise CommandError(f"cannot slice {part['file']}: {err}") from None
+        raise CommandError(f"cannot slice {what}: {err}") from None
 
-    print(f"Sliced {part['file']} to {result.gcode_path}")
+    print(f"Sliced {what} to {result.gcode_path}")
     used = f"{result.filament_mm / 1000:.2f} m of filament"
     if result.filament_g:
         used += f", {result.filament_g:.1f} g"
@@ -367,7 +454,7 @@ def _slice(args: argparse.Namespace) -> int:
 
 
 def _import(args: argparse.Namespace) -> int:
-    presets = orca_install.Presets([Path(folder) for folder in args.orca])
+    presets = orca_install.Presets([Path(folder) for folder in args.orca], github=args.github, vendor=args.vendor)
     if args.name is None:
         # Like `deli printer`: without a name, list what there is.
         for name in presets.names(args.kind):
@@ -414,22 +501,67 @@ def _send(args: argparse.Namespace) -> int:
         if not path.is_file():
             raise CommandError(f"no such file: {args.file}")
     else:
-        path = Path(Path(_the_part(doc)["file"]).with_suffix(".gcode").name)
+        _parts_of(doc)
+        path = Path(project.gcode_name(doc))
         if not path.is_file():
             raise CommandError(f"{path} does not exist; slice first with: deli slice")
         if project.FILE.exists() and project.FILE.stat().st_mtime > path.stat().st_mtime:
             raise CommandError(f"deli.toml has changed since {path} was sliced; run deli slice again, or name the file to send")
 
     printer = project.chosen_profile(doc, "printer")
-    host = send.host_from_env(printer[1].get("host_type", "") if printer else "")
+    printer_name = project.selected(doc, "printer").get("name")
+    host = send.host_for(printer_name, printer[1].get("host_type", "") if printer else "")
+
+    # The config may say what is loaded in the printer; starting a print for another filament is refused.
+    loaded = config.printer(printer_name).get("filament") if printer_name else None
+    chosen = project.selected(doc, "filament").get("name")
+    if loaded and chosen and loaded != chosen and not args.file:
+        if args.start:
+            raise CommandError(
+                f"this print is for the filament '{chosen}', but your config says '{loaded}' is loaded in the printer; "
+                f"choose it with: deli filament {loaded}  (or, after changing spools: deli config printers.{printer_name}.filament {chosen})"
+            )
+        print(f"  note: this print is for '{chosen}', but your config says '{loaded}' is loaded in the printer")
     print(f"Sending {path} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
 
     def progress(sent: int, total: int) -> None:
         if total > send.CHUNK:
             print(f"  {sent / 1e6:.1f} of {total / 1e6:.1f} MB", flush=True)
 
-    send.send(host, path, start=args.start, level=args.level, progress=progress)
+    send.send(host, path, start=args.start, level=args.level, progress=progress, printer=printer_name)
     print("Printing started." if args.start else f"Sent. Start it from the printer, or send again with --print.")
+    return 0
+
+
+def _config(args: argparse.Namespace) -> int:
+    def shown(value) -> str:
+        return ", ".join(value) if isinstance(value, list) else str(value)
+
+    if args.unset:
+        if not config.unset(args.unset):
+            print(f"{args.unset} is not set")
+        return 0
+    if args.key is None:
+        entries = config.entries()
+        if not entries:
+            print(f"Nothing is configured yet. Set something with: deli config printers.<printer>.host elegoo://...  ({config.path()})")
+        for key, value in entries:
+            print(f"{key} = {shown(value)}")
+        return 0
+    if args.value is None:
+        value = config.get(args.key)
+        print(shown(value) if value is not None else f"{args.key} is not set")
+        return 0
+    name, field = config.split_key(args.key)
+    kinds = {"filament": "filament", "filaments": "filament", "process": "process"}
+    if field in kinds:
+        for one in args.value.split(","):
+            library.find(kinds[field], library.slug(one.strip()))  # must be in the library
+    elif field == "host" and not args.value.startswith(("http://", "https://")):
+        send.parse_host(args.value, where=args.key)  # a plain http host is checked against the printer's host_type when sending
+    config.set_value(args.key, args.value)
+    if library.slug(name) not in library.names("printer"):
+        print(f"  note: no printer named '{name}' is in your library yet")
     return 0
 
 
@@ -437,7 +569,26 @@ def _view(args: argparse.Namespace) -> int:
     return view.serve(args.port, open_browser=not args.no_browser)
 
 
-def main(argv: list[str] | None = None) -> int:
+ENGINE_API = 2  # must match API_VERSION in _engine.cpp
+
+
+def _completion(args: argparse.Namespace) -> int:
+    from deli import complete
+
+    print(complete.script(args.shell))
+    return 0
+
+
+def _complete(args: argparse.Namespace) -> int:
+    """`deli __complete INDEX WORD...`, called by the shell completion scripts."""
+    from deli import complete
+
+    for candidate in complete.candidates(build_parser(), args.index, args.words):
+        print(candidate)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="deli", description="Git-style slicer front end for 3D printing.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
 
@@ -467,8 +618,17 @@ def main(argv: list[str] | None = None) -> int:
         description="Add a model file to the print in this directory.",
     )
     add.add_argument("file", help="an STL, OBJ, 3MF or AMF file")
-    add.add_argument("--replace", action="store_true", help="print this model instead of the one already added")
+    add.add_argument("--count", type=int, default=1, metavar="N", help="add N copies of it (adding a part again adds more)")
     add.set_defaults(run=_add)
+
+    remove = commands.add_parser(
+        "remove",
+        help="take a part, or some copies of it, out of this print",
+        description="Take a part out of the print in this directory, or with --count only some of its copies.",
+    )
+    remove.add_argument("part", help="the part's file, or its name without the extension")
+    remove.add_argument("--count", type=int, metavar="N", help="remove only N copies")
+    remove.set_defaults(run=_remove)
 
     short = ", ".join(f"{alias} ({name})" for alias, name in settings.ALIASES.items())
     set_ = commands.add_parser(
@@ -493,10 +653,11 @@ def main(argv: list[str] | None = None) -> int:
     scale = commands.add_parser(
         "scale",
         help="scale the part, or show its scale",
-        usage="deli scale [x|y|z] [FACTOR]",
-        description="Scale the part. `deli scale 110%%` scales it evenly, `deli scale x 110%%` along one axis, and "
+        usage="deli scale [PART] [x|y|z] [FACTOR]",
+        description="Scale a part. `deli scale 110%%` scales it evenly, `deli scale x 110%%` along one axis, and "
         "`deli scale z 30mm` makes it that size along an axis. A scale is of the model as it is in its file, "
-        "so `deli scale 100%%` undoes it. Without arguments, show the scale and the size it gives.",
+        "so `deli scale 100%%` undoes it. With more than one part, name the part first. Without arguments, "
+        "show each part's scale and the size it gives.",
     )
     scale.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     scale.set_defaults(run=_scale)
@@ -504,11 +665,11 @@ def main(argv: list[str] | None = None) -> int:
     rotate = commands.add_parser(
         "rotate",
         help="rotate the part, or show its rotation",
-        usage="deli rotate [x|y|z] [DEGREES]",
-        description="Rotate the part. `deli rotate 45` turns it 45 degrees on the bed, about z; `deli rotate x 90` "
+        usage="deli rotate [PART] [x|y|z] [DEGREES]",
+        description="Rotate a part. `deli rotate 45` turns it 45 degrees on the bed, about z; `deli rotate x 90` "
         "turns it about another axis. Rotations are applied about x, then y, then z, after scaling, and each is of "
-        "the model as it is in its file, so `deli rotate 0` undoes it. Without arguments, show the rotation and "
-        "the size it gives.",
+        "the model as it is in its file, so `deli rotate 0` undoes it. With more than one part, name the part first. "
+        "Without arguments, show each part's rotation and the size it gives.",
     )
     rotate.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     rotate.set_defaults(run=_rotate)
@@ -516,10 +677,10 @@ def main(argv: list[str] | None = None) -> int:
     slice_ = commands.add_parser(
         "slice",
         help="slice the print to G-code",
-        description="Slice the part with the chosen printer, filament and process and the changed settings, "
-        "writing G-code next to deli.toml.",
+        description="Slice the parts with the chosen printer, filament and process and the changed settings, "
+        "writing G-code next to deli.toml: named after the part when there is one, after the directory otherwise.",
     )
-    slice_.add_argument("-o", "--output", help="where to write the G-code (default: the part's name with .gcode)")
+    slice_.add_argument("-o", "--output", help="where to write the G-code")
     slice_.set_defaults(run=_slice)
 
     view_ = commands.add_parser(
@@ -537,7 +698,8 @@ def main(argv: list[str] | None = None) -> int:
         help="convert a preset from the OrcaSlicer on this machine into your library",
         description="Convert one of OrcaSlicer's presets, bundled or your own, into a PrusaSlicer-style printer, "
         "process or filament in your library. The name can be part of Orca's name for it, if that is enough to "
-        "tell it apart. Without a name, list Orca's presets of that kind.",
+        "tell it apart. Without a name, list Orca's presets of that kind. With --github, OrcaSlicer need not "
+        "be installed: the presets are fetched from its repository.",
     )
     import_.add_argument("app", choices=["orca"], help="the slicer to import from")
     import_.add_argument("kind", choices=library.KINDS)
@@ -546,6 +708,9 @@ def main(argv: list[str] | None = None) -> int:
     import_.add_argument("--name", dest="name_as", help="name to store it under (default: Orca's name)")
     import_.add_argument("-o", "--output", help="write the converted INI file here instead of into your library")
     import_.add_argument("--orca", action="append", default=[], metavar="DIR", help="a folder of Orca presets to look in as well")
+    import_.add_argument("--github", nargs="?", const="main", metavar="REF",
+                         help="read the presets from OrcaSlicer's GitHub repository instead of this machine, at a branch or tag (default: main)")  # fmt: skip
+    import_.add_argument("--vendor", help="only this vendor's presets (Elegoo, BBL, Creality, ...); saves fetching every vendor's index with --github")
     import_.set_defaults(run=_import)
 
     send_ = commands.add_parser(
@@ -560,9 +725,41 @@ def main(argv: list[str] | None = None) -> int:
     send_.add_argument("--level", action="store_true", help="with --print on an Elegoo printer: level the bed first")
     send_.set_defaults(run=_send)
 
-    args = parser.parse_args(argv)
+    config_ = commands.add_parser(
+        "config",
+        help="read or change your deli configuration (~/.config/deli/config.toml)",
+        description="Read or change ~/.config/deli/config.toml, which says what each printer in your library is "
+        "connected to and what is loaded in it. Keys are printers.<printer>.<host|api_key|filament|process|filaments>. "
+        "Without a key, list everything; with a key, show it; with a key and a value, set it.",
+    )
+    config_.add_argument("key", nargs="?", help="such as printers.elegoo-centauri-carbon-0.6-nozzle.host")
+    config_.add_argument("value", nargs="?", help="the new value; a list as names separated by commas")
+    config_.add_argument("--unset", metavar="KEY", help="remove a key")
+    config_.set_defaults(run=_config)
+
+    completion = commands.add_parser(
+        "completion",
+        help="print a shell completion script",
+        description="Print a completion script for your shell. bash: add `eval \"$(deli completion bash)\"` to ~/.bashrc; "
+        "zsh: the same with zsh in ~/.zshrc; fish: `deli completion fish > ~/.config/fish/completions/deli.fish`.",
+    )
+    completion.add_argument("shell", choices=["bash", "zsh", "fish"])
+    completion.set_defaults(run=_completion)
+
+    hidden = commands.add_parser("__complete", help=argparse.SUPPRESS)
+    hidden.add_argument("index", type=int)
+    hidden.add_argument("words", nargs="*")
+    hidden.set_defaults(run=_complete)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    if getattr(_engine, "API_VERSION", 1) != ENGINE_API:
+        print("deli: the engine was built from older code than the rest of deli; rebuild it with: make reinstall", file=sys.stderr)
+        return 1
+    args = build_parser().parse_args(argv)
     try:
         return args.run(args)
-    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, CommandError) as err:
+    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, config.ConfigError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return 1

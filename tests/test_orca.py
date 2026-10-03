@@ -287,3 +287,38 @@ def test_centauri_key_values(centauri):
     assert process.settings["fill_density"] == "15%"
     assert filament.settings["temperature"] == "210"
     assert filament.settings["bed_temperature"] == "60"
+
+
+def test_bed_exclude_area_is_cut_out_of_the_bed_at_a_corner():
+    bed = ["0x0", "256x0", "256x256", "0x256"]
+
+    # The Centauri Carbon's front-right corner, and then each of the others.
+    assert ",".join(orca.bed_without(bed, ["246x0", "256x0", "256x20", "246x20"])) == "0x0,246x0,246x20,256x20,256x256,0x256"
+    assert ",".join(orca.bed_without(bed, ["0x0", "10x0", "10x20", "0x20"])) == "10x0,256x0,256x256,0x256,0x20,10x20"
+    assert ",".join(orca.bed_without(bed, ["0x236", "20x236", "20x256", "0x256"])) == "0x0,256x0,256x256,20x256,20x236,0x236"
+    assert ",".join(orca.bed_without(bed, ["236x236", "256x236", "256x256", "236x256"])) == "0x0,256x0,256x236,236x236,236x256,0x256"
+
+
+def test_bed_exclude_area_biting_into_an_edge():
+    bed = ["0x0", "256x0", "256x256", "0x256"]
+
+    assert ",".join(orca.bed_without(bed, ["100x0", "120x0", "120x20", "100x20"])) == "0x0,100x0,100x20,120x20,120x0,256x0,256x256,0x256"
+    assert ",".join(orca.bed_without(bed, ["0x100", "20x100", "20x120", "0x120"])) == "0x0,256x0,256x256,0x256,0x120,20x120,20x100,0x100"
+
+
+def test_bed_exclude_area_that_is_not_one_polygon_is_left_alone():
+    bed = ["0x0", "256x0", "256x256", "0x256"]
+
+    assert orca.bed_without(bed, ["100x100", "120x100", "120x120", "100x120"]) is None  # an island
+    assert orca.bed_without(bed, ["0x100", "256x100", "256x120", "0x120"]) is None  # cuts the bed in two
+    assert orca.bed_without(["0x0", "100x0", "50x100"], ["0x0", "10x0", "10x10", "0x10"]) is None  # not a rectangular bed
+
+
+def test_machine_with_an_excluded_corner_gets_a_notched_bed():
+    machine = {"printable_area": ["0x0", "256x0", "256x256", "0x256"], "bed_exclude_area": ["246x0", "256x0", "256x20", "246x20"]}
+
+    converted = orca.convert_machine(machine)
+
+    assert converted.settings["bed_shape"] == "0x0,246x0,246x20,256x20,256x256,0x256"
+    assert "bed_exclude_area" not in converted.dropped
+    assert any("cut out of bed_shape" in note for note in converted.notes)

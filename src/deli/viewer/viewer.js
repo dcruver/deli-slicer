@@ -1,5 +1,5 @@
-// The viewer pane: the bed of the chosen printer and the part on it, placed as `deli slice`
-// places it. It is a viewer only. It asks the server for /state twice a second and redraws
+// The viewer pane: the bed of the chosen printer and the parts on it, placed as `deli slice`
+// places them. It is a viewer only. It asks the server for /state twice a second and redraws
 // when the version changes, so `deli scale`, `deli rotate` and edits to deli.toml show up here.
 
 import * as THREE from 'three';
@@ -98,16 +98,15 @@ const pct = f => `${Math.round(f * 1000) / 10}%`;
 
 function describe(state) {
   const lines = [];
-  if (state.part) {
-    lines.push(`<b>${state.part.file}</b>`);
-    if (state.part.size) lines.push(state.part.size.map(mm).join(' × ') + ' mm');
-    const s = state.part.scale, r = state.part.rotate;
+  for (const part of state.parts) {
+    lines.push(`<b>${part.file}</b>${part.count > 1 ? ` × ${part.count}` : ''}`);
+    if (part.size) lines.push(part.size.map(mm).join(' × ') + ' mm');
+    const s = part.scale, r = part.rotate;
     if (s.some(f => f !== 1)) lines.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
     const turns = ['x', 'y', 'z'].map((a, i) => r[i] ? `${r[i]}° about ${a}` : null).filter(Boolean);
     if (turns.length) lines.push(`<span class="dim">rotate</span> ${turns.join(', ')}`);
-  } else {
-    lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
   }
+  if (!state.parts.length) lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
   lines.push(state.printer ? `<span class="dim">printer</span> ${state.printer}`
                            : '<span class="dim">No printer chosen: deli printer &lt;name&gt;</span>');
   if (state.error) lines.push(`<span class="error">${state.error}</span>`);

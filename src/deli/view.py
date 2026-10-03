@@ -23,7 +23,7 @@ DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer 
 
 
 def _version() -> str:
-    """Changes when `deli.toml` or the part's file does."""
+    """Changes when `deli.toml` or any part's file does."""
     stamps = []
     for path in (project.FILE, *(Path(part["file"]) for part in _parts_quietly())):
         try:
@@ -53,47 +53,46 @@ def _bed(doc) -> tuple[list[list[float]], float, str | None]:
     return bed, float(settings.get("max_print_height", 0)), name
 
 
-def _centre(bed: list[list[float]]) -> tuple[float, float]:
-    xs = [x for x, _ in bed]
-    ys = [y for _, y in bed]
-    return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+def _config(doc) -> str:
+    """The print's settings as `slice` would merge them, from whichever profiles are chosen and present."""
+    settings: dict[str, str] = {}
+    for kind in ("printer", "filament", "process"):
+        if profile := project.chosen_profile(doc, kind):
+            settings |= profile[1]
+    settings |= project.settings(doc)
+    return "".join(f"{key} = {value}\n" for key, value in settings.items())
 
 
 def state() -> dict:
-    """What the page needs to describe the print: the bed, the part and its transforms."""
-    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "part": None}
+    """What the page needs to describe the print: the bed, the parts and their transforms."""
+    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "parts": []}
     try:
         doc = project.read()
         result["bed"], result["height"], result["printer"] = _bed(doc)
-        parts = project.parts(doc)
-        if parts:
-            part = parts[0]
+        for part in project.parts(doc):
             scale = project.part_transform(part, "scale")
             rotate = project.part_transform(part, "rotate")
-            result["part"] = {"file": part["file"], "scale": scale, "rotate": rotate}
+            described = {"file": part["file"], "scale": scale, "rotate": rotate, "count": project.part_count(part)}
             try:
-                result["part"]["size"] = list(_engine.model_size(part["file"], scale=scale, rotate=rotate))
+                described["size"] = list(_engine.model_size(part["file"], scale=scale, rotate=rotate))
             except RuntimeError as err:
                 result["error"] = f"cannot read {part['file']}: {err}"
+            result["parts"].append(described)
     except project.ProjectError as err:
         result["error"] = str(err)
     return result
 
 
 def mesh() -> bytes:
-    """The part's triangles: a header of two uint32 counts, then float32 vertices and uint32 indices."""
+    """Every part's triangles, placed as `slice` places them: a header of two uint32 counts,
+    then float32 vertices and uint32 indices."""
     doc = project.read()
-    parts = project.parts(doc)
-    if not parts:
+    if not project.parts(doc):
         return struct.pack("<II", 0, 0)
-    part = parts[0]
-    bed, _, _ = _bed(doc)
-    vertices, triangles = _engine.mesh(
-        part["file"],
-        scale=project.part_transform(part, "scale"),
-        rotate=project.part_transform(part, "rotate"),
-        centre=_centre(bed),
-    )
+    try:
+        vertices, triangles = _engine.mesh(project.engine_parts(doc), _config(doc))
+    except ValueError as err:  # the settings do not make a valid configuration
+        raise RuntimeError(str(err)) from None
     return struct.pack("<II", len(vertices) // 12, len(triangles) // 12) + vertices + triangles
 
 
