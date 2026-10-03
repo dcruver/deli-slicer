@@ -46,7 +46,7 @@ engine (about 15), and needs CMake, a C++17 compiler and about 5 GB of disk. `PL
 has the exact steps under "Dependency build"; the short version:
 
 ```
-git clone <this repository> deli && cd deli
+git clone git@github.com:dcruver/deli-slicer.git deli && cd deli
 git submodule update --init --depth 1
 # build PrusaSlicer's dependencies into build/deps (see PLAN.md)
 make install
@@ -102,10 +102,12 @@ GitHub has only the bundled ones.
 `https://` URL, including a link to a file's page on GitHub:
 
 ```
-deli load printer  profiles/printers/elegoo-centauri-carbon-0.6-nozzle.ini
-deli load process  profiles/processes/0.30mm-standard-elegoo-cc-0.6-nozzle.ini
-deli load filament profiles/filaments/elegoo-pla-ecc.ini
+deli load printer  https://github.com/dcruver/deli-slicer/blob/main/profiles/printers/elegoo-centauri-carbon-0.6-nozzle.ini
+deli load process  https://github.com/dcruver/deli-slicer/blob/main/profiles/processes/0.30mm-standard-elegoo-cc-0.6-nozzle.ini
+deli load filament https://github.com/dcruver/deli-slicer/blob/main/profiles/filaments/elegoo-pla-ecc.ini
 ```
+
+Anyone can host a printer this way: a PrusaSlicer INI file at any `https://` address.
 
 Either way, loaded files never carry a printer's network address or API key; those go
 in your config (below).
