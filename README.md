@@ -52,28 +52,29 @@ the name is not quite right, deli suggests the ones that are close.
 deli is a Python package with PrusaSlicer's slicing engine compiled in. You need
 Python 3.12 or newer and [`uv`](https://docs.astral.sh/uv/) (or `pipx`).
 
-### From a wheel (Linux x86-64)
+### From a release (Linux x86-64)
 
-If you have been given a wheel file:
+Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel with the
+engine inside; nothing else needs building. For 0.1.0:
 
 ```
-uv tool install ./deli-0.1.0-cp312-abi3-linux_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.1.0/deli-0.1.0-cp312-abi3-manylinux_2_28_x86_64.whl
 ```
 
-That puts `deli` on your PATH. The engine inside the wheel was built on Ubuntu 26.04
-and needs glibc 2.43 or newer; on an older distribution the wheel will not load, and
-building from source is the way.
+(`pipx install` takes the same URL.) That puts `deli` on your PATH. The wheel needs
+glibc 2.28 or newer, which most distributions from 2019 on have: Debian 10, Ubuntu
+18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. There are no macOS or Windows wheels yet.
 
 ### From source
 
 The first build compiles PrusaSlicer's dependencies (about 35 minutes) and then the
-engine (about 15), and needs CMake, a C++17 compiler and about 5 GB of disk. `PLAN.md`
-has the exact steps under "Dependency build"; the short version:
+engine (about 15), and needs CMake, Ninja, a C++17 compiler and about 5 GB of disk.
+`PLAN.md` has the details under "Dependency build"; the short version:
 
 ```
-git clone git@github.com:dcruver/deli-slicer.git deli && cd deli
+git clone https://github.com/dcruver/deli-slicer.git && cd deli-slicer
 git submodule update --init --depth 1
-# build PrusaSlicer's dependencies into build/deps (see PLAN.md)
+ci/build-deps.sh     # PrusaSlicer's dependencies, into build/deps
 make install
 ```
 
@@ -303,8 +304,8 @@ Things that a user would notice, roughly in the order they matter:
   Bambu Lab P1S have been compared with Orca's own output.
 - **Bambu printers can't be sent to.** `deli send` does not speak Bambu's LAN or cloud
   protocols; copy the G-code over by hand (SD card, or another program's send).
-- **Wheels for Linux x86-64 only**, built on a very new glibc. No macOS or Windows
-  builds yet, and no wheel for older distributions.
+- **Wheels for Linux x86-64 only.** No macOS, Windows or Linux ARM64 wheels yet;
+  there, deli has to be built from source.
 - **Settings apply to the whole print**, not to one part.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.
