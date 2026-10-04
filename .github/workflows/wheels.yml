@@ -6,7 +6,7 @@ name: wheels
 on:
   workflow_dispatch:
   push:
-    branches: [ci-wheels]
+    branches: [main, ci-wheels]
     tags: ["v*"]
 
 jobs:
