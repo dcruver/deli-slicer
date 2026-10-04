@@ -155,7 +155,22 @@ def test_toolpaths_are_the_extrusions_of_the_sliced_print(url):
     layers = struct.unpack_from(f"<{n}I", body, 4 + n * 32)
     assert layers[-1] == 99  # 20 mm at 0.2 mm
     roles = json.loads(get(url + "/state")[2])["roles"]
-    assert "External perimeter" in {roles[role] for role in body[4 + n * 36 :]}
+    assert {"External perimeter", "Travel"} <= {roles[role] for role in body[4 + n * 36 :]}
+
+
+def test_gcode_written_elsewhere_is_found(url, job):
+    sliced_cube()
+    (job / "out").mkdir()
+
+    main(["slice", "-o", "out/elsewhere.gcode"])
+    (job / "cube.gcode").unlink()
+
+    assert json.loads(get(url + "/state")[2])["gcode"] == "elsewhere.gcode"
+    assert struct.unpack_from("<I", get(url + "/toolpaths")[2])[0] > 1000
+
+    main(["slice"])  # back in the usual place
+    (job / "out" / "elsewhere.gcode").unlink()
+    assert json.loads(get(url + "/state")[2])["gcode"] == "cube.gcode"
 
 
 def test_gcode_is_not_shown_once_the_print_has_changed(url):

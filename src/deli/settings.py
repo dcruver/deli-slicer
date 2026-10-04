@@ -35,7 +35,7 @@ def kinds() -> dict[str, str]:
     for kind in library.KINDS:
         for name in names[kind]:
             found.setdefault(name, kind)
-    return found
+    return found | library.OWN
 
 
 def resolve(name: str) -> str:
@@ -51,7 +51,19 @@ def resolve(name: str) -> str:
     return key
 
 
-def _ini(settings: dict[str, str]) -> str:
+def for_engine(settings: dict[str, str]) -> str:
+    """The settings as INI text for the engine, with deli's own worked into PrusaSlicer's or
+    left out: `print_flow_ratio` multiplies the filament's `extrusion_multiplier`, as Orca's
+    print-level flow multiplies its filament's."""
+    settings = dict(settings)
+    settings.pop("gcode_footer", None)  # `slice` writes it itself: see cli._write_footer
+    if (ratio := settings.pop("print_flow_ratio", None)) is not None:
+        try:
+            ratio = float(library.own_value("print_flow_ratio", ratio))
+        except ValueError as err:
+            raise SettingError(f"bad value for setting print_flow_ratio: {err}") from None
+        multipliers = settings.get("extrusion_multiplier", "1").split(",")
+        settings["extrusion_multiplier"] = ",".join(f"{float(m) * ratio:g}" for m in multipliers)
     return "".join(f"{key} = {value}\n" for key, value in settings.items())
 
 
@@ -59,6 +71,11 @@ def check(key: str, value: str, others: dict[str, str]) -> str:
     """The value as the engine writes it, once it is known to make a valid configuration
     together with `others`, the rest of the print's settings."""
     value = value.strip()
+    if key in library.OWN:
+        try:
+            return library.own_value(key, value)
+        except ValueError as err:
+            raise SettingError(f"cannot set {key} to '{value}': {err}") from None
     if "\n" in value:
         raise SettingError(f"cannot set {key}: write a line break as \\n, as PrusaSlicer does")
     candidates = [value]
@@ -75,7 +92,7 @@ def check(key: str, value: str, others: dict[str, str]) -> str:
     errors = []
     for candidate in candidates:
         try:
-            groups, _ = _engine.split_config(_ini(others | {key: candidate}))
+            groups, _ = _engine.split_config(for_engine(others | {key: candidate}))
             return groups[kinds()[key]][key]
         except ValueError as err:
             errors.append(str(err).removeprefix(f"bad value for setting {key}: ").removeprefix("invalid configuration: "))
@@ -94,4 +111,6 @@ def effective(doc, key: str) -> tuple[str, str]:
     profile = project.chosen_profile(doc, kind)
     if profile and key in profile[1]:
         return profile[1][key], f"the {kind} '{profile[0]}'"
+    if key in library.OWN:
+        return {"print_flow_ratio": "1"}.get(key, ""), "deli's default"
     return _engine.setting_default(key), "PrusaSlicer's default"

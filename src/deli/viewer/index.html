@@ -13,6 +13,9 @@
   #info b { color: #fff; }
   #info .dim { color: #9aa0a8; }
   #info .error { color: #ff8a80; }
+  #info .options { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; }
+  #info label { cursor: pointer; display: flex; align-items: center; gap: 0.5em; }
+  #info input { margin: 0; }
   #info .swatch { display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.5em; border-radius: 2px; }
   #layers { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
             align-items: center; padding: 8px 14px; background: rgba(27, 30, 35, 0.85);
@@ -24,7 +27,8 @@
 </head>
 <body>
 <div id="info">Connecting to deli…</div>
-<div id="layers" hidden><input type="range" id="layer" min="1" max="1"><span id="layerLabel"></span></div>
+<div id="layers" hidden><input type="range" id="layer" min="1" max="1" list="pauseTicks"><span id="layerLabel"></span></div>
+<datalist id="pauseTicks"></datalist>
 <script type="module" src="./viewer.js"></script>
 </body>
 </html>

@@ -64,6 +64,8 @@ struct SliceResult
     double                   filament_g;
     std::vector<std::string> warnings;
     std::vector<std::pair<int, double>> pauses; // the layer each pause comes after, and how high the print is by then
+    int                      layers;     // as the G-code counts them: see layer_tops
+    double                   height;     // of the top of the last one, in mm
 };
 
 // The settings in `ini` as given, with names from older PrusaSlicer versions updated.
@@ -368,13 +370,15 @@ SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini,
         throw std::runtime_error("nothing to print: the object is not fully inside the print volume");
 
     print.process();
+    const std::vector<double> tops = layer_tops(print);
+    result.layers = int(tops.size());
+    result.height = tops.empty() ? 0. : tops.back();
     if (!pauses.empty()) {
         // PrusaSlicer keeps pauses by height and writes each before the first layer at or
         // above it. The heights are only known now, so the pauses go into the model here and
         // the print is told again; that redoes the last steps only, not the slicing.
         if (config.opt_bool("complete_objects"))
             throw std::runtime_error("a print cannot pause at a layer when its parts are printed one after another (complete_objects)");
-        const std::vector<double> tops = layer_tops(print);
         std::sort(pauses.begin(), pauses.end());
         CustomGCode::Info &custom = model.custom_gcode_per_print_z();
         custom.mode = CustomGCode::SingleExtruder;
@@ -438,10 +442,11 @@ std::pair<nb::bytes, nb::bytes> mesh(const std::vector<Part> &parts, const std::
             nb::bytes(reinterpret_cast<const char *>(triangles.data()), triangles.size() * sizeof(uint32_t))};
 }
 
-// The extrusions in a G-code file, in the order they are printed, as PrusaSlicer's own
-// G-code reader finds them: for each, float32 x, y, z of its start and of its end, its
-// width and its height; a uint32 layer, counted from 0; and a uint8 index into
-// `extrusion_roles`. The z is the nozzle's, so the top of the extruded line.
+// The extrusions and the travel moves in a G-code file, in the order they are made, as
+// PrusaSlicer's own G-code reader finds them: for each, float32 x, y, z of its start and of
+// its end, its width and its height (0 for a travel move); a uint32 layer, counted from 0;
+// and a uint8 index into `extrusion_roles`, whose last name is the one for travel. The z
+// is the nozzle's, so the top of the extruded line.
 std::tuple<nb::bytes, nb::bytes, nb::bytes> toolpaths(const std::string &gcode_path)
 {
     std::vector<float>    segments;
@@ -456,11 +461,12 @@ std::tuple<nb::bytes, nb::bytes, nb::bytes> toolpaths(const std::string &gcode_p
         for (size_t i = 1; i < moves.size(); ++i) {
             const GCodeProcessorResult::MoveVertex &move = moves[i];
             const Vec3f &from = moves[i - 1].position, &to = move.position;
-            if (move.type != EMoveType::Extrude || from == to)
+            const bool travel = move.type == EMoveType::Travel;
+            if ((move.type != EMoveType::Extrude && !travel) || from == to)
                 continue;
-            segments.insert(segments.end(), {from.x(), from.y(), from.z(), to.x(), to.y(), to.z(), move.width, move.height});
+            segments.insert(segments.end(), {from.x(), from.y(), from.z(), to.x(), to.y(), to.z(), travel ? 0.f : move.width, travel ? 0.f : move.height});
             layers.push_back(move.layer_id);
-            roles.push_back(uint8_t(move.extrusion_role));
+            roles.push_back(travel ? uint8_t(GCodeExtrusionRole::Count) : uint8_t(move.extrusion_role));
         }
     }
     return {nb::bytes(reinterpret_cast<const char *>(segments.data()), segments.size() * sizeof(float)),
@@ -468,12 +474,14 @@ std::tuple<nb::bytes, nb::bytes, nb::bytes> toolpaths(const std::string &gcode_p
             nb::bytes(reinterpret_cast<const char *>(roles.data()), roles.size())};
 }
 
-// PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them.
+// PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them,
+// and after them the name `toolpaths` gives a move that extrudes nothing.
 std::vector<std::string> extrusion_roles()
 {
     std::vector<std::string> names;
     for (uint8_t role = 0; role < uint8_t(GCodeExtrusionRole::Count); ++role)
         names.push_back(gcode_extrusion_role_to_string(GCodeExtrusionRole(role)));
+    names.push_back("Travel");
     return names;
 }
 
@@ -531,7 +539,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 6;
+    m.attr("API_VERSION") = 7;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -539,7 +547,9 @@ NB_MODULE(_engine, m)
         .def_ro("filament_mm", &SliceResult::filament_mm, "Filament used, in millimetres.")
         .def_ro("filament_g", &SliceResult::filament_g, "Filament used, in grams.")
         .def_ro("warnings", &SliceResult::warnings, "Warnings PrusaSlicer raised while validating the print.")
-        .def_ro("pauses", &SliceResult::pauses, "For each pause, the layer it comes after and the height of the print by then, in mm.");
+        .def_ro("pauses", &SliceResult::pauses, "For each pause, the layer it comes after and the height of the print by then, in mm.")
+        .def_ro("layers", &SliceResult::layers, "How many layers the print has, as the G-code's layer changes count them.")
+        .def_ro("height", &SliceResult::height, "Height of the top of the last layer, in mm.");
 
     m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{},
           "Slice the parts of a print and write G-code to `output`.\n\n"
@@ -564,13 +574,14 @@ NB_MODULE(_engine, m)
           "of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
 
     m.def("toolpaths", &toolpaths, "gcode"_a,
-          "The extrusions in a G-code file, in printing order: a triple of bytes. Per extrusion,\n"
-          "eight float32 (start x, y, z, end x, y, z, width, height), one uint32 layer counted\n"
-          "from 0, and one uint8 index into `extrusion_roles()`.\n\n"
+          "The extrusions and travel moves in a G-code file, in order: a triple of bytes. Per\n"
+          "move, eight float32 (start x, y, z, end x, y, z, width, height; the last two 0 for\n"
+          "travel), one uint32 layer counted from 0, and one uint8 index into `extrusion_roles()`.\n\n"
           "Raises RuntimeError when the file cannot be read.");
 
     m.def("extrusion_roles", &extrusion_roles,
-          "PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them.");
+          "PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them,\n"
+          "followed by 'Travel' for the moves that extrude nothing.");
 
     m.def("split_config", &split_config, "config"_a,
           "Sort the settings in PrusaSlicer INI text into 'printer', 'process' and 'filament'.\n\n"

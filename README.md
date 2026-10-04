@@ -193,8 +193,9 @@ layer the print does not have.
 `deli view` opens a page in your browser and gives the shell straight back; the page
 follows the print as you change it. After `deli slice` it shows the G-code instead of
 the parts: every extrusion, supports included, coloured by what it is for, with a
-slider to go through the layers. It goes back to the parts as soon as the print
-changes. The page is served in the background until it has been closed for ten
+slider to go through the layers. The colours turn lighter where the print pauses, and
+a box in the legend shows the travel moves. It goes back to the parts as soon as the
+print changes. The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
 `deli slice` draws one into the G-code for the printer's screen; the Centauri Carbon
 shows it.
@@ -268,12 +269,14 @@ Things that a user would notice, roughly in the order they matter:
   PETG-CF with a pause, which ran to the end but came out stringy with lines in the
   hull, from a spool that was probably damp. Nothing with supports has been printed,
   and `deli send` to Moonraker and OctoPrint hosts has only been tested against fakes.
-- **Converted profiles differ from Orca in small ways.** The process's 0.97 flow ratio
-  is not applied (about 3 % more filament); the Centauri Carbon shows the percentage
-  and the current layer but no remaining time and no layer total, which it gets from
-  Orca's `M73` lines and file header; the first layer's layer-change G-code is
-  skipped; one bridge speed instead of two; no brim where Orca would add one
+- **Converted profiles differ from Orca in small ways.** The first layer's layer-change
+  G-code is skipped; one bridge speed instead of two; no brim where Orca would add one
   automatically. `PLAN.md` has the full list with measurements.
+- **Remaining time on the Centauri Carbon is untried.** Its screen showed none for
+  deli's first prints. The G-code now carries the `M73` lines Orca's files have, which
+  is where it should get it from; nobody has watched a print since. The layer count now
+  shows in the printer's file list: it comes from the printer profile's `gcode_footer`,
+  comment lines deli adds to the end of the file, which converted printers have.
 - **Other printers.** The Orca converter has been checked against Orca's own output
   on the Centauri Carbon and the Bambu Lab P1S (start and end blocks match command for
   command). Other printers convert but have not been compared.

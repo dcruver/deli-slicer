@@ -24,6 +24,8 @@ def test_slices_a_cube(tmp_path):
     out = tmp_path / "cube.gcode"
     result = _engine.slice(part(), CONFIG, str(out))
 
+    assert (result.layers, result.height) == (100, pytest.approx(20.0))
+
     assert result.gcode_path == str(out)
     assert out.read_text().count(";LAYER_CHANGE") == 100
     assert top_z(out) == pytest.approx(20.0)
@@ -169,7 +171,9 @@ def test_toolpaths_are_the_extrusions_of_a_gcode_file(tmp_path):
     layers = [layer for *_, layer, _ in paths]
     assert layers == sorted(layers) and (layers[0], layers[-1]) == (0, 99)
     assert {"External perimeter", "Perimeter", "Internal infill", "Top solid infill"} <= {role for *_, role in paths}
-    assert max(end[2] for _, end, *_ in paths) == pytest.approx(20.0)
+    assert max(end[2] for _, end, *_, role in paths if role != "Travel") == pytest.approx(20.0)
+    travel = [(width, height) for *_, width, height, _, role in paths if role == "Travel"]
+    assert travel and set(travel) == {(0, 0)}  # moves that extrude nothing come too, without a size
     walls = [(start, end, width, height) for start, end, width, height, _, role in paths if role == "External perimeter"]
     assert all(90 - 0.01 <= c <= 110 + 0.01 for start, end, *_ in walls for c in (*start[:2], *end[:2]))  # the cube, centred at 100, 100
     assert all(0.3 < width < 0.6 and height == pytest.approx(0.2, abs=0.001) for *_, width, height in walls)

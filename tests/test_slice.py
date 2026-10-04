@@ -164,3 +164,40 @@ def test_several_parts_slice_together_into_a_file_named_after_the_directory(job,
     assert "Sliced cube.stl x 3, other.stl to job.gcode" in out  # the fixture added one, the test two more
     gcode = (job / "job.gcode").read_text()
     assert len(set(re.findall(r"; printing object .*", gcode))) == 4  # three cubes and the other part
+
+
+def test_print_flow_ratio_multiplies_the_filaments_flow(job, capsys):
+    assert main(["set", "print_flow_ratio", "0.95"]) == 0
+    assert "print_flow_ratio = 0.95" in capsys.readouterr().out
+
+    assert main(["slice"]) == 0
+
+    assert "; extrusion_multiplier = 0.95\n" in (job / "cube.gcode").read_text()  # the filament's own is 1
+
+
+def test_a_print_flow_ratio_that_is_not_a_ratio_is_refused(job, capsys):
+    assert main(["set", "print_flow_ratio", "lots"]) == 1
+
+    assert "cannot set print_flow_ratio" in capsys.readouterr().err
+
+
+def test_the_printers_footer_goes_among_the_closing_figures(job, capsys):
+    assert main(["set", "gcode_footer", "; total layers count = {total_layer_count}"]) == 0
+
+    main(["slice"])
+
+    gcode = (job / "cube.gcode").read_text()
+    assert "\n; total layers count = 100\n; estimated printing time (normal mode) = " in gcode
+    assert "gcode_footer" not in gcode  # the engine never sees it
+
+
+def test_gcode_has_no_footer_unless_the_printer_has_one(job):
+    main(["slice"])
+
+    assert "total layers count" not in (job / "cube.gcode").read_text()
+
+
+def test_a_footer_must_be_comments(job, capsys):
+    assert main(["set", "gcode_footer", "M84"]) == 1
+
+    assert "every line must start with ;" in capsys.readouterr().err

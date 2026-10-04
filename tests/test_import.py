@@ -109,7 +109,7 @@ def test_import_names_the_printer_a_process_was_converted_for(home, capsys):
     assert library.names("process") == ["thick-walls"]
     out = capsys.readouterr().out
     assert f"for Orca's printer '{MACHINE}'" in out
-    assert "note: print_flow_ratio 0.97 is not applied" in out
+    assert library.read_settings(library.find("process", "thick-walls"))["print_flow_ratio"] == "0.97"
 
 
 def test_output_writes_a_file_deli_load_accepts(home, tmp_path, capsys):

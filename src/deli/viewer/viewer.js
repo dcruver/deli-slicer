@@ -11,6 +11,7 @@ const info = document.getElementById('info');
 const layerBar = document.getElementById('layers');
 const layerSlider = document.getElementById('layer');
 const layerLabel = document.getElementById('layerLabel');
+const pauseTicks = document.getElementById('pauseTicks');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b1e23);
@@ -22,6 +23,7 @@ renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+controls.zoomToCursor = true;  // towards what is under the pointer, not the middle of the bed
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 1.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -30,7 +32,8 @@ scene.add(sun);
 
 let bedGroup = null;
 let partMesh = null;
-let paths = null;  // the sliced print: { mesh, ends, tops }
+let paths = null;  // the sliced print: what is drawn, and where each layer ends in it
+let showTravel = false;
 let framed = false;
 let version = null;
 const material = new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.6, metalness: 0.05 });
@@ -101,7 +104,12 @@ async function drawPart() {
 
 function clearPrint() {
   if (partMesh) { scene.remove(partMesh); partMesh.geometry.dispose(); partMesh = null; }
-  if (paths) { scene.remove(paths.mesh); paths.mesh.geometry.dispose(); paths.mesh.material.dispose(); paths.mesh.dispose(); paths = null; }
+  if (paths) {
+    scene.remove(paths.mesh, paths.travel);
+    for (const drawn of [paths.mesh, paths.travel]) { drawn.geometry.dispose(); drawn.material.dispose(); }
+    paths.mesh.dispose();
+    paths = null;
+  }
   layerBar.hidden = true;
 }
 
@@ -115,9 +123,11 @@ const ROLE_COLOURS = {
 };
 const roleColour = name => ROLE_COLOURS[name] || '#e6b3b3';
 
-// The sliced print: one box per extrusion, as wide and as high as the line it lays down,
-// in printing order, so that drawing the first so many of them shows the print up to a layer.
-async function drawToolpaths(roles) {
+// The sliced print: one box per extrusion, as wide and as high as the line it lays down, in
+// printing order, so that drawing the first so many of them shows the print up to a layer.
+// Travel moves are thin lines, shown when asked for. After each pause the colours change,
+// lighter and back again, as a change of filament there would show.
+async function drawToolpaths(roles, pauses) {
   const response = await fetch('/toolpaths');
   if (!response.ok) throw new Error(await response.text());
   const data = await response.arrayBuffer();
@@ -125,18 +135,31 @@ async function drawToolpaths(roles) {
   const segments = new Float32Array(data, 4, n * 8);
   const layers = new Uint32Array(data, 4 + n * 32, n);
   const roleOf = new Uint8Array(data, 4 + n * 36, n);
+  const travelRole = roles.indexOf('Travel');
 
   clearPrint();
   if (n === 0) return;
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), n);
+  let travels = 0;
+  for (let i = 0; i < n; i++) if (roleOf[i] === travelRole) travels++;
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), n - travels);
   mesh.frustumCulled = false;
+  const travelPoints = new Float32Array(travels * 6);
   const colours = roles.map(name => new THREE.Color(roleColour(name)));
+  const lighter = colours.map(colour => colour.clone().lerp(new THREE.Color(0xffffff), 0.55));
   const from = new THREE.Vector3(), along = new THREE.Vector3(), middle = new THREE.Vector3();
   const turn = new THREE.Quaternion(), size = new THREE.Vector3(), matrix = new THREE.Matrix4();
   const xAxis = new THREE.Vector3(1, 0, 0);
-  const ends = [], tops = [], used = new Set();  // per layer: how many extrusions by its end, and its height
+  // Per layer: how many extrusions and travel moves there are by its end, and its height.
+  const ends = [], travelEnds = [], tops = [], used = new Set();
+  let boxes = 0, lines = 0;
   for (let i = 0; i < n; i++) {
     const [x0, y0, z0, x1, y1, z1, width, height] = segments.subarray(i * 8, i * 8 + 8);
+    const layer = layers[i];
+    if (roleOf[i] === travelRole) {
+      travelPoints.set([x0, y0, z0, x1, y1, z1], lines++ * 6);
+      travelEnds[layer] = lines;
+      continue;
+    }
     from.set(x0, y0, z0);
     along.set(x1, y1, z1).sub(from);
     const length = along.length();
@@ -144,33 +167,51 @@ async function drawToolpaths(roles) {
     middle.z -= height / 2;  // the nozzle rides on top of the line
     turn.setFromUnitVectors(xAxis, along.divideScalar(length));
     matrix.compose(middle, turn, size.set(length + width / 2, width, height));  // a little long, to close the corners
-    mesh.setMatrixAt(i, matrix);
-    mesh.setColorAt(i, colours[roleOf[i]]);
+    mesh.setMatrixAt(boxes, matrix);
+    // A pause after layer 30 comes before the layer numbered 30 here, where they count from 0.
+    const pausesBelow = pauses.filter(after => after <= layer).length;
+    mesh.setColorAt(boxes, (pausesBelow % 2 ? lighter : colours)[roleOf[i]]);
     used.add(roleOf[i]);
-    ends[layers[i]] = i + 1;
-    tops[layers[i]] = z1;
+    ends[layer] = ++boxes;
+    tops[layer] = z1;
   }
   for (let layer = 0; layer < ends.length; layer++) {  // a layer with nothing in it ends where the one before did
     ends[layer] ??= ends[layer - 1] ?? 0;
+    travelEnds[layer] ??= travelEnds[layer - 1] ?? 0;
     tops[layer] ??= tops[layer - 1] ?? 0;
   }
-  scene.add(mesh);
-  paths = { mesh, ends, tops };
+  const travelGeometry = new THREE.BufferGeometry();
+  travelGeometry.setAttribute('position', new THREE.BufferAttribute(travelPoints, 3));
+  const travel = new THREE.LineSegments(travelGeometry, new THREE.LineBasicMaterial({ color: 0x8a9099 }));
+  travel.frustumCulled = false;
+  travel.visible = showTravel;
+  scene.add(mesh, travel);
+  paths = { mesh, travel, ends, travelEnds, tops, pauses };
 
   layerSlider.max = ends.length;
   layerSlider.value = ends.length;
+  pauseTicks.innerHTML = pauses.map(after => `<option value="${after}"></option>`).join('');
   layerBar.hidden = false;
   showLayers();
   info.innerHTML += '<br>' + roles.map((name, role) => used.has(role)
-    ? `<br><span class="swatch" style="background: ${roleColour(name)}"></span>${name}` : '').join('');
+    ? `<br><span class="swatch" style="background: ${roleColour(name)}"></span>${name}` : '').join('')
+    + (pauses.length ? '<br><span class="dim">lighter between one pause and the next</span>' : '')
+    + `<div class="options"><label><input type="checkbox" id="travel"${showTravel ? ' checked' : ''}> Show travel moves</label></div>`;
 }
 
 function showLayers() {
   const layer = Number(layerSlider.value);
   paths.mesh.count = paths.ends[layer - 1];
-  layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${mm(paths.tops[layer - 1])} mm`;
+  paths.travel.geometry.setDrawRange(0, paths.travelEnds[layer - 1] * 2);
+  layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${mm(paths.tops[layer - 1])} mm`
+    + (paths.pauses.includes(layer) ? ', then a pause' : '');
 }
 layerSlider.addEventListener('input', showLayers);
+info.addEventListener('change', event => {  // the info box is rewritten on every redraw, so the box listens for its checkbox
+  if (event.target.id !== 'travel') return;
+  showTravel = event.target.checked;
+  if (paths) paths.travel.visible = showTravel;
+});
 
 const mm = n => Math.round(n * 100) / 100;
 const pct = f => `${Math.round(f * 1000) / 10}%`;
@@ -204,7 +245,7 @@ async function refresh() {
       version = state.version;
       drawBed(state.bed, state.height);
       describe(state);
-      await (state.gcode ? drawToolpaths(state.roles) : drawPart());
+      await (state.gcode ? drawToolpaths(state.roles, state.pauses) : drawPart());
     }
   } catch (err) {
     // A fetch that cannot reach the server at all fails with a TypeError: the viewer has gone.

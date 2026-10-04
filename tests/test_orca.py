@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from deli import orca
+from deli import library, orca
 
 ROOT = Path(__file__).resolve().parents[1]
 PRINT_CONFIG = ROOT / "vendor/PrusaSlicer/src/libslic3r/PrintConfig.cpp"
@@ -117,9 +117,19 @@ def test_unknown_process_setting_is_reported_not_copied():
     assert "seam_slope_type" not in result.settings
 
 
-def test_print_flow_ratio_is_noted():
+def test_print_flow_ratio_is_kept_as_delis_own_setting():
     result = orca.convert_process({"print_flow_ratio": "0.97"}, nozzle=0.6)
-    assert any("0.97" in note for note in result.notes)
+    assert result.settings["print_flow_ratio"] == "0.97"
+    assert "print_flow_ratio" not in orca.convert_process({"print_flow_ratio": "1"}, nozzle=0.6).settings
+
+
+def test_a_converted_printer_states_the_layer_count_as_orcas_files_do():
+    assert orca.convert_machine({}).settings["gcode_footer"] == "; total layers count = {total_layer_count}"
+
+
+def test_progress_lines_are_on_unless_orca_turns_them_off():
+    assert orca.convert_machine({}).settings["remaining_times"] == "1"
+    assert orca.convert_machine({"disable_m73": "1"}).settings["remaining_times"] == "0"
 
 
 def test_machine_bed_limits_and_thumbnails():
@@ -262,7 +272,7 @@ def centauri():
 
 @needs_local_profiles
 def test_centauri_only_emits_real_prusaslicer_settings(centauri):
-    known = prusa_keys()
+    known = prusa_keys() | set(library.OWN)  # and deli's own, which it works into PrusaSlicer's
     for converted in centauri:
         assert set(converted.settings) - known == set()
 

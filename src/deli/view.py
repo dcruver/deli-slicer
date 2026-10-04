@@ -30,7 +30,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from deli import _engine, project
+from deli import _engine, project, settings
 
 PAGES = Path(__file__).parent / "viewer"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
@@ -44,7 +44,7 @@ def _version() -> str:
     try:
         doc = project.read()
         paths += [Path(part["file"]) for part in project.parts(doc)]
-        paths.append(Path(project.gcode_name(doc)))
+        paths.append(_gcode_path(doc))
     except project.ProjectError:
         pass
     stamps = []
@@ -57,13 +57,40 @@ def _version() -> str:
     return hashlib.sha256("\n".join(stamps).encode()).hexdigest()[:16]
 
 
+def _output_record() -> Path:
+    """Where it is noted that `slice -o` last wrote this directory's G-code somewhere other than the usual place."""
+    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "deli"
+    return state / f"sliced-{hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:16]}"
+
+
+def remember_output(gcode: Path) -> None:
+    """Called by `slice` with the file it wrote, so that the viewer finds G-code written elsewhere with `-o`."""
+    record = _output_record()
+    if gcode.resolve() == Path(project.gcode_name(project.read())).resolve():
+        record.unlink(missing_ok=True)
+    else:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(str(gcode.resolve()))
+
+
+def _gcode_path(doc) -> Path:
+    """Where this print's G-code is: where `slice -o` last put it, if it is still there, else the usual place."""
+    try:
+        elsewhere = Path(_output_record().read_text())
+        if elsewhere.is_file():
+            return elsewhere
+    except OSError:
+        pass
+    return Path(project.gcode_name(doc))
+
+
 def _gcode(doc) -> Path | None:
     """The G-code `deli slice` wrote for this print, unless `deli.toml` or a part's file
     has changed since: it is then no longer a picture of the print."""
     found = project.parts(doc)
     if not found:
         return None
-    path = Path(project.gcode_name(doc))
+    path = _gcode_path(doc)
     try:
         sliced = path.stat().st_mtime
         sources = (project.FILE, *(Path(part["file"]) for part in found))
@@ -86,12 +113,12 @@ def _bed(doc) -> tuple[list[list[float]], float, str | None]:
 
 def _config(doc) -> str:
     """The print's settings as `slice` would merge them, from whichever profiles are chosen and present."""
-    settings: dict[str, str] = {}
+    merged: dict[str, str] = {}
     for kind in ("printer", "filament", "process"):
         if profile := project.chosen_profile(doc, kind):
-            settings |= profile[1]
-    settings |= project.settings(doc)
-    return "".join(f"{key} = {value}\n" for key, value in settings.items())
+            merged |= profile[1]
+    merged |= project.settings(doc)
+    return settings.for_engine(merged)
 
 
 def state() -> dict:
@@ -164,7 +191,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, "application/octet-stream", toolpaths())
             else:
                 self._send_page("index.html" if path == "/" else path.lstrip("/"))
-        except (project.ProjectError, RuntimeError) as err:
+        except (project.ProjectError, settings.SettingError, RuntimeError) as err:
             self._send(500, "text/plain; charset=utf-8", str(err).encode())
 
     def _send_page(self, name: str) -> None:

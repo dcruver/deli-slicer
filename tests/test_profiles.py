@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deli import _engine, library
+from deli import _engine, library, settings
 
 ROOT = Path(__file__).resolve().parents[1]
 CUBE = ROOT / "vendor/PrusaSlicer/tests/data/test_stl/ASCII/20mmbox-LF.stl"
@@ -41,7 +41,10 @@ TRIOS = {
 def test_shipped_profiles_slice_a_cube(trio, tmp_path):
     names, layers, banner = TRIOS[trio]
     folders = {kind: folder for folder, kind in FOLDERS.items()}
-    config = "".join((ROOT / "profiles" / folders[kind] / f"{name}.ini").read_text() for kind, name in names.items())
+    merged = {}
+    for kind, name in names.items():
+        merged |= library.read_settings(ROOT / "profiles" / folders[kind] / f"{name}.ini")
+    config = settings.for_engine(merged)  # as `deli slice` hands them over
 
     out = tmp_path / "cube.gcode"
     result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, None, 0)], config, str(out))
@@ -50,4 +53,7 @@ def test_shipped_profiles_slice_a_cube(trio, tmp_path):
     gcode = out.read_text()
     assert gcode.count(";LAYER_CHANGE") == layers
     assert banner in gcode
+    assert re.search(r"^M73 P0 R\d+$", gcode, re.M)  # progress lines, as Orca writes them
+    if trio == "centauri":  # Orca's 0.97 print flow on top of the filament's 0.98
+        assert "; extrusion_multiplier = 0.9506" in gcode
     assert not re.search(r"^[GMT][^;\n]*\{", gcode, re.M)  # every template expression in a command was evaluated

@@ -606,6 +606,18 @@ def _duration(seconds: float) -> str:
     return f"{secs} s"
 
 
+def _write_footer(gcode: Path, footer: str, layers: int) -> None:
+    """Add the printer's `gcode_footer` to the figures a G-code file closes with, just before
+    the estimated printing time: where OrcaSlicer states the number of layers, and where the
+    Elegoo Centauri Carbon was found to read it from, and from nowhere else."""
+    text = gcode.read_bytes()
+    at = text.rfind(b"; estimated printing time (normal mode)")
+    if at < 0:  # binary G-code, or a file without PrusaSlicer's closing figures
+        return
+    lines = footer.replace("\\n", "\n").replace("{total_layer_count}", str(layers)).strip() + "\n"
+    gcode.write_bytes(text[:at] + lines.encode() + text[at:])
+
+
 def _slice(args: argparse.Namespace) -> int:
     doc = project.read()
     parts = _parts_of(doc)
@@ -615,7 +627,7 @@ def _slice(args: argparse.Namespace) -> int:
     config |= project.settings(doc)
 
     output = Path(args.output) if args.output else Path(project.gcode_name(doc))
-    ini = "".join(f"{key} = {value}\n" for key, value in config.items())
+    ini = settings.for_engine(config)
     what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
     try:
         result = _engine.slice(project.engine_parts(doc), ini, str(output), pauses=project.pauses(doc))
@@ -624,6 +636,9 @@ def _slice(args: argparse.Namespace) -> int:
     except RuntimeError as err:
         raise CommandError(f"cannot slice {what}: {err}") from None
 
+    if footer := config.get("gcode_footer"):
+        _write_footer(Path(result.gcode_path), footer, result.layers)
+    view.remember_output(Path(result.gcode_path))
     print(f"Sliced {what} to {result.gcode_path}")
     used = f"{result.filament_mm / 1000:.2f} m of filament"
     if result.filament_g:
@@ -765,7 +780,7 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
-ENGINE_API = 6  # must match API_VERSION in _engine.cpp
+ENGINE_API = 7  # must match API_VERSION in _engine.cpp
 
 
 def _completion(args: argparse.Namespace) -> int:

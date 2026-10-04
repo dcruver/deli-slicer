@@ -100,9 +100,35 @@ def find(kind: str, name: str) -> Path:
     return path
 
 
-def read_settings(path: Path) -> dict[str, str]:
-    lines = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]
+# Settings of deli's own, which PrusaSlicer does not have, and the kind of profile each is kept in.
+OWN = {
+    "print_flow_ratio": "process",  # Orca's print-level flow, multiplied into the filament's when slicing
+    # Comment lines for the figures a G-code file closes with, where some firmware looks for
+    # what PrusaSlicer does not say; {total_layer_count} in them is the number of layers.
+    "gcode_footer": "printer",
+}
+
+
+def own_value(key: str, value: str) -> str:
+    """A value for one of deli's own settings, as it is stored; ValueError when it cannot be that."""
+    if key == "gcode_footer":
+        lines = [line.strip() for line in value.replace("\\n", "\n").splitlines() if line.strip()]
+        if not all(line.startswith(";") for line in lines):
+            raise ValueError(f"{key} is for comments: every line must start with ;")
+        return "\\n".join(lines)
+    ratio = float(value)
+    if not 0 < ratio <= 2:
+        raise ValueError(f"{key} is a ratio, such as 0.97")
+    return f"{ratio:g}"
+
+
+def parse(text: str) -> dict[str, str]:
+    lines = [line for line in text.splitlines() if line and not line.startswith("#")]
     return {key.strip(): value.strip() for key, _, value in (line.partition("=") for line in lines)}
+
+
+def read_settings(path: Path) -> dict[str, str]:
+    return parse(path.read_text())
 
 
 def fingerprint(path: Path) -> str:
@@ -136,6 +162,15 @@ def store(kind: str, text: str, source: str, name: str | None = None, fallback: 
     # A file that is passed around must not carry the address or key of its author's machine.
     settings = {key: value for key, value in found.items() if not is_connection(key)}
     connection = sorted(key for key, value in found.items() if is_connection(key) and value)
+    # The engine does not know deli's own settings; they are kept all the same.
+    given = parse(text)
+    for key in [key for key in unknown if key in OWN]:
+        unknown.remove(key)
+        if OWN[key] == kind:
+            try:
+                settings[key] = own_value(key, given[key])
+            except ValueError as err:
+                raise LibraryError(f"{source}: bad value for setting {key}: {err}") from None
     if not settings:
         raise LibraryError(f"{source} has no {kind} settings")
 

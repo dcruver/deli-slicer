@@ -47,20 +47,20 @@ Do not reopen these without a reason.
 |---|---|
 | Scaffold (`src/deli`, `tests`, `pyproject.toml`) | Done. `deli` only prints a hello line. |
 | `vendor/PrusaSlicer` | Shallow submodule pinned to `version_2.9.6`. |
-| `src/deli/orca.py` | Orca to PrusaSlicer converter. 28 tests pass. |
+| `src/deli/orca.py` | Orca to PrusaSlicer converter. 35 tests pass. |
 | `src/deli/_engine.cpp`, `CMakeLists.txt` | Python binding to `libslic3r`. 22 tests pass. See step 4. |
 | Dependency build in `build/deps` | Done. All 24 packages built with no patches. |
 | `libslic3r` build in `build/prusaslicer` | Done. Console binary at `build/prusaslicer/src/prusa-slicer`. |
 | Converted Centauri Carbon profile | Validated against Orca on a test cube. See step 3. |
-| `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 14 tests pass. See step 5. |
+| `deli load` (`src/deli/cli.py`, `src/deli/library.py`) | Done. 15 tests pass. See step 5. |
 | `deli printer`, `deli filament`, `deli process` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 19 tests pass. See step 5. |
 | `profiles/` | The converted Centauri Carbon printer, process and filament. 4 tests pass. |
 | `deli add` (`src/deli/cli.py`, `src/deli/project.py`) | Done. 11 tests pass. See step 5. |
 | `deli set`, `deli unset` (`src/deli/cli.py`, `src/deli/settings.py`) | Done. 20 tests pass. See step 5. |
 | `deli scale`, `deli rotate`, `deli move` (`src/deli/cli.py`) | Done. 32 tests pass. See step 5. |
-| `deli slice` (`src/deli/cli.py`) | Done. 14 tests pass. See step 5. |
+| `deli slice` (`src/deli/cli.py`) | Done. 18 tests pass. See step 5. |
 | `deli pause` (`src/deli/cli.py`) | Done. 8 tests pass. See step 5. |
-| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 17 tests pass. See step 6. |
+| `deli view` (`src/deli/view.py`, `src/deli/viewer/`) | Done. 18 tests pass. See step 6. |
 | `deli send` (`src/deli/send.py`) | Done against fake printers. 15 tests pass. `deli send --print` has uploaded and started one real print on the Centauri Carbon (2026-10-03). See "Upload" below. |
 | `deli config` (`src/deli/config.py`) | Done. 27 tests pass. See step 5. |
 | `deli completion` (`src/deli/complete.py`) | Done. 10 tests pass. See step 5. |
@@ -467,8 +467,18 @@ Done. 8 tests pass.
   uint32 layer each, a uint8 role each. The page draws one box per extrusion (an
   `InstancedMesh`) in PrusaSlicer's preview colours, lists the roles in use, and has a
   slider that draws the print up to a layer. Supports show as extrusions; so do the
-  start G-code's purge lines (role Custom). Travel moves are not drawn. G-code written
-  elsewhere with `slice -o` is not found.
+  start G-code's purge lines (role Custom).
+- Pauses show in the sliced view: the colours are lighter from one pause to the next
+  and back again after it, the slider has a tick at each (a `datalist`), and its label
+  says "then a pause" on that layer. Travel moves come from `_engine.toolpaths` as the
+  role "Travel", the last name in `extrusion_roles()`, with no width or height; the
+  page draws them as thin lines when its "travel moves" box is ticked. Scrolling zooms
+  towards the pointer (`OrbitControls.zoomToCursor`), not the middle of the bed.
+- G-code written elsewhere with `slice -o` is found: `slice` calls
+  `view.remember_output`, which notes the path in
+  `$XDG_STATE_HOME/deli/sliced-<hash of the directory>` and removes the note when the
+  G-code goes to the usual place again. `tests/conftest.py` points `XDG_STATE_HOME` and
+  `XDG_RUNTIME_DIR` at a temporary directory for every test.
 - `deli view` does not hold the shell. `view.start` opens the listening socket, so a taken
   port is reported at once and the browser can connect straight away, and hands it
   (`pass_fds`) to a detached process running the hidden `deli view --serve FD`. That
@@ -492,14 +502,8 @@ per-part settings, multi-filament, more host types.
 
 **Viewer, to do:**
 
-- Show pauses in the sliced view (asked for by the user, 2026-10-03): where the print
-  pauses should be visible, probably by a change of colour from that layer on, since a
-  pause is where the filament is changed. `/state` already has the layers in `pauses`;
-  a mark on the slider at each would help too.
-- Zooming aims at the bed's centre, so a small part elsewhere takes panning to look at.
 - Speed with very large prints is unmeasured: organic supports on a Gridfinity bin came
   to about 977,000 extrusions, one box each.
-- Travel moves are not drawn, and G-code written elsewhere with `slice -o` is not found.
 - A moved part has been checked through the server's output only, not looked at.
 
 **Other small things, to do:** two parts placed with `deli move` are not checked for
@@ -582,10 +586,14 @@ Open items, each a real behaviour difference from Orca:
 
 - **Excluded bed corner.** Done: Orca's 246–256 × 0–20 mm is cut out of the converted
   `bed_shape`, and the engine keeps parts off it (see step 5, "Placement").
-- **Flow.** Orca's process has `print_flow_ratio` 0.97 on top of the filament's 0.98.
-  It is not applied. Decide whether deli multiplies it into `extrusion_multiplier` when
-  it merges the three profiles. Measured on the test cube: deli extrudes 1489.8 mm of
-  filament against Orca's 1440.1 mm, about 3 % more.
+- **Flow.** Done. Orca's process has `print_flow_ratio` 0.97 on top of the filament's
+  0.98, and PrusaSlicer has no print-level flow. The converter now keeps it as a process
+  setting of deli's own, `print_flow_ratio` (`library.OWN`): `deli load` keeps it, `deli
+  set` takes it, and `settings.for_engine`, through which `slice`, `view` and `set`'s
+  checks all hand settings to the engine, multiplies the filament's
+  `extrusion_multiplier` by it (0.98 x 0.97 = 0.9506 in the G-code's config block) and
+  leaves the key out. Before this, measured on the test cube, deli extruded 1489.8 mm
+  against Orca's 1440.1 mm, about 3 % more. Not yet printed with.
 - **First layer change.** PrusaSlicer skips `before_layer_gcode` and `layer_gcode` on
   the first layer; Orca runs them on every layer. The printer is therefore never told
   `CURRENT_LAYER=1` and reports layer 0 until the second layer starts.
@@ -595,14 +603,28 @@ Open items, each a real behaviour difference from Orca:
   `CURRENT_LAYER`, but the remaining time stays at 00:00:00 and the layer total at 0
   ("25 /0"), although `SET_PRINT_STATS_INFO TOTAL_LAYER=160` is sent every layer. The
   file list likewise shows no layer count or material length for deli's files and does
-  for Orca's. To do: (1) time: PrusaSlicer's `remaining_times = 1` writes
-  `M73 P.. R..` lines in the form Orca's file has (checked with the Centauri profile),
-  so the converter could set it; untried on the printer. (2) layer total: probably read
-  from Orca's header, whose first lines are `; HEADER_BLOCK_START`, `; generated by
-  OrcaSlicer ...`, `; total layer number: 67`, `; filament_density`, `; filament_diameter`,
-  `; max_z_height`, `; filament: 1`, `; HEADER_BLOCK_END`; deli would have to write
-  such a block at the top of the file after slicing. Which lines the firmware reads is
-  a guess until tried.
+  for Orca's. Both now written, neither yet seen on the printer: (1) time: the
+  converter sets PrusaSlicer's `remaining_times` (on unless Orca's `disable_m73` is 1),
+  which writes `M73 P.. R..` lines in the form Orca's file has. With a pause in the
+  print PrusaSlicer also writes `M73 C..` lines (time to the pause), which Orca does
+  not; whether the firmware minds is not known. (2) layer total: settled on 2026-10-04
+  by uploading four test files, each stating the count one of the ways Orca does, and
+  reading the printer's file list (its "Layer Height" column is the layer count). The
+  firmware reads `; total layers count = N` from Orca's closing figures, just before
+  `; estimated printing time (normal mode)`. It does not read Orca's `HEADER_BLOCK`
+  (`; total layer number: N`), with or without a `; generated by OrcaSlicer` line, nor
+  `;LAYER_COUNT:N`. How to write it is the printer definition's business, the user
+  said, not `slice`'s. The printer's end G-code was tried first and does not work
+  (`deli-test-5`): it lands before the `M73 P100 R0` PrusaSlicer writes after the end
+  G-code, and the firmware evidently reads only the comments after the last command. So
+  the printer carries a setting of deli's own, `gcode_footer` (`library.OWN`; comment
+  lines only, `{total_layer_count}` filled in), which the converter gives every
+  converted printer as Orca's line, and `slice` inserts it just before the estimated
+  printing time (`_write_footer` in `cli.py`, with the engine's `SliceResult.layers`),
+  the place that was seen to work. A printer loaded from a plain PrusaSlicer file has no
+  footer unless its author gives it one. The total during a print ("25 /0" before) has
+  not been looked at since. The test files, `deli-test-1` to `-5`, were left on the
+  printer for the user to delete.
 - **Fan values.** PrusaSlicer writes fractional fan speeds such as `M106 S249.9`; Orca
   writes whole numbers. The firmware accepts them: during the same print the page showed
   the model fan at 28 % while the G-code's last command was `M106 S71.4`.

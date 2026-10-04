@@ -368,6 +368,11 @@ def convert_machine(machine: Orca) -> Converted:
         if old in machine:
             out[new] = _escape(convert_gcode(_first(machine[old]), literals))
             handled.add(old)
+    # Orca closes every file with the number of layers, among the figures after the last
+    # command, and firmware made for its files reads it there (the Centauri Carbon's does,
+    # for its file list). PrusaSlicer writes no such line, and a printer's end G-code comes
+    # too early for it, so the printer carries it in a setting of deli's own.
+    out["gcode_footer"] = "; total layers count = {total_layer_count}"
     # PrusaSlicer refuses relative extrusion unless every layer change resets E, which it
     # looks for literally in layer_gcode. Orca does not need it, so most of its printers lack it.
     layer = _first(machine.get("layer_change_gcode", ""))
@@ -403,6 +408,9 @@ def convert_machine(machine: Orca) -> Converted:
         result.notes.append("change_filament_gcode was not converted: single-filament prints only.")
     if machine.get("host_type"):
         result.notes.append(f"host_type {_first(machine['host_type'])!r} has no PrusaSlicer equivalent.")
+    # Orca writes M73 progress lines unless told not to; PrusaSlicer writes them only when asked.
+    out["remaining_times"] = "0" if _first(machine.get("disable_m73", "0")) == "1" else "1"
+    handled.add("disable_m73")
     return _finish(result, machine, handled, "no PrusaSlicer equivalent")
 
 
@@ -642,10 +650,9 @@ def convert_process(process: Orca, nozzle: float) -> Converted:
     ratio = _first(process.get("print_flow_ratio", "1"))
     handled.add("print_flow_ratio")
     if float(ratio) != 1:
-        result.notes.append(
-            f"print_flow_ratio {ratio} is not applied: PrusaSlicer has no print-level flow "
-            "multiplier, so multiply the filament's extrusion_multiplier by it."
-        )
+        # PrusaSlicer has no print-level flow multiplier. deli keeps Orca's as a setting of
+        # its own and multiplies the filament's extrusion_multiplier by it when it slices.
+        out["print_flow_ratio"] = ratio
     return _finish(result, process, handled, "no PrusaSlicer equivalent")
 
 

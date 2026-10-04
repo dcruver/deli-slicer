@@ -169,3 +169,14 @@ def test_missing_file_is_an_error(home, tmp_path, capsys):
     assert main(["load", "printer", str(tmp_path / "missing.ini")]) == 1
 
     assert "cannot read" in capsys.readouterr().err
+
+
+def test_delis_own_settings_are_kept(tmp_path):
+    source = tmp_path / "process.ini"
+    source.write_text("layer_height = 0.2\nprint_flow_ratio = 0.970\nprint_settings_id = with flow\n")
+
+    loaded = library.load("process", str(source))
+
+    assert loaded.settings["print_flow_ratio"] == "0.97"
+    assert loaded.unknown == []
+    assert library.read_settings(loaded.path)["print_flow_ratio"] == "0.97"
