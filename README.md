@@ -1,4 +1,4 @@
-# deli
+# deli-slicer
 
 A git-style, shell-native slicer front end for 3D printing.
 
@@ -30,18 +30,22 @@ the end.
 
 ## Motivation
 
-deli came out of three frustrations with the slicers I was using:
+deli came out of my frustrations with the slicers I was using:
 
 - **PrusaSlicer has no settings built in for my printer**, an Elegoo Centauri Carbon.
 - **OrcaSlicer does, but it crashes often** and generally does not like my PC.
+- **OrcaSlicer supports lots of printers, but it is somewhat focused on Bambu Lab's.**
+- **I have two printers, the Elegoo and a Voron, and want to configure both easily.**
+  I found myself using both slicers, plus Cura now and then.
 - **Both have bewildering settings screens**, mostly because there are so many settings
   and options. Most of them stay at their defaults, so finding a particular one means
   hunting and guessing, and the guess is often wrong.
 
-So deli takes the printer's settings from OrcaSlicer, slices with PrusaSlicer's engine,
-and has no window to open. A print is a short text file that holds only what you
-changed, and you change a setting by its name: `deli set infill 20%`. When the name is
-not quite right, deli suggests the ones that are close.
+So deli takes a printer's settings from OrcaSlicer, slices with PrusaSlicer's engine,
+and has no window to open. Every printer is a profile in one library, chosen for each
+print, so one tool can serve them all. A print is a short text file that holds only
+what you changed, and you change a setting by its name: `deli set infill 20%`. When
+the name is not quite right, deli suggests the ones that are close.
 
 ## Install
 
