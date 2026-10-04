@@ -52,7 +52,11 @@ Do not reopen these without a reason.
   the container's shared copies; and fuzzy skin's `std::random_device::entropy()`, the
   one call needing GLIBCXX_3.4.25, wrapped at link time (`src/deli/entropy.cpp`, answers
   0). Dependencies take about 15-27 minutes and are cached by PrusaSlicer's commit and
-  `build-deps.sh`; the engine takes about 30 on every run. *Printers*
+  `build-deps.sh`; the engine takes about 30 on every run.
+  Releases: pushing a tag `vX.Y.Z` that matches `pyproject.toml`'s version builds and
+  tests the wheels and publishes them as a GitHub release (`release` job); a mismatched
+  tag fails in the first minute. PyPI is for later, once there are wheels for more than
+  Linux x86-64 (and `deli` may be taken there). *Printers*
   are not shipped a thousand at a time: `deli import orca --github` converts any of
   Orca's on demand, and a sweep over all of them is to publish which convert and slice.
   **Matching OrcaSlicer's output is a guide, not a requirement:** compare with it to find

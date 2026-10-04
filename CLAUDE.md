@@ -44,6 +44,8 @@ make uninstall
 make wheel           # build dist/deli-*.whl to give to someone
 ```
 
+Releasing: set `version` in `pyproject.toml`, commit, and push a tag `vX.Y.Z` with the same version. `.github/workflows/wheels.yml` refuses a tag that does not match, builds and tests every platform's wheel, and publishes them as a GitHub release (a tag with a `-`, such as `v0.2.0-rc1`, as a pre-release). Each platform's build job uploads its wheel as an artifact named `wheel-<platform>`; a new platform's test job goes in the release job's `needs`.
+
 ## Local environment
 
 - GCC 15.2 and CMake 4.2, both newer than PrusaSlicer's pinned dependencies expect. `sudo` needs a password.

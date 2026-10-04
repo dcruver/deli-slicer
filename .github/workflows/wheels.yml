@@ -1,5 +1,6 @@
 # Builds deli's wheels, one per platform (the engine uses Python's stable ABI, so a wheel
 # serves every Python from 3.12 on), and runs the tests against each on a clean machine.
+# A tag vX.Y.Z also publishes them as a GitHub release; its version must be pyproject's.
 name: wheels
 
 on:
@@ -9,8 +10,25 @@ on:
     tags: ["v*"]
 
 jobs:
+  # Before an hour of building: a tag that is not the package's version would give
+  # wheels named for one version under a release named for another.
+  version:
+    name: Tag matches the version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but pyproject.toml says $version. Change one to match the other."
+            exit 1
+          fi
+
   linux:
     name: Linux x86-64 wheel
+    needs: version
     runs-on: ubuntu-24.04
     # An old glibc, so the wheel loads on any distribution from about 2019 on.
     container: quay.io/pypa/manylinux_2_28_x86_64
@@ -68,7 +86,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: wheel-as-built
+          name: unrepaired-linux-x86_64
           path: dist/*.whl
 
       - uses: actions/upload-artifact@v4
@@ -129,3 +147,38 @@ jobs:
           path: |
             PRINTERS.md
             printers.json
+
+  # Every platform's wheel, once its tests pass. A platform added later goes in `needs`;
+  # its wheel artifact, named wheel-<platform>, is picked up from there.
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test-linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: wheelhouse
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l wheelhouse
+          cat > notes.md <<NOTES
+          Install the wheel for your platform with pip or uv, for example:
+
+              pip install https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME/<wheel file>
+              uv tool install https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME/<wheel file>
+
+          Each wheel serves Python 3.12 and later. The Linux wheel needs glibc 2.28 or later
+          (most distributions from 2019 on).
+          NOTES
+          # A tag such as v0.2.0-rc1 is published as a pre-release.
+          case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; *) pre= ;; esac
+          gh release create "$GITHUB_REF_NAME" wheelhouse/*.whl --verify-tag --title "deli ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md --generate-notes $pre
