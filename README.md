@@ -28,6 +28,21 @@ for two real prints on an Elegoo Centauri Carbon, sliced and sent with
 `deli send --print`: a cube, and a Benchy with a pause part-way. See "Not done yet" at
 the end.
 
+## Motivation
+
+deli came out of three frustrations with the slicers I was using:
+
+- **PrusaSlicer has no settings built in for my printer**, an Elegoo Centauri Carbon.
+- **OrcaSlicer does, but it crashes often** and generally does not like my PC.
+- **Both have bewildering settings screens**, mostly because there are so many settings
+  and options. Most of them stay at their defaults, so finding a particular one means
+  hunting and guessing, and the guess is often wrong.
+
+So deli takes the printer's settings from OrcaSlicer, slices with PrusaSlicer's engine,
+and has no window to open. A print is a short text file that holds only what you
+changed, and you change a setting by its name: `deli set infill 20%`. When the name is
+not quite right, deli suggests the ones that are close.
+
 ## Install
 
 deli is a Python package with PrusaSlicer's slicing engine compiled in. You need
