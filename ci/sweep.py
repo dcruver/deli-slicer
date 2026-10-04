@@ -118,7 +118,7 @@ def _reason(why: str) -> str:
     return line if len(line) <= 160 else line[:157] + "..."
 
 
-def report(results: list[dict], label: str) -> str:
+def report(results: list[dict], label: str, ref: str | None = None) -> str:
     counts = collections.Counter(r["outcome"] for r in results)
     lines = [
         "# Printers",
@@ -126,7 +126,7 @@ def report(results: list[dict], label: str) -> str:
         f"Every printer preset in {label}, converted by deli and used to slice a 20 mm cube",
         f"on {datetime.date.today().isoformat()}. This page is written by `ci/sweep.py`.",
         "",
-        "**What it tells you:** whether `deli import orca printer \"<name>\" --github` gives you a printer",
+        f"**What it tells you:** whether `deli import orca printer \"<name>\" --github{' ' + ref if ref else ''}` gives you a printer",
         "deli can slice for. **What it does not:** whether the G-code prints well. Only the Elegoo",
         "Centauri Carbon has been printed on; if you print on another, please say how it went.",
         "",
@@ -164,6 +164,7 @@ def main() -> int:
     parser.add_argument("--vendor", help="only this vendor")
     parser.add_argument("--jobs", type=int, default=4, help="printers to try at once (default 4)")
     parser.add_argument("--label", default="OrcaSlicer", help="what to call the presets in the report, such as 'OrcaSlicer 2.4.2'")
+    parser.add_argument("--ref", help="the OrcaSlicer tag the presets come from, for the import command the report shows")
     parser.add_argument("--out", type=Path, help="write the report here (default: print a summary only)")
     parser.add_argument("--json", type=Path, help="write every result here")
     parser.add_argument("--one", help=argparse.SUPPRESS)
@@ -182,7 +183,7 @@ def main() -> int:
     if args.json:
         args.json.write_text(json.dumps(results, indent=1))
     if args.out:
-        args.out.write_text(report(results, args.label) + "\n")
+        args.out.write_text(report(results, args.label, args.ref) + "\n")
     return 0
 
 

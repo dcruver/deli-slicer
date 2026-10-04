@@ -44,7 +44,15 @@ Do not reopen these without a reason.
   and both are to be done without owning the platforms. *Wheels* for the common systems
   are built and tested on GitHub's hosted machines (`.github/workflows/wheels.yml`,
   `ci/build-deps.sh`): Linux x86-64 first, then macOS, Linux ARM64 and Windows (which
-  needs `deli view`'s background server ported: it passes a file descriptor). *Printers*
+  needs `deli view`'s background server ported: it passes a file descriptor). The Linux
+  x86-64 wheel is done: `manylinux_2_28`, built in the `manylinux_2_28` container,
+  installed and tested on Ubuntu 22.04 (first green run 2026-10-04). What it took: GMP
+  from ftp.gnu.org (gmplib.org does not answer GitHub's machines); zlib and libpng built
+  statically into the deps prefix before the rest, since the superbuild otherwise links
+  the container's shared copies; and fuzzy skin's `std::random_device::entropy()`, the
+  one call needing GLIBCXX_3.4.25, wrapped at link time (`src/deli/entropy.cpp`, answers
+  0). Dependencies take about 15-27 minutes and are cached by PrusaSlicer's commit and
+  `build-deps.sh`; the engine takes about 30 on every run. *Printers*
   are not shipped a thousand at a time: `deli import orca --github` converts any of
   Orca's on demand, and a sweep over all of them is to publish which convert and slice.
   **Matching OrcaSlicer's output is a guide, not a requirement:** compare with it to find
@@ -190,7 +198,7 @@ Done. Start at step 5.
   to the console binary's, apart from the timestamp and object name.
 - Checked: `uv build --wheel` gives a 24 MB `cp312-abi3-linux_x86_64` wheel holding
   only the package and the module, which needs no shared libraries beyond libc and
-  libstdc++. Not done: a manylinux build, an sdist, licence notices for the bundled
+  libstdc++. Not done: an sdist, licence notices for the bundled
   libraries, and any platform other than Linux x86_64.
 - Post-processing scripts (`post_process`) are not run by the module.
 - Thumbnails: libslic3r only encodes the picture; PrusaSlicer draws it with OpenGL. So
@@ -690,7 +698,10 @@ Open items, each a real behaviour difference from Orca:
   is left is mostly start G-code with variables that have no simple equivalent
   (Snapmaker's fan expressions, `bed_mesh_algo`, `first_layer_center_no_wipe_tower`,
   Bambu's newer machines): the "Why printers fail" table in `PRINTERS.md` is the to-do
-  list. The workflow runs the sweep against Orca's main branch after the wheel builds.
+  list. The workflow runs the sweep after the wheel builds, against an Orca release tag
+  (`ORCA_REF` in the workflow, v2.4.2) so that `PRINTERS.md` changes only when the tag
+  does; it matches the installed 2.4.2 exactly. Orca's main branch on 2026-10-04 gave
+  931 of 1,129, all 56 Bambu printers among them (8 of 48 slice in 2.4.2).
   The older note follows.
 - **Other printers, as first measured.** The converter has only been checked on the Centauri Carbon. Run
   over all 1,001 printer presets bundled with Orca 2.4.2, each with one compatible

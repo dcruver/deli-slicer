@@ -101,6 +101,9 @@ jobs:
     name: Every printer OrcaSlicer ships
     needs: linux
     runs-on: ubuntu-22.04
+    env:
+      # An OrcaSlicer release, so that PRINTERS.md changes only when this does.
+      ORCA_REF: v2.4.2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -113,13 +116,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install wheelhouse/*.whl
-      - name: OrcaSlicer's profiles, as they are today
+      - name: OrcaSlicer's profiles, as released
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/SoftFever/OrcaSlicer orca
+          git clone --depth 1 --branch "$ORCA_REF" --filter=blob:none --sparse https://github.com/SoftFever/OrcaSlicer orca
           git -C orca sparse-checkout set resources/profiles
       # Says which printers convert and slice; it does not fail the run when some do not.
       - name: Convert each and slice a cube
-        run: python ci/sweep.py --orca orca/resources/profiles --label "OrcaSlicer's main branch" --out PRINTERS.md --json printers.json
+        run: python ci/sweep.py --orca orca/resources/profiles --label "OrcaSlicer ${ORCA_REF#v}" --ref "$ORCA_REF" --out PRINTERS.md --json printers.json
       - uses: actions/upload-artifact@v4
         with:
           name: printers

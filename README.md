@@ -108,8 +108,8 @@ deli import orca filament "Elegoo PETG-CF @ECC" --github --vendor Elegoo
 deli import orca printer --github --vendor Elegoo      # lists that vendor's printers
 ```
 
-[PRINTERS.md](PRINTERS.md) lists every printer Orca ships and whether deli can convert
-it and slice with it. A name can be any unique part of Orca's name, in any case. `--vendor` (Elegoo, BBL,
+[PRINTERS.md](PRINTERS.md) lists every printer Orca 2.4.2 ships and whether deli can
+convert it and slice with it (`--github v2.4.2` imports from that release). A name can be any unique part of Orca's name, in any case. `--vendor` (Elegoo, BBL,
 Creality, Prusa, Voron, ...) saves fetching every vendor's list; without it, a name
 that begins with the vendor's is found just as quickly. Processes and filaments are
 converted for the printer they say they fit; `--printer` chooses another.
@@ -297,7 +297,7 @@ Things that a user would notice, roughly in the order they matter:
   is where it should get it from; nobody has watched a print since. The layer count now
   shows in the printer's file list: it comes from the printer profile's `gcode_footer`,
   comment lines deli adds to the end of the file, which converted printers have.
-- **Other printers.** Of the 1,001 printers OrcaSlicer ships, 789 convert and slice a
+- **Other printers.** Of the 1,001 printers OrcaSlicer 2.4.2 ships, 789 convert and slice a
   test cube; [PRINTERS.md](PRINTERS.md) lists every one, and why the rest fail. That
   is all it says: only the Centauri Carbon has been printed on, and only it and the
   Bambu Lab P1S have been compared with Orca's own output.
