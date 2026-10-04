@@ -676,7 +676,23 @@ Open items, each a real behaviour difference from Orca:
     documentation and tested against fakes only.
   - Without a file, `deli send` sends this print's G-code and refuses if `deli.toml`
     is newer than it. Upload only by default; `--print` starts the print.
-- **Other printers.** The converter has only been checked on the Centauri Carbon. Run
+- **Other printers, now.** `ci/sweep.py --orca DIR` converts every printer in Orca's
+  `profiles` folder with its default process and filament (or the first that fit; the
+  shared `OrcaFilamentLibrary` counts), slices a cube with each in a process of its own,
+  and writes `PRINTERS.md`. On Orca 2.4.2 on 2026-10-04: 789 of 1,001 slice, 186 fail
+  while slicing, 16 have settings the engine rejects, 10 have no process. It started at
+  348; what it turned up and was fixed in the converter: printer models listed as
+  presets (`machine_model` files in the machine folder), beds and thumbnails written as
+  one string instead of a list, a lone `0x0` as "no excluded area", thumbnail formats
+  PrusaSlicer cannot write (dropped, with a note), multi-line `printer_notes` breaking
+  the INI, percentage overhang speeds, `[name[index]]` placeholders, and Orca-only
+  G-code variables (`GCODE_RENAMES`, and `GCODE_ABSENT` for what deli does not do). What
+  is left is mostly start G-code with variables that have no simple equivalent
+  (Snapmaker's fan expressions, `bed_mesh_algo`, `first_layer_center_no_wipe_tower`,
+  Bambu's newer machines): the "Why printers fail" table in `PRINTERS.md` is the to-do
+  list. The workflow runs the sweep against Orca's main branch after the wheel builds.
+  The older note follows.
+- **Other printers, as first measured.** The converter has only been checked on the Centauri Carbon. Run
   over all 1,001 printer presets bundled with Orca 2.4.2, each with one compatible
   process and filament and a test cube: 400 sliced, 233 failed while slicing, 77 gave a
   config the engine rejected, 28 crashed the converter, and 263 were not tested because

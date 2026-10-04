@@ -364,3 +364,69 @@ def test_crosshatch_infill_becomes_cubic():
     converted = orca.convert_process({"sparse_infill_pattern": "crosshatch"}, 0.4)
 
     assert converted.settings["fill_pattern"] == "cubic"
+
+
+def test_printer_models_are_not_presets(tmp_path):
+    machine = tmp_path / "machine"
+    machine.mkdir()
+    (machine / "Some Printer.json").write_text(json.dumps({"type": "machine_model", "name": "Some Printer"}))
+    (machine / "Some Printer 0.4 nozzle.json").write_text(json.dumps({"type": "machine", "name": "Some Printer 0.4 nozzle"}))
+
+    assert list(orca.load_index([tmp_path])) == [("machine", "Some Printer 0.4 nozzle")]
+
+
+# What a sweep over every printer Orca ships turned up (ci/sweep.py).
+
+
+def test_a_bed_given_as_one_string_is_read_as_points():
+    out = orca.convert_machine({"printable_area": "0x0,220x0,220x220,0x220", "bed_exclude_area": "0x0"})
+
+    assert out.settings["bed_shape"] == "0x0,220x0,220x220,0x220"
+    assert not any("bed_exclude_area" in note for note in out.notes)  # a lone 0x0 excludes nothing
+
+
+def test_an_excluded_area_that_is_not_points_is_noted_not_fatal():
+    out = orca.convert_machine({"printable_area": ["0x0", "200x0", "200x200", "0x200"], "bed_exclude_area": ["0x0", "0,11", "5x11", "5x0"]})
+
+    assert out.settings["bed_shape"] == "0x0,200x0,200x200,0x200"
+    assert any("not enforced" in note for note in out.notes)
+
+
+def test_thumbnails_in_formats_prusaslicer_cannot_write_are_left_out():
+    out = orca.convert_machine({"thumbnails": ["320x320/COLPIC/#30394F", "160x160/COLPIC/#30394F", "160x160/PNG"], "thumbnails_format": "COLPIC"})
+
+    assert out.settings["thumbnails"] == "160x160/PNG"
+    assert any("320x320/COLPIC" in note for note in out.notes)
+    assert "thumbnails" not in orca.convert_machine({"thumbnails": ""}).settings
+    assert orca.convert_machine({"thumbnails": "96x96,300x300", "thumbnails_format": "PNG"}).settings["thumbnails"] == "96x96/PNG,300x300/PNG"
+
+
+def test_notes_over_several_lines_stay_on_one():
+    out = orca.convert_machine({"printer_notes": "Keep these:\nPRINTER_MODEL_MINI\n"})
+
+    assert out.settings["printer_notes"] == "Keep these:\\nPRINTER_MODEL_MINI\\n"
+
+
+def test_overhang_speeds_may_be_percentages():
+    speeds = {"overhang_4_4_speed": "0", "overhang_3_4_speed": "50%", "overhang_2_4_speed": "80%", "overhang_1_4_speed": "0%"}
+    out = orca.convert_process({"outer_wall_speed": "60", **speeds}, nozzle=0.4).settings
+
+    assert [out[f"overhang_speed_{i}"] for i in range(4)] == ["60", "50%", "80%", "60"]
+
+
+def test_gcode_variables_orca_has_and_prusaslicer_does_not():
+    gcode = (
+        "M140 S[bed_temperature_initial_layer[initial_extruder]]\n"
+        "M190 S[hot_plate_temp_initial_layer]\n"
+        "BED_MESH_CALIBRATE mesh_min={adaptive_bed_mesh_min[0]},{adaptive_bed_mesh_min[1]}\n"
+        "{if ! spiral_mode}M74{endif}\n"
+        "; plate [plate_name]\n"
+    )
+
+    assert orca.convert_gcode(gcode, orca.GCODE_ABSENT) == (
+        "M140 S{first_layer_bed_temperature[initial_extruder]}\n"
+        "M190 S[first_layer_bed_temperature]\n"
+        "BED_MESH_CALIBRATE mesh_min={first_layer_print_min[0]},{first_layer_print_min[1]}\n"
+        "{if ! spiral_vase}M74{endif}\n"
+        "; plate \n"
+    )

@@ -41,7 +41,9 @@ def load_index(roots: list[Path]) -> dict[tuple[str, str], Orca]:
                     data = json.loads(path.read_text())
                 except (OSError, ValueError):
                     continue
-                if isinstance(data, dict) and data.get("name"):
+                # A vendor's machine folder also holds its printer models ("Anker M5"), which
+                # describe a product for Orca's setup wizard and are not presets.
+                if isinstance(data, dict) and data.get("name") and data.get("type") != "machine_model":
                     index.setdefault((kind, data["name"]), data)
     return index
 
@@ -120,6 +122,30 @@ GCODE_RENAMES = {
     # settings at 0, as they ship, it falls back to exactly these.
     "flush_volumetric_speeds": "filament_max_volumetric_speed",
     "flush_temperatures": "temperature",
+    # Orca meshes the bed under the first layer plus a margin; this is the first layer itself.
+    "adaptive_bed_mesh_min": "first_layer_print_min",
+    "adaptive_bed_mesh_max": "first_layer_print_max",
+    "initial_layer_print_height": "first_layer_height",
+    "spiral_mode": "spiral_vase",
+    "overall_chamber_temperature": "chamber_temperature[initial_extruder]",
+    # Orca keeps a bed temperature for each kind of plate. The converted filament has the
+    # one for the printer's plate, so whichever plate the G-code names, that is the one meant.
+    **{f"{plate}_plate_temp": "bed_temperature" for plate in ("cool", "eng", "hot", "textured", "supertack", "textured_cool")},
+    **{f"{plate}_plate_temp_initial_layer": "first_layer_bed_temperature" for plate in ("cool", "eng", "hot", "textured", "supertack", "textured_cool")},
+}
+
+# Variables for things deli does not do, as the constant that says so: no plate names, no
+# first-layer scan or timelapse, and none of the fans and filters whose settings are dropped.
+GCODE_ABSENT = {
+    "plate_name": '""',
+    "scan_first_layer": "false",
+    "timelapse_type": "0",
+    "additional_cooling_fan_speed": "0",
+    "during_print_exhaust_fan_speed": "0",
+    "complete_print_exhaust_fan_speed": "0",
+    "activate_air_filtration": "false",
+    "activate_air_filtration_on_completion": "false",
+    "idle_temperature": "0",
 }
 
 # Orca's outer_wall_volumetric_speed: the outer wall's speed times its line's cross-section
@@ -160,6 +186,7 @@ BUILTIN_VARIABLES = {
 
 _EXPRESSION = re.compile(r"(\{[^{}]*\})")
 _LEGACY = re.compile(r"\[([a-z_][a-z0-9_]*)\]")
+_LEGACY_INDEXED = re.compile(r"\[([a-z_][a-z0-9_]*\[[a-z0-9_]+\])\]")  # [name[index]], which only Orca reads
 _IDENTIFIER = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 
 
@@ -196,6 +223,7 @@ def convert_gcode(gcode: str, literals: dict[str, str] | None = None) -> str:
         if i % 2:
             pieces[i] = "{" + _rewrite_expression(piece[1:-1], literals) + "}"
         else:
+            piece = _LEGACY_INDEXED.sub(lambda m: "{" + _rewrite_expression(m.group(1), literals) + "}", piece)
             pieces[i] = _LEGACY.sub(lambda m: _rewrite_legacy(m, literals), piece)
     return "".join(pieces)
 
@@ -296,9 +324,19 @@ def _finish(result: Converted, source: Orca, handled: set[str], why: str) -> Con
     return result
 
 
+def _points(value: object) -> list[str]:
+    """Orca's points ("0x0", ...), which it writes as a list or as one comma-separated string."""
+    return [str(point).strip() for point in (value if isinstance(value, list) else str(value).split(","))]
+
+
 def _rectangle(points: list[str]) -> tuple[float, float, float, float] | None:
     """The bounds of four Orca points ("0x0", ...) when they are an axis-aligned rectangle."""
-    pts = {tuple(float(n) for n in point.split("x")) for point in points}
+    try:
+        pts = {tuple(float(n) for n in point.split("x")) for point in points}
+    except ValueError:  # some presets have a point that is not one
+        return None
+    if any(len(point) != 2 for point in pts):
+        return None
     xs, ys = {x for x, _ in pts}, {y for _, y in pts}
     if len(pts) != 4 or len(xs) != 2 or len(ys) != 2:
         return None
@@ -355,15 +393,15 @@ def convert_machine(machine: Orca) -> Converted:
 
     for old, new in MACHINE_RENAMES.items():
         if old in machine:
-            out[new] = _joined(machine[old])
+            out[new] = _escape(_joined(machine[old]))  # printer_notes may run over several lines
             handled.add(old)
 
     if "printable_area" in machine:
-        out["bed_shape"] = _joined(machine["printable_area"])
+        out["bed_shape"] = ",".join(_points(machine["printable_area"]))
         handled.add("printable_area")
 
     bed_name = BED_TYPES.get(_first(machine.get("default_bed_type", "4")), ("", "unknown"))[1]
-    literals = {"curr_bed_type": f'"{bed_name}"', "outer_wall_volumetric_speed": f"({OUTER_WALL_VOLUMETRIC_SPEED})"}
+    literals = GCODE_ABSENT | {"curr_bed_type": f'"{bed_name}"', "outer_wall_volumetric_speed": f"({OUTER_WALL_VOLUMETRIC_SPEED})"}
     for old, new in MACHINE_GCODE.items():
         if old in machine:
             out[new] = _escape(convert_gcode(_first(machine[old]), literals))
@@ -381,9 +419,18 @@ def convert_machine(machine: Orca) -> Converted:
         result.notes.append("G92 E0 added to the layer-change G-code; PrusaSlicer requires it with relative extrusion.")
 
     if "thumbnails" in machine:
-        fmt = _first(machine.get("thumbnails_format", "PNG"))
-        sizes = machine["thumbnails"] if isinstance(machine["thumbnails"], list) else [machine["thumbnails"]]
-        out["thumbnails"] = ",".join(f"{size}/{fmt}" for size in sizes)
+        # Each is a size, or a size with a format of its own (and, for some, a colour after it).
+        default = _first(machine.get("thumbnails_format", "PNG")).upper()
+        wanted, unknown = [], []
+        for entry in _points(machine["thumbnails"]):
+            size, _, rest = entry.partition("/")
+            fmt = rest.split("/")[0].upper() or default
+            if size:
+                (wanted if fmt in ("PNG", "JPG", "QOI") else unknown).append(f"{size}/{fmt}")
+        if wanted:
+            out["thumbnails"] = ",".join(wanted)
+        if unknown:
+            result.notes.append("thumbnails " + ", ".join(unknown) + " are in a format PrusaSlicer cannot write, so the printer's screen may show no picture.")
         handled.add("thumbnails")
 
     # Orca always extrudes in relative mode and never writes M201/M203 limits
@@ -391,10 +438,11 @@ def convert_machine(machine: Orca) -> Converted:
     out["use_relative_e_distances"] = "1"
     out["machine_limits_usage"] = "time_estimate_only"
 
-    if machine.get("bed_exclude_area"):
+    excluded = _points(machine.get("bed_exclude_area") or [])
+    if len(excluded) > 1:  # a lone "0x0" is how Orca says there is none
         # PrusaSlicer has no excluded bed region, but its bed may be any polygon: cut the
         # region out of the bed, and parts are kept off it when they are arranged.
-        cut = bed_without(machine.get("printable_area", []), machine["bed_exclude_area"])
+        cut = bed_without(_points(machine.get("printable_area", [])), excluded)
         if cut:
             out["bed_shape"] = ",".join(cut)
             handled.add("bed_exclude_area")
@@ -645,7 +693,8 @@ def convert_process(process: Orca, nozzle: float) -> Converted:
         out["enable_dynamic_overhang_speeds"] = "1"
         for index, step in enumerate(steps):
             speed = _first(process[step])
-            out[f"overhang_speed_{index}"] = fallback if float(speed) == 0 else speed
+            # A speed may be a percentage of the outer wall's; 0 means "as the outer wall".
+            out[f"overhang_speed_{index}"] = fallback if float(speed.rstrip("%") or 0) == 0 else speed
 
     ratio = _first(process.get("print_flow_ratio", "1"))
     handled.add("print_flow_ratio")
