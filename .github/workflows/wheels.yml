@@ -36,7 +36,7 @@ jobs:
       # The dependencies take far longer than deli itself and change only with PrusaSlicer.
       - name: PrusaSlicer's dependencies, from an earlier run
         id: deps
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: build/deps/destdir
           key: deps-manylinux_2_28-x86_64-${{ steps.engine.outputs.sha }}-${{ hashFiles('ci/build-deps.sh') }}
@@ -45,14 +45,31 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         run: ci/build-deps.sh
 
+      # Kept as soon as they are built, so a later step failing does not cost them.
+      - name: Keep the dependencies for later runs
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/deps/destdir
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
       - name: Build the wheel
         env:
           # libslic3r's largest sources need several GB each; the runner has 16 GB.
           SKBUILD_BUILD_TOOL_ARGS: -j3
+        run: python -m pip wheel . --no-deps -w dist
+
+      - name: Make it a manylinux wheel
         run: |
-          python -m pip wheel . --no-deps -w dist
-          auditwheel repair dist/*.whl -w wheelhouse
+          auditwheel show dist/*.whl || true
+          auditwheel -v repair dist/*.whl -w wheelhouse
           ls -l wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: wheel-as-built
+          path: dist/*.whl
 
       - uses: actions/upload-artifact@v4
         with:
