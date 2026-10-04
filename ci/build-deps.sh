@@ -18,6 +18,14 @@ if [ "$(uname)" = Darwin ]; then
     excludes="wxWidgets;OpenCSG;Catch2"
 fi
 
+# gmplib.org does not answer GitHub's machines, so GMP comes from GNU's own server. The
+# superbuild checks the hash of a file that is already there and uses it.
+gmp=build/deps/downloads/GMP/gmp-6.2.1.tar.bz2
+if [ ! -f "$gmp" ]; then
+    mkdir -p "$(dirname "$gmp")"
+    curl -fL --retry 3 -o "$gmp" https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.bz2
+fi
+
 cmake -S vendor/PrusaSlicer/deps -B build/deps -G Ninja -DCMAKE_BUILD_TYPE=Release \
     "-DPrusaSlicer_deps_PACKAGE_EXCLUDES=$excludes"
 # One package at a time; each package compiles in parallel.
