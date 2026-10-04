@@ -141,7 +141,7 @@ def test_default_missing_from_the_library_is_noted(home, capsys):
     assert "filament" not in tomllib.loads(Path("deli.toml").read_text())
 
 
-def test_filament_listing_shows_what_is_loaded_and_on_hand(home, capsys):
+def test_filament_listing_shows_the_default_and_what_is_on_hand(home, capsys):
     main(["config", f"printers.{MK3}.filament", "spare-pla"])
     main(["config", f"printers.{MK3}.filaments", f"{ABS},spare-pla"])
     main(["printer", MK3])
@@ -149,7 +149,7 @@ def test_filament_listing_shows_what_is_loaded_and_on_hand(home, capsys):
 
     main(["filament"])
 
-    assert capsys.readouterr().out.splitlines() == [f"  {ABS} (on hand)", "* spare-pla (loaded in the printer)"]
+    assert capsys.readouterr().out.splitlines() == [f"  {ABS} (on hand)", "* spare-pla (the default for this printer)"]
 
 
 def test_send_takes_the_host_from_the_config_and_the_environment_overrides(home, monkeypatch):
@@ -173,23 +173,20 @@ def test_api_key_comes_from_the_config_too(home, monkeypatch):
     send._printer_name = None
 
 
-def test_print_for_a_filament_other_than_the_loaded_one_is_refused(home, capsys):
+def test_a_print_for_a_filament_other_than_the_default_is_sent_without_comment(home, capsys):
     main(["config", f"printers.{MK3}.filament", "spare-pla"])
-    main(["config", HOST, "elegoo://127.0.0.1:1"])  # never reached: the refusal comes first
+    main(["config", HOST, "elegoo://127.0.0.1:1"])  # nothing listens there
     main(["printer", MK3])
     main(["filament", ABS])
     main(["add", "cube.stl"])
     Path("cube.gcode").write_text("G28\n")
     capsys.readouterr()
 
-    assert main(["send", "--print"]) == 1
-    err = capsys.readouterr().err
-    assert f"this print is for the filament '{ABS}', but your config says 'spare-pla' is loaded" in err
-    assert f"deli filament spare-pla" in err
+    assert main(["send", "--print"]) == 1  # only because the address cannot be reached
 
-    assert main(["send"]) == 1  # without --print it goes on (and fails to reach the fake address)
     out, err = capsys.readouterr()
-    assert "note: this print is for" in out and "cannot reach" in err
+    assert "spare-pla" not in out + err
+    assert "cannot reach" in err
 
 
 def chosen() -> dict:
@@ -217,7 +214,7 @@ def test_default_filament_and_process_belong_to_the_printer(home, capsys):
     assert main(["filament", "spare-pla", "--default"]) == 0
     assert main(["process", QUALITY, "--default"]) == 0
 
-    assert "The default filament for 'original-prusa-i3-mk3' is now 'spare-pla', the one loaded in it" in capsys.readouterr().out
+    assert "The default filament for 'original-prusa-i3-mk3' is now 'spare-pla': new prints" in capsys.readouterr().out
     assert tomllib.loads((home / "config.toml").read_text()) == {"printer": MK3, "printers": {MK3: {"filament": "spare-pla", "process": QUALITY}}}
     assert not Path("deli.toml").exists()
 

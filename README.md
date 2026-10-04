@@ -24,8 +24,9 @@ deli send --print
 `deli view` after `deli slice`: the sliced print on the printer's bed, in your browser.
 
 Status: early. Everything above works, and has so far been used on one machine and
-for one real print: a cube on an Elegoo Centauri Carbon, sliced and sent with
-`deli send --print`. See "Not done yet" at the end.
+for two real prints on an Elegoo Centauri Carbon, sliced and sent with
+`deli send --print`: a cube, and a Benchy with a pause part-way. See "Not done yet" at
+the end.
 
 ## Install
 
@@ -123,17 +124,17 @@ in your config (below).
 ```
 deli config printers.elegoo-centauri-carbon-0.6-nozzle.host elegoo://192.168.1.50
 deli printer elegoo-centauri-carbon-0.6-nozzle --default        # the printer new prints start with
-deli filament elegoo-petg-cf-ecc --default                      # the spool loaded in it
+deli filament elegoo-petg-cf-ecc --default                      # the filament new prints on it start with
 deli process 0.30mm-standard-elegoo-cc-0.6-nozzle --default     # its usual process
 ```
 
 This writes `~/.config/deli/config.toml`, which you can also edit by hand. `host` is
 where `deli send` sends; its scheme says what kind of host the printer is:
 `elegoo://` (Elegoo Centauri Carbon), `moonraker://` (Klipper) or `octoprint://`
-(`api_key` alongside, if the host needs one). `filament` is the spool loaded in the
-printer right now and `process` the usual process: `deli printer` uses both as
-defaults for a new print, and `deli send --print` refuses a print sliced for a
-filament other than the loaded one. Update `filament` when you change spools.
+(`api_key` alongside, if the host needs one). `filament` and `process` are what a new
+print on that printer starts with, so you do not choose them again for every print.
+They are defaults and nothing more: a print that chooses another filament is sliced
+and sent like any other.
 
 The three `--default` lines write the config's `printer` key (`deli config printer
 <name>` sets the same one), and that printer's `filament` and `process` (the keys
@@ -195,7 +196,8 @@ the parts: every extrusion, supports included, coloured by what it is for, with 
 slider to go through the layers. It goes back to the parts as soon as the print
 changes. The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
-`deli slice` draws one into the G-code for the printer's screen.
+`deli slice` draws one into the G-code for the printer's screen; the Centauri Carbon
+shows it.
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli move` and `deli pause` without arguments show what
@@ -252,7 +254,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli slice [-o FILE]` | slice to G-code |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
 | `deli send [FILE] [--print]` | upload to the printer in your config |
-| `deli config [key] [value]` | your default printer, and your printers' addresses and loaded filaments |
+| `deli config [key] [value]` | your default printer, and your printers' addresses and default filament and process |
 | `deli completion bash\|zsh\|fish` | shell completion |
 
 `deli <command> --help` has the details.
@@ -261,13 +263,15 @@ check the file arrived and start it from the printer's own screen.
 
 Things that a user would notice, roughly in the order they matter:
 
-- **One real print so far.** A cube, sliced with the converted Centauri Carbon profile
-  and sent with `deli send --print`, printed well. Nothing harder has been printed, and
-  `deli send` to Moonraker and OctoPrint hosts has only been tested against fakes.
+- **Two real prints so far**, both on the Centauri Carbon with its converted profile,
+  sent with `deli send --print`: a cube in PLA, which printed well, and a Benchy in
+  PETG-CF with a pause, which ran to the end but came out stringy with lines in the
+  hull, from a spool that was probably damp. Nothing with supports has been printed,
+  and `deli send` to Moonraker and OctoPrint hosts has only been tested against fakes.
 - **Converted profiles differ from Orca in small ways.** The process's 0.97 flow ratio
-  is not applied (about 3 % more filament); fan speeds are written with decimals, which
-  the firmware may or may not accept; there are no `M73` progress lines, so the
-  printer's screen may not show progress; the first layer's layer-change G-code is
+  is not applied (about 3 % more filament); the Centauri Carbon shows the percentage
+  and the current layer but no remaining time and no layer total, which it gets from
+  Orca's `M73` lines and file header; the first layer's layer-change G-code is
   skipped; one bridge speed instead of two; no brim where Orca would add one
   automatically. `PLAN.md` has the full list with measurements.
 - **Other printers.** The Orca converter has been checked against Orca's own output
@@ -282,16 +286,13 @@ Things that a user would notice, roughly in the order they matter:
   elsewhere, which is untested.
 - **One filament per print.** A change by hand at a `deli pause` is the only kind;
   filament-change G-code for multi-material printers is not converted.
-- **Pauses are untried on a printer.** The G-code carries the printer's pause command
-  at the right layer; nobody has yet watched a printer stop there.
+- **Pauses have been seen once.** A Centauri Carbon stopped where `deli pause 90` said,
+  with the head parked, and carried on when resumed. Other printers are untried.
 - **Parts you place yourself are not checked against each other**, only against the
   bed, so two moved parts can overlap.
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
 - **Hosts:** PrusaLink, Duet and the others PrusaSlicer knows are not supported by
   `deli send`; the Centauri Carbon 2's newer protocol is not either.
-- **Thumbnails are untried on a printer.** The G-code carries the picture the printer's
-  profile asks for, drawn by deli; whether the Centauri Carbon's screen shows it has not
-  been checked.
 
 ## Engine
 

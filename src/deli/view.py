@@ -96,10 +96,12 @@ def _config(doc) -> str:
 
 def state() -> dict:
     """What the page needs to describe the print: the bed, the parts and their transforms."""
-    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "parts": [], "gcode": None, "pauses": []}
+    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "filament": None, "parts": [], "gcode": None, "pauses": []}
     try:
         doc = project.read()
         result["bed"], result["height"], result["printer"] = _bed(doc)
+        # The G-code is only shown while it is no older than deli.toml, so this is also the filament it was sliced for.
+        result["filament"] = project.selected(doc, "filament").get("name")
         for part in project.parts(doc):
             scale = project.part_transform(part, "scale")
             rotate = project.part_transform(part, "rotate")

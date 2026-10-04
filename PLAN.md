@@ -188,9 +188,10 @@ Done. Start at step 5.
   z-buffer renderer that draws the arranged parts from the front right and above, in the
   viewer's orange on a transparent background, at each size in the printer's `thumbnails`
   setting (144x144 PNG for the Centauri Carbon). PrusaSlicer writes it as a
-  `; thumbnail begin` block near the top of the file. Not yet seen on the printer's
-  screen, and there is no Orca thumbnail here to compare the block with: Orca's command
-  line writes none (`build/orca-compare/orca-cube.gcode`).
+  `; thumbnail begin` block near the top of the file. The Centauri Carbon's screen shows
+  it (seen by the user on 2026-10-03), so the firmware does not need Orca's
+  `THUMBNAIL_BLOCK` markers or its placement. There is no Orca thumbnail here to compare
+  the block with: Orca's command line writes none (`build/orca-compare/orca-cube.gcode`).
 - `_engine.toolpaths(gcode)` reads a G-code file with PrusaSlicer's `GCodeProcessor` and
   returns its extrusions for the viewer (step 6); `_engine.extrusion_roles()` names the
   roles it numbers them by.
@@ -324,7 +325,22 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   when the printer has none. Decided with the user on 2026-10-03: no separate
   colour-change command, since a pause is where the filament is changed and the
   Centauri's pause is `M600` itself; a printer that needs another command for it can
-  set `pause_print_gcode`. Not tried on the printer.
+  set `pause_print_gcode`. Seen on the Centauri Carbon on 2026-10-03, on a Benchy with
+  `pause = [90]`: after layer 90 the printer's page went from Printing to Paused with
+  the layer counter at 91, the head parked at X202 Y264.5 and lifted about 10 mm, and a
+  resume button in place of pause. The user resumed it: the page showed Preparing for
+  about a minute and a half with the head still parked (the model fan went to 100 % for
+  part of it), then Printing again at layer 93 with the head back over the part at the
+  right height and the clock running. The print then ran to the end: the page showed
+  Print Complete, the head parked, and the model, side and chamber fans off. The user's
+  verdict on the part: "pretty stringy" with lines in the hull, and not necessarily the
+  slicer's doing, since the PETG-CF spool probably needs drying. In support of that, the
+  G-code's retraction and temperature are Orca's for this printer and filament (0.8 mm
+  at 30 mm/s both ways, 0.4 mm lift, wipe on, 1.2 mm minimum travel, 250 °C), and Orca
+  does not enable pressure advance for this filament either. What does differ and could
+  matter: the 3 % extra flow, and PrusaSlicer's straight lift where Orca uses "Auto
+  Lift". Not settled until the same Benchy is printed from a dried spool, or from Orca
+  with this one.
 - **Defaults for new prints.** The config's top-level `printer` names the default
   printer; its filament and process are that printer's `filament` and `process`, as
   before. They are set with `deli printer|filament|process NAME --default`, which writes
@@ -347,13 +363,16 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   With the Centauri Carbon profiles it writes the same G-code as step 3, apart from
   the object name.
 - **Config file** (`~/.config/deli/config.toml`, `src/deli/config.py`, `deli config`):
-  per-printer `host`, `api_key`, `filament` (the spool loaded now, and the default for
-  new prints), `process` (default), `filaments` (on hand). Keys are dotted,
-  `printers.<name>.<key>`, and a printer's name may hold dots. `deli printer X` fills in
-  the config's filament and process when the print has none; `deli filament` marks
-  "loaded in the printer" and "on hand"; `deli send --print` refuses when the print's
-  filament is not the loaded one (and notes it without `--print`), which is the mistake
-  it exists to catch: a print sliced for PLA with PETG-CF in the printer. Values set
+  per-printer `host`, `api_key`, `filament` (the default for new prints), `process`
+  (default), `filaments` (on hand). Keys are dotted, `printers.<name>.<key>`, and a
+  printer's name may hold dots. `deli printer X` fills in the config's filament and
+  process when the print has none; `deli filament` marks "the default for this printer"
+  and "on hand". The config's `filament` used to mean the spool loaded in the printer as
+  well, and `deli send --print` refused a print whose filament differed from it. The
+  user had that removed on 2026-10-03: it refused a PETG-CF print with PETG-CF in the
+  printer because the config still said PLA. The defaults exist to save choosing the
+  same things for every print, never to hold a print to them. Do not bring a check of
+  this kind back. Values set
   with `deli config` are checked: filaments and processes must be in the library, a
   host's scheme must be one deli knows. 15 tests.
 - **Decided:** `slice` refuses when a chosen profile is not in the library, has no hash
@@ -459,6 +478,9 @@ Done. 8 tests pass.
   its pid and port; a later `deli view` reads it, asks that port for `/directory` to make
   sure it is still this directory's viewer, and opens the same page instead of starting
   another. Linux and macOS only (it passes a file descriptor to the child).
+- `/state` also has the print's `filament`, which the page lists under the printer. The
+  G-code is only shown while it is no older than `deli.toml`, so in the sliced view that
+  is the filament it was sliced for.
 - Checked in Chrome on the Centauri Carbon bed with PrusaSlicer's `U_overhang.obj` at
   500 % and supports on: the page went from the model to the toolpaths when `deli slice`
   finished, and back when `deli scale` changed the print.
@@ -467,6 +489,21 @@ Done. 8 tests pass.
 
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
 per-part settings, multi-filament, more host types.
+
+**Viewer, to do:**
+
+- Show pauses in the sliced view (asked for by the user, 2026-10-03): where the print
+  pauses should be visible, probably by a change of colour from that layer on, since a
+  pause is where the filament is changed. `/state` already has the layers in `pauses`;
+  a mark on the slider at each would help too.
+- Zooming aims at the bed's centre, so a small part elsewhere takes panning to look at.
+- Speed with very large prints is unmeasured: organic supports on a Gridfinity bin came
+  to about 977,000 extrusions, one box each.
+- Travel moves are not drawn, and G-code written elsewhere with `slice -o` is not found.
+- A moved part has been checked through the server's output only, not looked at.
+
+**Other small things, to do:** two parts placed with `deli move` are not checked for
+overlapping; `deli --help` lists the hidden `__complete` command with `==SUPPRESS==`.
 
 **Painting (idea, not started; the user's direction of 2026-10-03).** Not "paint-on
 supports" but painting in general: the browser only lets the user paint areas of a part
@@ -553,9 +590,22 @@ Open items, each a real behaviour difference from Orca:
   the first layer; Orca runs them on every layer. The printer is therefore never told
   `CURRENT_LAYER=1` and reports layer 0 until the second layer starts.
 - **Progress.** Orca emits `M73` progress lines and a `HEADER_BLOCK` with the layer
-  count; deli's output has neither. Whether the printer's screen needs them is unknown.
+  count; deli's output has neither. Seen on the printer's web page during a Benchy
+  print on 2026-10-03: the percentage works and the current layer follows the G-code's
+  `CURRENT_LAYER`, but the remaining time stays at 00:00:00 and the layer total at 0
+  ("25 /0"), although `SET_PRINT_STATS_INFO TOTAL_LAYER=160` is sent every layer. The
+  file list likewise shows no layer count or material length for deli's files and does
+  for Orca's. To do: (1) time: PrusaSlicer's `remaining_times = 1` writes
+  `M73 P.. R..` lines in the form Orca's file has (checked with the Centauri profile),
+  so the converter could set it; untried on the printer. (2) layer total: probably read
+  from Orca's header, whose first lines are `; HEADER_BLOCK_START`, `; generated by
+  OrcaSlicer ...`, `; total layer number: 67`, `; filament_density`, `; filament_diameter`,
+  `; max_z_height`, `; filament: 1`, `; HEADER_BLOCK_END`; deli would have to write
+  such a block at the top of the file after slicing. Which lines the firmware reads is
+  a guess until tried.
 - **Fan values.** PrusaSlicer writes fractional fan speeds such as `M106 S249.9`; Orca
-  writes whole numbers. Whether the printer's firmware accepts a fraction is untested.
+  writes whole numbers. The firmware accepts them: during the same print the page showed
+  the model fan at 28 % while the G-code's last command was `M106 S71.4`.
 - **Printer model.** `printer_model` is dropped, so the `;printer_model:` comment in
   the start block is empty. Orca writes `Elegoo Centauri Carbon` there.
 - **Bridges.** Orca prints internal bridges at 45 mm/s; PrusaSlicer has one bridge
@@ -611,5 +661,10 @@ Open items, each a real behaviour difference from Orca:
 - Converted G-code has been printed once on the real printer: a simple cube on the
   Centauri Carbon, sent by the user with `deli send --print` on 2026-10-03, which printed
   very well. The screen's progress and layer display and the fractional fan values
-  above were not checked during it. Do not send anything to the printer without the
+  above were not checked during it. A second print, in PETG-CF, was started the same
+  day: the thumbnail showed, the nozzle heated to the filament's temperature, and the
+  purge lines were drawn. It did not level the bed first, which is as the user wants
+  it (`deli send --print` only levels with `--level`). The printer's own page is at
+  `http://centauri-carbon.cruver.network`; looking at it is fine, its controls are not
+  to be touched. Do not send anything to the printer without the
   user's say-so.

@@ -118,8 +118,7 @@ def _make_default(doc, kind: str, name: str) -> int:
             "set your default printer first with: deli printer <name> --default"
         )
     config.set_value(f"printers.{printer}.{kind}", name)
-    loaded = ", the one loaded in it" if kind == "filament" else ""
-    print(f"The default {kind} for '{printer}' is now '{name}'{loaded}: new prints on that printer start with it")
+    print(f"The default {kind} for '{printer}' is now '{name}': new prints on that printer start with it")
     return 0
 
 
@@ -147,7 +146,7 @@ def _choose(args: argparse.Namespace) -> int:
             if kind == "printer" and name == config.default_printer():
                 notes.append("your default")
             if name == about.get("filament"):
-                notes.append("loaded in the printer")
+                notes.append("the default for this printer")
             elif name in about.get("filaments", []):
                 notes.append("on hand")
             note = f" ({'; '.join(notes)})" if notes else ""
@@ -696,16 +695,6 @@ def _send(args: argparse.Namespace) -> int:
     printer_name = project.selected(doc, "printer").get("name")
     host = send.host_for(printer_name, printer[1].get("host_type", "") if printer else "")
 
-    # The config may say what is loaded in the printer; starting a print for another filament is refused.
-    loaded = config.printer(printer_name).get("filament") if printer_name else None
-    chosen = project.selected(doc, "filament").get("name")
-    if loaded and chosen and loaded != chosen and not args.file:
-        if args.start:
-            raise CommandError(
-                f"this print is for the filament '{chosen}', but your config says '{loaded}' is loaded in the printer; "
-                f"choose it with: deli filament {loaded}  (or, after changing spools: deli config printers.{printer_name}.filament {chosen})"
-            )
-        print(f"  note: this print is for '{chosen}', but your config says '{loaded}' is loaded in the printer")
     print(f"Sending {path} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
 
     def progress(sent: int, total: int) -> None:
@@ -987,8 +976,9 @@ def build_parser() -> argparse.ArgumentParser:
     config_ = commands.add_parser(
         "config",
         help="read or change your deli configuration (~/.config/deli/config.toml)",
-        description="Read or change ~/.config/deli/config.toml, which says what each printer in your library is "
-        "connected to and what is loaded in it. Keys are printers.<printer>.<host|api_key|filament|process|filaments>. "
+        description="Read or change ~/.config/deli/config.toml, which names the printer new prints start with and says "
+        "what each printer in your library is connected to and which filament and process a new print on it starts "
+        "with. Keys are printer and printers.<printer>.<host|api_key|filament|process|filaments>. "
         "Without a key, list everything; with a key, show it; with a key and a value, set it.",
     )
     config_.add_argument("key", nargs="?", help="such as printers.elegoo-centauri-carbon-0.6-nozzle.host")

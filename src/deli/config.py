@@ -1,14 +1,15 @@
 """The per-user configuration, `~/.config/deli/config.toml`, in the spirit of `~/.gitconfig`.
 
 It names the printer a new print starts with, and says what each printer in the library
-is connected to and what is loaded in it:
+is connected to and what a new print on it starts with. These are defaults only: a print
+that has chosen something else is never held to them.
 
     printer = "elegoo-centauri-carbon-0.6-nozzle"   # the default printer for new prints
 
     [printers.elegoo-centauri-carbon-0.6-nozzle]
     host = "elegoo://centauri.local"      # where `deli send` sends (DELI_HOST overrides)
     api_key = "..."                       # for hosts that need one (DELI_API_KEY overrides)
-    filament = "elegoo-petg-cf-ecc"       # the spool loaded now; the default for new prints
+    filament = "elegoo-petg-cf-ecc"       # the default filament for new prints
     process = "0.30mm-standard-elegoo-cc-0.6-nozzle"   # the default process for new prints
     filaments = ["elegoo-pla-ecc", "elegoo-petg-cf-ecc"]  # spools on hand
 

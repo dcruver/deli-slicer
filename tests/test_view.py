@@ -52,7 +52,7 @@ def test_state_describes_an_empty_directory(url):
     assert status == 200
     state = json.loads(body)
     assert state["parts"] == []
-    assert state["printer"] is None
+    assert state["printer"] is None and state["filament"] is None
     assert state["bed"] == view.DEFAULT_BED
 
 
@@ -139,6 +139,7 @@ def test_state_names_the_gcode_once_the_print_is_sliced(url):
 
     state = json.loads(get(url + "/state")[2])
     assert state["gcode"] == "cube.gcode"
+    assert state["filament"] == "generic-abs"  # what it was sliced for
     assert "Support material" in state["roles"]
     assert state["version"] != before["version"]
 
