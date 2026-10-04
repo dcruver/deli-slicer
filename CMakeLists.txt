@@ -9,6 +9,11 @@ if (NOT EXISTS "${DELI_DEPS_PREFIX}")
                         "Build them first (see PLAN.md) or set DELI_DEPS_PREFIX.")
 endif ()
 list(PREPEND CMAKE_PREFIX_PATH "${DELI_DEPS_PREFIX}")
+# zlib and libpng are built statically into the same prefix (ci/build-deps.sh); a system's
+# shared copies, where there are any, must not be linked instead.
+set(ZLIB_USE_STATIC_LIBS ON)
+set(ZLIB_ROOT "${DELI_DEPS_PREFIX}")
+set(PNG_ROOT "${DELI_DEPS_PREFIX}")
 
 # The engine is linked statically into a Python extension module.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

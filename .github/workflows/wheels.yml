@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: System packages
         run: |
-          dnf install -y dbus-devel mesa-libGLU-devel zlib-devel libpng-devel \
+          dnf install -y dbus-devel mesa-libGLU-devel \
             autoconf automake libtool m4 perl-core perl-IPC-Cmd git patch which file
           dnf install -y --enablerepo=powertools texinfo
           /opt/python/cp312-cp312/bin/python -m pip install cmake ninja

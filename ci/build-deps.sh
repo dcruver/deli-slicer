@@ -28,5 +28,24 @@ fi
 
 cmake -S vendor/PrusaSlicer/deps -B build/deps -G Ninja -DCMAKE_BUILD_TYPE=Release \
     "-DPrusaSlicer_deps_PACKAGE_EXCLUDES=$excludes"
+
+# On Linux the superbuild takes zlib and libpng from the system, which links them into the
+# engine as shared libraries a wheel may not depend on. Build both statically into the same
+# prefix first, so that every package after them finds these instead.
+if [ "$(uname)" = Linux ]; then
+    prefix="$PWD/build/deps/destdir/usr/local"
+    cmake --build build/deps --target dep_ZLIB
+    png=build/extra/libpng-1.6.43
+    if [ ! -f "$prefix/lib/libpng16.a" ] && [ ! -f "$prefix/lib64/libpng16.a" ]; then
+        mkdir -p build/extra
+        curl -fL --retry 3 https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.43.tar.gz | tar -xz -C build/extra
+        cmake -S "$png" -B build/extra/libpng-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_INSTALL_PREFIX=$prefix" "-DCMAKE_PREFIX_PATH=$prefix" "-DZLIB_ROOT=$prefix" \
+            -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DPNG_SHARED=OFF -DPNG_STATIC=ON -DPNG_TESTS=OFF -DPNG_TOOLS=OFF -DPNG_FRAMEWORK=OFF
+        cmake --build build/extra/libpng-build --target install
+    fi
+fi
+
 # One package at a time; each package compiles in parallel.
 cmake --build build/deps -- -j1 -k 0
