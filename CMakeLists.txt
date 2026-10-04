@@ -27,6 +27,13 @@ endif ()
 # them from this one, so the imported targets have to be visible here too.
 set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)
 
+# STEP files need OpenCASCADE, the largest of the dependencies by far, through a wrapper
+# library that PrusaSlicer loads at run time and deli does not ship. Leave both out, except
+# on macOS, where libslic3r links the wrapper directly.
+if (NOT APPLE)
+    set(SLIC3R_ENABLE_FORMAT_STEP OFF CACHE BOOL "" FORCE)
+endif ()
+
 set(SLIC3R_GUI OFF CACHE BOOL "" FORCE)
 set(SLIC3R_STATIC ON CACHE BOOL "" FORCE)
 set(SLIC3R_BUILD_TESTS OFF CACHE BOOL "" FORCE)

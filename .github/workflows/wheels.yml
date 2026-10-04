@@ -1,0 +1,81 @@
+# Builds deli's wheels, one per platform (the engine uses Python's stable ABI, so a wheel
+# serves every Python from 3.12 on), and runs the tests against each on a clean machine.
+name: wheels
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-wheels]
+    tags: ["v*"]
+
+jobs:
+  linux:
+    name: Linux x86-64 wheel
+    runs-on: ubuntu-24.04
+    # An old glibc, so the wheel loads on any distribution from about 2019 on.
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    timeout-minutes: 300
+    steps:
+      - name: System packages
+        run: |
+          dnf install -y dbus-devel mesa-libGLU-devel zlib-devel libpng-devel \
+            autoconf automake libtool m4 perl-core perl-IPC-Cmd git patch which file
+          dnf install -y --enablerepo=powertools texinfo
+          /opt/python/cp312-cp312/bin/python -m pip install cmake ninja
+          echo /opt/python/cp312-cp312/bin >> "$GITHUB_PATH"
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Which PrusaSlicer
+        id: engine
+        run: echo "sha=$(git rev-parse HEAD:vendor/PrusaSlicer)" >> "$GITHUB_OUTPUT"
+
+      # The dependencies take far longer than deli itself and change only with PrusaSlicer.
+      - name: PrusaSlicer's dependencies, from an earlier run
+        id: deps
+        uses: actions/cache@v4
+        with:
+          path: build/deps/destdir
+          key: deps-manylinux_2_28-x86_64-${{ steps.engine.outputs.sha }}-${{ hashFiles('ci/build-deps.sh') }}
+
+      - name: Build PrusaSlicer's dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: ci/build-deps.sh
+
+      - name: Build the wheel
+        env:
+          # libslic3r's largest sources need several GB each; the runner has 16 GB.
+          SKBUILD_BUILD_TOOL_ARGS: -j3
+        run: |
+          python -m pip wheel . --no-deps -w dist
+          auditwheel repair dist/*.whl -w wheelhouse
+          ls -l wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-x86_64
+          path: wheelhouse/*.whl
+
+  test-linux:
+    name: Tests on Ubuntu 22.04
+    needs: linux
+    # Older than the machine the wheel was built for by hand, which needed glibc 2.43.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true   # the tests slice PrusaSlicer's own test models
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-linux-x86_64
+          path: wheelhouse
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the wheel, not the source
+        run: python -m pip install wheelhouse/*.whl pytest
+      - name: Run the tests
+        run: python -m pytest -q

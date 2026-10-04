@@ -40,6 +40,16 @@ Do not reopen these without a reason.
 - **Parts:** a print holds any number of parts, each with copies, arranged on the bed
   by PrusaSlicer's arrange. Settings apply to the whole print; per-part settings are
   not built.
+- **Adoption (2026-10-04):** two things stand between deli and other people using it,
+  and both are to be done without owning the platforms. *Wheels* for the common systems
+  are built and tested on GitHub's hosted machines (`.github/workflows/wheels.yml`,
+  `ci/build-deps.sh`): Linux x86-64 first, then macOS, Linux ARM64 and Windows (which
+  needs `deli view`'s background server ported: it passes a file descriptor). *Printers*
+  are not shipped a thousand at a time: `deli import orca --github` converts any of
+  Orca's on demand, and a sweep over all of them is to publish which convert and slice.
+  **Matching OrcaSlicer's output is a guide, not a requirement:** compare with it to find
+  what deli gets wrong, but do not chase a 1:1 match for its own sake. Whether a printer
+  prints correctly can only come from the people who own one.
 
 ## What exists
 
@@ -299,6 +309,8 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   refuses more copies of a placed part, and the engine refuses a hand-edited file).
   The place is not checked against the bed when it is given, since the printer may not
   be chosen yet; `slice` and `view` say so when it is off the bed.
+  The user has looked at a moved part in the viewer and found it where it should be
+  (2026-10-04).
   - In the engine a part is `(file, scale, rotate, count, place, height)` (API_VERSION
     5). `load_arranged` shifts a placed file as a whole, then arranges with a selection
     mask (`Unplaced`) so PrusaSlicer's arrange moves only the parts without a place and
@@ -504,7 +516,6 @@ per-part settings, multi-filament, more host types.
 
 - Speed with very large prints is unmeasured: organic supports on a Gridfinity bin came
   to about 977,000 extrusions, one box each.
-- A moved part has been checked through the server's output only, not looked at.
 
 **Other small things, to do:** two parts placed with `deli move` are not checked for
 overlapping; `deli --help` lists the hidden `__complete` command with `==SUPPRESS==`.
