@@ -54,5 +54,11 @@ if (CMAKE_COMPILER_IS_GNUCXX)
     # Boost's quad-precision literals, as in PrusaSlicer's own build.
     target_compile_options(_engine PRIVATE -fext-numeric-literals)
 endif ()
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Fuzzy skin asks std::random_device for its entropy, which needs a newer libstdc++
+    # than a manylinux_2_28 wheel may require; src/deli/entropy.cpp answers instead.
+    target_sources(_engine PRIVATE src/deli/entropy.cpp)
+    target_link_options(_engine PRIVATE "-Wl,--wrap=_ZNKSt13random_device13_M_getentropyEv")
+endif ()
 
 install(TARGETS _engine LIBRARY DESTINATION deli)
