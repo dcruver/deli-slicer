@@ -10,6 +10,7 @@ Orca's names are full of `@` and spaces (`Generic PLA @System`)."""
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from deli import config, library, project, settings
@@ -301,3 +302,38 @@ complete -c deli -f -a '(__deli_complete)'
 
 def script(shell: str) -> str:
     return {"bash": BASH, "zsh": ZSH, "fish": FISH}[shell]
+
+
+SHELLS = ("bash", "zsh", "fish")
+# What a shell's startup file needs when the shell loads no completion file on its own.
+RC_LINE = {"bash": 'eval "$(deli completion bash)"', "zsh": 'eval "$(deli completion zsh)"'}
+# Where bash-completion, if installed, is set up from; it then loads per-user scripts by itself.
+_BASH_COMPLETION = [Path("/usr/share/bash-completion/bash_completion"), Path("/etc/profile.d/bash_completion.sh"),
+                    Path("/opt/homebrew/etc/profile.d/bash_completion.sh"), Path("/usr/local/etc/profile.d/bash_completion.sh")]  # fmt: skip
+
+
+def _home_dir(variable: str, fallback: str) -> Path:
+    return Path(os.environ.get(variable) or Path.home() / fallback)
+
+
+def completion_file(shell: str) -> Path | None:
+    """Where a shell loads deli's completion from by itself, with nothing in its startup
+    file: bash with bash-completion installed, and fish. None for zsh, and for bash without it."""
+    if shell == "fish":
+        return _home_dir("XDG_CONFIG_HOME", ".config") / "fish" / "completions" / "deli.fish"
+    if shell == "bash" and any(path.exists() for path in _BASH_COMPLETION):
+        return _home_dir("XDG_DATA_HOME", ".local/share") / "bash-completion" / "completions" / "deli"
+    return None
+
+
+def startup_file(shell: str) -> Path:
+    if shell == "zsh":
+        return Path(os.environ.get("ZDOTDIR") or Path.home()) / ".zshrc"
+    return Path.home() / ".bashrc"
+
+
+def has_rc_line(shell: str) -> bool:
+    try:
+        return RC_LINE[shell] in startup_file(shell).read_text()
+    except OSError:
+        return False

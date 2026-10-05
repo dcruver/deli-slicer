@@ -283,7 +283,7 @@ def test_a_default_that_differs_from_one_of_the_same_name_is_stored_apart(home, 
     assert "perimeters = 9" in process.read_text()
     assert "0.30mm-standard-elegoo-cc-0.6-nozzle-second" in library.names("process")
     out = capsys.readouterr().out
-    assert "Orca's default filament for this printer, 'elegoo-pla-ecc', is already in your library" in out
+    assert "The filament for this printer, 'elegoo-pla-ecc', is already in your library" in out
 
 
 # ---------------------------------------------------------------- listing
@@ -454,3 +454,58 @@ def test_process_lists_orcas_and_yours_alike(github, home, print_dir, capsys):
     assert f"* {PROCESS} (the default for this printer)" in lines
     assert f"  {PROCESS} - Mine" in lines  # made for it, not chosen yet
     assert "  thick-walls" in lines  # yours, under the name you gave it
+
+
+# ---------------------------------------------------------------- deli setup
+
+
+def test_setup_with_flags_chooses_the_printer_and_its_address(github, home, print_dir, monkeypatch, capsys):
+    from deli import config
+
+    assert main(["setup", "--printer", "centauri", "--host", "moonraker://printer.local", "--no-completion"]) == 0
+
+    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
+    about = config.printer("elegoo-centauri-carbon-0.6-nozzle")
+    assert about["host"] == "moonraker://printer.local" and about["process"] and about["filament"]
+    assert not (print_dir / "deli.toml").exists()  # setting deli up does not start a print here
+    assert "deli send sends to the moonraker host" in capsys.readouterr().out
+
+
+def test_setup_asks_at_a_terminal(github, home, print_dir, monkeypatch, capsys):
+    from deli import config
+
+    answers = iter(["carbon", "2", ""])  # two printers match; take the second; no address
+    monkeypatch.setattr("builtins.input", lambda question: next(answers))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    assert main(["setup", "--no-completion"]) == 0
+
+    assert "   2. Elegoo Centauri Carbon 0.6 nozzle" in capsys.readouterr().out
+    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
+
+
+def test_setup_asks_nothing_without_a_terminal(github, home, print_dir, monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda question: pytest.fail("asked: " + question))
+
+    assert main(["setup", "--no-completion"]) == 0
+
+    assert "deli vendor" in capsys.readouterr().out
+
+
+def test_setup_puts_completion_where_the_shell_loads_it(home, print_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+    assert main(["setup", "--shell", "fish"]) == 0
+
+    file = tmp_path / "config" / "fish" / "completions" / "deli.fish"
+    assert "deli __complete" in file.read_text()
+
+
+def test_setup_adds_to_zshrc_only_when_told(home, print_dir, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ZDOTDIR", str(tmp_path))
+
+    assert main(["setup", "--shell", "zsh"]) == 0  # not at a terminal: says the line, adds nothing
+
+    assert not (tmp_path / ".zshrc").exists()
+    assert 'eval "$(deli completion zsh)"' in capsys.readouterr().out

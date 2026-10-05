@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import shutil
+import difflib
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -927,15 +928,25 @@ def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: 
     defaults = presets.defaults(orca_printer)
     doc = config.read()
     mine = config.printer(printer, doc)
+    picked = None
+    if "process" not in defaults:
+        # Orca names none for some printers (95 of them in 2.4.2); a print cannot slice
+        # without one, so take the standard one made for it, else the middle of the list.
+        made, _ = presets.fitting("process", orca_printer)
+        if made:
+            defaults["process"] = next((n for n in made if "standard" in n.lower()), made[len(made) // 2])
+            picked = defaults["process"]
+            print(f"Orca names no default process for this printer; taking '{picked}', made for it")
     for kind in ("process", "filament"):
         if kind not in defaults:
             print(f"Orca names no default {kind} for this printer; see what fits it with: deli {kind}")
             continue
         name, stored = _store_from_orca(presets, kind, defaults[kind], orca_printer, printer)
         if stored is None:
-            print(f"Orca's default {kind} for this printer, '{name}', is already in your library")
+            print(f"The {kind} for this printer, '{name}', is already in your library")
         else:
-            print(f"Imported {kind} '{name}', Orca's default for this printer ({stored})")
+            why = "made for this printer" if defaults[kind] == picked else "Orca's default for this printer"
+            print(f"Imported {kind} '{name}', {why} ({stored})")
         if not mine.get(kind):
             config.set_value(f"printers.{printer}.{kind}", name)
             print(f"  and made it the default {kind} for new prints on '{printer}'")
@@ -1046,6 +1057,128 @@ def _view(args: argparse.Namespace) -> int:
 
 
 ENGINE_API = 7  # must match API_VERSION in _engine.cpp
+
+
+def _ask(question: str) -> str:
+    """One answer from the person at the terminal; empty if they give none or end input."""
+    try:
+        return input(question).strip()
+    except EOFError:
+        print()
+        return ""
+
+
+def _setup_completion(shell: str, asking: bool) -> None:
+    """Tab completion for one shell: a file the shell loads by itself where it has such a
+    place, else a line in its startup file, added only when the person says so."""
+    from deli import complete
+
+    if shell not in complete.SHELLS:
+        print(f"Tab completion: deli completes bash, zsh and fish, not {shell or 'this shell'}; see: deli completion --help")
+        return
+    if file := complete.completion_file(shell):
+        current = complete.script(shell)
+        if file.exists() and file.read_text() == current:
+            print(f"Tab completion for {shell} is set up ({_home_relative(file)})")
+            return
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(current)
+        print(f"Tab completion for {shell} set up in {_home_relative(file)}; it works in new terminals")
+        return
+    line, rc = complete.RC_LINE[shell], complete.startup_file(shell)
+    if complete.has_rc_line(shell):
+        print(f"Tab completion for {shell} is set up ({_home_relative(rc)})")
+    elif asking and _ask(f"Tab completion for {shell} needs a line in {_home_relative(rc)}. Add it? [Y/n] ").lower() in ("", "y", "yes"):
+        with rc.open("a") as out:
+            out.write(f"\n# Tab completion for deli\n{line}\n")
+        print(f"Added to {_home_relative(rc)}; it works in new terminals")
+    else:
+        print(f"Tab completion for {shell}: add this line to {_home_relative(rc)}:\n  {line}")
+
+
+def _pick_printer(presets: orca_install.Presets) -> str | None:
+    """Ask which printer this is until one of Orca's is named: a vendor lists its printers,
+    part of a name the printers it is part of, and a number picks from the last list."""
+    shown: list[str] = []
+    while True:
+        answer = _ask("Which printer do you have? Part of its name will do, or a number from the list (Enter to skip): ")
+        if not answer:
+            return None
+        if answer.isdigit() and shown:
+            if 1 <= int(answer) <= len(shown):
+                return shown[int(answer) - 1]
+            print(f"Choose a number from 1 to {len(shown)}.")
+            continue
+        vendor = presets.vendor(answer)
+        names = presets.names("printer")
+        found = sorted(presets.vendors[vendor].names("printer")) if vendor else [n for n in names if answer.lower() in n.lower()]
+        exact = [n for n in found if n.lower() == answer.lower()]
+        if len(found) == 1 or exact:
+            return (exact or found)[0]
+        if not found:
+            close = difflib.get_close_matches(answer.lower(), [n.lower() for n in names], n=3, cutoff=0.6)
+            lower = {n.lower(): n for n in names}
+            hint = f" Did you mean: {', '.join(lower[c] for c in close)}?" if close else " Try the maker's name, such as Prusa, Creality or Voron."
+            print(f"Orca has no printer called '{answer}'.{hint}")
+            continue
+        if len(found) > 40:
+            makers = sorted({v for n in found if (v := presets.vendor_of("printer", n))}, key=str.lower)
+            listed = (", ".join(makers[:5]) + " and others") if len(makers) > 6 else " and ".join([", ".join(makers[:-1]), makers[-1]]) if len(makers) > 1 else ""
+            print(f"{len(found)} printers match '{answer}'" + (f", from {listed}" if len(makers) > 1 else "") + "; say more, such as the model.")
+            continue
+        shown = found
+        for number, name in enumerate(found, 1):
+            print(f"  {number:>2}. {name}")
+        print("The number at the end of each is the nozzle size; most printers come with 0.4 mm.")
+
+
+def _setup(args: argparse.Namespace) -> int:
+    """`deli setup`: tab completion for this shell, your printer with its process and
+    filament, and how to reach it. Asks only at a terminal; every answer can be a flag."""
+    asking = sys.stdin.isatty() and sys.stdout.isatty()
+
+    # 1. Tab completion.
+    if not args.no_completion:
+        _setup_completion(args.shell or Path(os.environ.get("SHELL", "")).name, asking)
+
+    # 2. The printer, made the default with Orca's process and filament for it.
+    printer = None
+    if args.printer or asking:
+        presets = orca_install.Presets(github=orca_install.ORCA_REF)
+        wanted = args.printer or _pick_printer(presets)
+        if wanted:
+            print()
+            printer = _from_library_or_orca(project.read(), "printer", wanted)
+            config.set_value(config.DEFAULT_PRINTER, printer)
+            about = config.printer(printer)
+            print(f"Your printer is '{printer}': new prints start with it")
+            for kind in ("process", "filament"):
+                if about.get(kind):
+                    print(f"  {kind}: {about[kind]}; another with: deli {kind} <name> --default")
+    printer = printer or config.default_printer()
+
+    # 3. Where it is, for deli send.
+    host = args.host
+    if printer and not host and asking and not config.printer(printer).get("host"):
+        print()
+        host = _ask("How does deli reach it, for deli send? An address such as moonraker://voron.local,\n"
+                    "octoprint://octopi.local or elegoo://192.168.1.50 (Enter to skip): ")
+    if host:
+        if not printer:
+            raise CommandError("--host is for your printer; name it too with --printer")
+        try:
+            parsed = send.parse_host(host, where="the address")
+        except send.SendError as err:
+            raise CommandError(str(err)) from None
+        config.set_value(f"printers.{printer}.host", host)
+        print(f"deli send sends to the {parsed.kind} host at {parsed.url}")
+        if parsed.kind == "octoprint" and asking and not config.printer(printer).get("api_key"):
+            if key := _ask("OctoPrint's API key (Enter to skip): "):
+                config.set_value(f"printers.{printer}.api_key", key)
+
+    print("\nNext, in a folder with a model: deli add <model.stl>, then deli send --print" if printer
+          else "\nChoose your printer when you are ready: deli vendor, then deli printer \"<name>\" --default")
+    return 0
 
 
 def _completion(args: argparse.Namespace) -> int:
@@ -1291,6 +1424,20 @@ def build_parser() -> argparse.ArgumentParser:
     config_.add_argument("value", nargs="?", help="the new value; a list as names separated by commas")
     config_.add_argument("--unset", metavar="KEY", help="remove a key")
     config_.set_defaults(run=_config)
+
+    setup_ = commands.add_parser(
+        "setup",
+        help="set deli up: tab completion, your printer, and how to reach it",
+        description="Set deli up for you: tab completion for your shell, your printer (found by any part of its name, "
+        "with OrcaSlicer's process and filament for it, made the defaults for new prints), and its address for deli "
+        "send. It asks at a terminal; each answer can be given as an option instead, and nothing is asked when input "
+        "is not a terminal. Run it again to add or change a printer.",
+    )
+    setup_.add_argument("--printer", help="your printer: Orca's name for it or a part of it, or one in your library")
+    setup_.add_argument("--host", help="its address for deli send: moonraker://, octoprint:// or elegoo://")
+    setup_.add_argument("--shell", choices=["bash", "zsh", "fish"], help="set up tab completion for this shell (default: yours, from $SHELL)")
+    setup_.add_argument("--no-completion", action="store_true", help="leave tab completion alone")
+    setup_.set_defaults(run=_setup)
 
     completion = commands.add_parser(
         "completion",

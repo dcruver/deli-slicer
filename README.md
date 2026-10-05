@@ -70,6 +70,18 @@ Ubuntu 18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. The macOS wheels need macO
 (Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer. There is no
 Windows wheel yet.
 
+Then let deli set itself up:
+
+```
+deli setup
+```
+
+It sets up tab completion for your shell, asks which printer you have (any part of its
+name; it lists the matches to pick from) and how deli can reach it, and makes that
+printer, with OrcaSlicer's process and filament for it, the one new prints start with.
+Run it again to add or change a printer. Everything it does can also be done step by
+step, as the next sections show.
+
 ### From source
 
 The first build compiles PrusaSlicer's dependencies (about 35 minutes) and then the
@@ -89,14 +101,19 @@ a wheel in `dist/` to give to someone else.
 
 ### Shell completion
 
-Completion covers commands, options, the printers and filaments in your library, the
-parts of the current print, setting names and their short names, and config keys.
+Completion covers commands, options, printers, filaments and processes (yours and
+OrcaSlicer's), the parts of the current print, setting names and their short names, and
+config keys. `deli setup` sets it up; by hand, it is one of:
 
 ```
 eval "$(deli completion bash)"      # in ~/.bashrc
 eval "$(deli completion zsh)"       # in ~/.zshrc
 deli completion fish > ~/.config/fish/completions/deli.fish
 ```
+
+`deli setup` puts bash's in `~/.local/share/bash-completion/completions/` when the
+bash-completion package is installed, which loads it with nothing in `~/.bashrc`, and
+adds the line to `~/.zshrc` only if you say yes.
 
 ## Set up a printer
 
@@ -105,7 +122,8 @@ nozzle, start and end G-code), a **process** (layer height, speeds, infill: what
 PrusaSlicer calls print settings) and a **filament**. You don't write any of them.
 deli converts them from [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)'s
 presets, which cover over a thousand printers, and choosing your printer gets all
-three. You don't need OrcaSlicer installed.
+three. You don't need OrcaSlicer installed. `deli setup` does the steps below for you;
+this is what it does, and how to do more.
 
 ### 1. Find your printer
 
@@ -352,6 +370,7 @@ check the file arrived and start it from the printer's own screen.
 
 | | |
 |---|---|
+| `deli setup` | tab completion, your printer and its address, asked for once |
 | `deli printer\|filament\|process [name]` | choose one for this print, from your library or else OrcaSlicer's (imported as it is chosen; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |

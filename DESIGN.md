@@ -42,6 +42,13 @@ has. Whether a profile is already on your machine or still has to be fetched fro
 OrcaSlicer's presets and converted is deli's business: lists do not separate the two,
 and choosing works the same either way.
 
+## Asks only when someone is there to answer
+
+One command asks questions: `deli setup`, which a new user runs first. A command may ask
+only when every answer can also be given as an option, it never asks when input is not
+a terminal (a script, a pipe, CI), and anything that would change a file of yours
+outside deli's own, such as `~/.zshrc`, is asked about first.
+
 ## One way to do each thing, the same way everywhere
 
 - A noun command lists when given no name and chooses when given one: `deli printer`,
