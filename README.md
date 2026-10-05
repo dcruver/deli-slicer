@@ -75,10 +75,14 @@ Then let deli set itself up:
 deli setup
 ```
 
-It sets up tab completion for your shell, asks which printer you have (any part of its
-name; it lists the matches to pick from) and how deli can reach it, and makes that
-printer, with OrcaSlicer's process and filament for it, the one new prints start with.
-Run it again to add or change a printer. Everything it does can also be done step by
+It sets up tab completion for your shell, then asks for your printer's hostname or IP
+address and asks the printer what it is: a Klipper printer says its nozzle, bed and
+height, and setup lists OrcaSlicer's printers that fit; an Elegoo printer says its model,
+and setup asks only the nozzle size. The printer is imported with Orca's process and
+filament for it, fitted to what it reported (no taller prints than its Z travel, the
+material passed to a `PRINT_START` that reads it), and its address kept for `deli send`.
+A printer deli cannot reach is found by any part of its name instead. A Bambu Lab
+printer is recognised, but deli cannot send to one yet. Run it again to add or change a printer. Everything it does can also be done step by
 step, as the next sections show.
 
 ### From source

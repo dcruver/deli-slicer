@@ -54,6 +54,13 @@ def _configs() -> list[Path]:
     ]
 
 
+def matches(typed: str, name: str) -> bool:
+    """Whether a name is what someone typed: the typed text in it, or every typed word in
+    it in any order, in any case ("bambu p1s" is "Bambu Lab P1S 0.4 nozzle")."""
+    name, typed = name.lower(), typed.lower()
+    return typed in name or all(word in name for word in typed.split())
+
+
 class OrcaError(Exception):
     """No Orca presets on this machine, or not the one asked for."""
 
@@ -316,6 +323,43 @@ class Presets:
             anywhere += len(self.vendors[LIBRARY].names(kind))
         return sorted(set(named)), anywhere
 
+    def fitting_printers(self, nozzle: float, bed: tuple[float, float] | None, structure: str | None) -> list[str]:
+        """Orca's printers with this nozzle whose bed is within 10 mm of `bed` each way and
+        whose build (CoreXY, bed slinger, ...) is Klipper's `structure`, where both are known:
+        for `deli setup`, from what a Klipper printer says of itself. Each candidate's file is
+        read, those of every vendor at once, and kept like the rest."""
+        import re as _re
+
+        wanted = f"{nozzle:g}"
+        candidates = [n for n in self.names("printer") if (m := _re.search(r"(\d+(?:\.\d+)?) nozzle$", n)) and f"{float(m.group(1)):g}" == wanted]
+        by_vendor: dict[str, list[tuple[str, str]]] = {}
+        for name in candidates:
+            if vendor := self.vendor_of("printer", name):
+                by_vendor.setdefault(vendor, []).append((KINDS["printer"], name))
+        remote = [(self.vendors[v], keys) for v, keys in by_vendor.items() if isinstance(self.vendors[v], GitHubVendor)]
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            list(pool.map(lambda pair: pair[0].prefetch(pair[1]), remote))
+        # Klipper's kinematics as Orca's printer_structure calls them.
+        structure = {"cartesian": "i3", "corexy": "corexy", "hybrid_corexy": "corexy", "corexz": "corexy", "delta": "delta"}.get(structure or "")
+        found = []
+        for name in candidates:
+            try:
+                machine = self.resolve("printer", name)
+            except OrcaError:
+                continue
+            if bed:
+                try:
+                    points = [tuple(float(v) for v in p.split("x")) for p in machine.get("printable_area", [])]
+                    size = (max(x for x, _ in points) - min(x for x, _ in points), max(y for _, y in points) - min(y for _, y in points))
+                except (ValueError, TypeError):
+                    continue
+                if abs(size[0] - bed[0]) > 10 or abs(size[1] - bed[1]) > 10:
+                    continue
+            if structure and machine.get("printer_structure") and machine["printer_structure"] != structure:
+                continue
+            found.append(name)
+        return found
+
     def names(self, kind: str) -> list[str]:
         """Presets of a kind that can be used as they are: not the bases others inherit from."""
         self._read_all()
@@ -335,12 +379,12 @@ class Presets:
         exact = [found for found in names if found.lower() == name.lower()]
         if exact:
             return exact[0]
-        matches = [found for found in names if name.lower() in found.lower()]
-        if len(matches) == 1:
-            return matches[0]
-        if matches:
-            shown = "\n  ".join(matches[:20]) + ("\n  ..." if len(matches) > 20 else "")
-            raise OrcaError(f"Orca has {len(matches)} {kind}s matching '{name}'; which one?\n  {shown}")
+        found_ = [found for found in names if matches(name, found)]
+        if len(found_) == 1:
+            return found_[0]
+        if found_:
+            shown = "\n  ".join(found_[:20]) + ("\n  ..." if len(found_) > 20 else "")
+            raise OrcaError(f"Orca has {len(found_)} {kind}s matching '{name}'; which one?\n  {shown}")
         lower = {found.lower(): found for found in names}
         close = [lower[match] for match in difflib.get_close_matches(name.lower(), list(lower), n=3, cutoff=0.6)]
         raise NotFound(f"Orca has no {kind} named or containing '{name}'" + (f"; did you mean: {', '.join(close)}?" if close else ""), close)
@@ -356,6 +400,9 @@ class Presets:
                 vendor = next((v for v in self._vendors_for(name) if self.vendors[v].get(key) is not None), None)
             if data is None and vendor is not None:
                 data = self.vendors[vendor].get(key)
+            if data is None and vendor not in (None, LIBRARY) and LIBRARY in self.vendors:
+                # A vendor's filament may inherit one of Orca's shared library ("Generic PLA @System").
+                data = self.vendors[LIBRARY].get(key)
             if data is None:
                 where = f"vendor '{vendor}'" if vendor else "Orca"
                 raise OrcaError(f"the {kind} '{chain[-1]['name']}' inherits '{name}', which {where} does not have" if chain

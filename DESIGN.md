@@ -72,7 +72,9 @@ tested against, and re-converting a profile happens only when you ask (`deli imp
 Output is written for someone using deli for the first time. What does not need
 anything from them is counted, not listed ("23 Orca settings have no PrusaSlicer
 equivalent and were left out"), and `-v` or `deli import` gives the detail. Paths are
-shown from `~`. Every error says what to do next.
+shown from `~`. Every error says what to do next. Colour is used only by `deli setup`,
+lightly (bold step titles, a green check, dim hints), only when output is a terminal and
+never with `NO_COLOR` set; everything else is plain text.
 
 ## Build products stay out of sight
 

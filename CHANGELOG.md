@@ -5,9 +5,16 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
-- `deli setup`: tab completion for your shell, your printer (found by any part of its
-  name, picked from a numbered list) with OrcaSlicer's process and filament for it as
-  the defaults, and its address for `deli send`. It asks at a terminal; `--printer`,
+- `deli setup`: tab completion for your shell, then your printer from its hostname or IP
+  address alone: deli asks the printer what it is (Klipper says its nozzle, bed and
+  height; an Elegoo printer its model; OctoPrint and Bambu Lab printers are recognised)
+  and lists OrcaSlicer's printers that fit, or finds it by any part of its name (the
+  model, then the nozzle size). It is imported with Orca's process and filament, fitted
+  to the machine (print height, `MATERIAL` for a Klipper `PRINT_START` that reads it),
+  its address kept for `deli send`, and made the default printer only if there is none
+  or you say so. Every question to the printer is read-only.
+- Printer names match when every word typed is in them, in any order: `deli printer
+  "bambu p1s"` finds "Bambu Lab P1S 0.4 nozzle". It asks at a terminal; `--printer`,
   `--host`, `--shell` and `--no-completion` give the answers instead.
 - **Changed:** choosing another printer for a print brings that printer's default
   filament and process with it, and says what they were before; until now the old

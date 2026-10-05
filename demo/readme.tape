@@ -20,9 +20,8 @@ Sleep 1s
 Show
 
 Type "deli setup" Sleep 400ms Enter Sleep 2.5s
-Type "voron 2.4 350" Sleep 400ms Enter Sleep 2s
-Type "4" Sleep 600ms Enter Sleep 5s
-Type "moonraker://localhost:7125" Sleep 400ms Enter Sleep 3s
+Type "localhost" Sleep 400ms Enter Sleep 4s
+Type "1" Sleep 600ms Enter Sleep 6s
 Hide
 Type "clear" Enter Sleep 300ms
 Show

@@ -165,6 +165,18 @@ def settings_in(kind: str, text: str) -> dict[str, str]:
     return settings
 
 
+def update(path: Path, changes: dict[str, str]) -> None:
+    """Change settings in a library file in place, keeping its comments and other lines."""
+    lines, seen = [], set()
+    for line in path.read_text().splitlines():
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("#") else None
+        if key in changes:
+            line, seen = f"{key} = {changes[key]}", seen | {key}
+        lines.append(line)
+    lines += [f"{key} = {value}" for key, value in changes.items() if key not in seen]
+    path.write_text("\n".join(lines) + "\n")
+
+
 def made_for(path: Path) -> str | None:
     """The printer a converted process or filament was made for, as its file records it."""
     for line in path.read_text().splitlines():

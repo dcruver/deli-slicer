@@ -459,32 +459,6 @@ def test_process_lists_orcas_and_yours_alike(github, home, print_dir, capsys):
 # ---------------------------------------------------------------- deli setup
 
 
-def test_setup_with_flags_chooses_the_printer_and_its_address(github, home, print_dir, monkeypatch, capsys):
-    from deli import config
-
-    assert main(["setup", "--printer", "centauri", "--host", "moonraker://printer.local", "--no-completion"]) == 0
-
-    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
-    about = config.printer("elegoo-centauri-carbon-0.6-nozzle")
-    assert about["host"] == "moonraker://printer.local" and about["process"] and about["filament"]
-    assert not (print_dir / "deli.toml").exists()  # setting deli up does not start a print here
-    assert "deli send sends to the moonraker host" in capsys.readouterr().out
-
-
-def test_setup_asks_at_a_terminal(github, home, print_dir, monkeypatch, capsys):
-    from deli import config
-
-    answers = iter(["carbon", "2", ""])  # two printers match; take the second; no address
-    monkeypatch.setattr("builtins.input", lambda question: next(answers))
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-
-    assert main(["setup", "--no-completion"]) == 0
-
-    assert "   2. Elegoo Centauri Carbon 0.6 nozzle" in capsys.readouterr().out
-    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
-
-
 def test_setup_asks_nothing_without_a_terminal(github, home, print_dir, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda question: pytest.fail("asked: " + question))
 
@@ -515,3 +489,130 @@ def test_an_import_records_the_printer_it_was_converted_for(home):
     assert main(["import", "orca", "process", "mine", "--orca", str(FIXTURE)]) == 0
 
     assert library.made_for(library.find("process", library.names("process")[0])) == MACHINE
+
+
+def test_setup_is_styled_only_at_a_terminal(github, home, print_dir, monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda question: "")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm")
+
+    assert main(["setup", "--no-completion"]) == 0
+
+    assert "\033[1;36mSetting up deli\033[0m" in capsys.readouterr().out
+
+
+def test_setup_asks_for_the_model_then_the_nozzle(monkeypatch, capsys):
+    from deli import cli
+
+    class Presets:
+        def vendor(self, name):
+            return None
+
+        def names(self, kind):
+            return ["Voron 2.4 350 0.4 nozzle", "Voron 2.4 350 0.6 nozzle", "Voron 2.4 300 0.4 nozzle", "Voron Trident 250 0.4 nozzle"]
+
+    answers = iter(["voron 2.4", "2", "0.6mm"])  # two models match; the 350; its 0.6 nozzle
+    monkeypatch.setattr("builtins.input", lambda question: next(answers))
+
+    assert cli._pick_printer(Presets()) == "Voron 2.4 350 0.6 nozzle"
+    out = capsys.readouterr().out
+    assert " 1. Voron 2.4 300\n" in out and " 2. Voron 2.4 350\n" in out
+
+    answers = iter(["voron 2.4 350", ""])  # one model; Enter takes the usual 0.4
+    assert cli._pick_printer(Presets()) == "Voron 2.4 350 0.4 nozzle"
+
+
+def found_centauri():
+    from deli import probe
+
+    return probe.Printer("elegoo", "elegoo://centauri.local", model="Elegoo Centauri Carbon", hint="Elegoo Centauri Carbon", details="firmware V1.4.49")
+
+
+def test_setup_from_an_address_finds_the_printer_and_keeps_the_address(github, home, print_dir, monkeypatch, capsys):
+    from deli import config, probe
+
+    monkeypatch.setattr(probe, "probe", lambda address: found_centauri())
+
+    assert main(["setup", "--host", "centauri.local", "--no-completion"]) == 0
+
+    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"  # Orca has it with one nozzle only, so nothing is asked
+    assert config.printer("elegoo-centauri-carbon-0.6-nozzle")["host"] == "elegoo://centauri.local"
+    out = capsys.readouterr().out
+    assert "✓ Elegoo Centauri Carbon (firmware V1.4.49)" in out
+    assert "process   0.30mm Standard @Elegoo CC 0.6 nozzle" in out
+    assert not (print_dir / "deli.toml").exists()  # setting deli up does not start a print here
+    assert "\033[" not in out  # no colour when not at a terminal
+
+
+def test_setup_from_a_klipper_address_matches_and_fits_the_printer(github, home, print_dir, monkeypatch, capsys):
+    from deli import probe
+
+    klipper = probe.Printer("moonraker", "moonraker://voron.local", nozzle=0.6, bed=(256.0, 256.0), height=200.0, structure="corexy", hint="voron")
+    monkeypatch.setattr(probe, "probe", lambda address: klipper)
+
+    assert main(["setup", "--host", "voron.local", "--no-completion"]) == 0  # one of Orca's fits, so nothing is asked
+
+    stored = library.read_settings(library.find("printer", "elegoo-centauri-carbon-0.6-nozzle"))
+    assert stored["max_print_height"] == "200"  # no taller than the machine's Z travel
+    assert "print height lowered to 200 mm" in capsys.readouterr().out
+
+
+def test_setup_keeps_another_default_printer_unless_told(github, home, print_dir, monkeypatch, capsys):
+    from deli import config, probe
+
+    config.set_value("printer", "my-voron")
+    monkeypatch.setattr(probe, "probe", lambda address: found_centauri())
+
+    assert main(["setup", "--host", "centauri.local", "--no-completion"]) == 0
+
+    assert config.default_printer() == "my-voron"
+    assert "Your default printer is still my-voron" in capsys.readouterr().out
+
+
+def test_setup_refuses_an_address_nothing_answers_at(github, home, print_dir, monkeypatch, capsys):
+    from deli import config, probe
+
+    def nothing(address):
+        raise probe.NotFound("printer.locl can't be found; check the spelling")
+
+    monkeypatch.setattr(probe, "probe", nothing)
+
+    assert main(["setup", "--host", "printer.locl", "--no-completion"]) == 1
+
+    assert "can't be found; check the spelling; nothing was saved" in capsys.readouterr().err
+    assert config.default_printer() is None
+
+
+def test_setup_asks_at_a_terminal(github, home, print_dir, monkeypatch, capsys):
+    from deli import config, probe
+
+    answers = iter(["centauri.local"])
+    monkeypatch.setattr("builtins.input", lambda question: next(answers))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(probe, "probe", lambda address: found_centauri())
+
+    assert main(["setup", "--no-completion"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Asking centauri.local what it is" in out and "\033[" not in out  # NO_COLOR is respected
+    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
+
+
+def test_setup_without_an_address_finds_the_printer_by_name(github, home, print_dir, monkeypatch, capsys):
+    from deli import config
+
+    answers = iter(["", "carbon", "2"])  # no address; two models match; the second
+    monkeypatch.setattr("builtins.input", lambda question: next(answers))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    assert main(["setup", "--no-completion"]) == 0
+
+    assert " 2. Elegoo Centauri Carbon\n" in capsys.readouterr().out
+    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
+

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -781,7 +782,7 @@ def _list_printers(presets: orca_install.Presets, what: str) -> None:
         print('\nTo choose one, with its default process and filament: deli printer "<printer>"')
         return
 
-    printers = [name for name in presets.names("printer") if what.lower() in name.lower()]
+    printers = [name for name in presets.names("printer") if orca_install.matches(what, name)]
     exact = [name for name in printers if name.lower() == what.lower()]
     if len(printers) > 1 and not exact:
         print(f"Orca has {len(printers)} printers matching '{what}':")
@@ -1106,6 +1107,32 @@ def _view(args: argparse.Namespace) -> int:
 ENGINE_API = 7  # must match API_VERSION in _engine.cpp
 
 
+def _styled(code: str):
+    """Light styling for deli setup, only on a terminal and never with NO_COLOR set."""
+
+    def style(text: str) -> str:
+        if sys.stdout.isatty() and "NO_COLOR" not in os.environ and os.environ.get("TERM") != "dumb":
+            return f"\033[{code}m{text}\033[0m"
+        return text
+
+    return style
+
+
+_bold, _dim, _green, _title = _styled("1"), _styled("2"), _styled("1;32"), _styled("1;36")
+
+
+def _done(text: str) -> None:
+    print(f"   {_green('✓')} {text}")
+
+
+def _model_and_nozzle(name: str) -> tuple[str, str | None]:
+    """Orca's printer names end with the nozzle: 'Voron 2.4 350 0.4 nozzle'."""
+    import re
+
+    found = re.fullmatch(r"(.*\S)\s+(\d+(?:\.\d+)?) nozzle", name)
+    return (found.group(1), found.group(2)) if found else (name, None)
+
+
 def _ask(question: str) -> str:
     """One answer from the person at the terminal; empty if they give none or end input."""
     try:
@@ -1121,110 +1148,266 @@ def _setup_completion(shell: str, asking: bool) -> None:
     from deli import complete
 
     if shell not in complete.SHELLS:
-        print(f"Tab completion: deli completes bash, zsh and fish, not {shell or 'this shell'}; see: deli completion --help")
+        print(f"   deli completes bash, zsh and fish, not {shell or 'this shell'}; see: deli completion --help")
         return
     if file := complete.completion_file(shell):
         current = complete.script(shell)
-        if file.exists() and file.read_text() == current:
-            print(f"Tab completion for {shell} is set up ({_home_relative(file)})")
-            return
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(current)
-        print(f"Tab completion for {shell} set up in {_home_relative(file)}; it works in new terminals")
+        if not (file.exists() and file.read_text() == current):
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(current)
+        _done(f"{shell}: works in new terminals {_dim('(' + _home_relative(file) + ')')}")
         return
     line, rc = complete.RC_LINE[shell], complete.startup_file(shell)
     if complete.has_rc_line(shell):
-        print(f"Tab completion for {shell} is set up ({_home_relative(rc)})")
-    elif asking and _ask(f"Tab completion for {shell} needs a line in {_home_relative(rc)}. Add it? [Y/n] ").lower() in ("", "y", "yes"):
+        _done(f"{shell}: set up in {_home_relative(rc)}")
+    elif asking and _ask(f"   It needs a line in {_home_relative(rc)}. Add it? [Y/n] ").lower() in ("", "y", "yes"):
         with rc.open("a") as out:
             out.write(f"\n# Tab completion for deli\n{line}\n")
-        print(f"Added to {_home_relative(rc)}; it works in new terminals")
+        _done(f"{shell}: added to {_home_relative(rc)}; works in new terminals")
     else:
-        print(f"Tab completion for {shell}: add this line to {_home_relative(rc)}:\n  {line}")
+        print(f"   For {shell}, add this line to {_home_relative(rc)}:\n     {line}")
 
 
-def _pick_printer(presets: orca_install.Presets) -> str | None:
-    """Ask which printer this is until one of Orca's is named: a vendor lists its printers,
-    part of a name the printers it is part of, and a number picks from the last list."""
+def _pick_printer(presets: orca_install.Presets, first: str | None = None) -> str | None:
+    """Ask which printer this is until one of Orca's is named: first the model (a vendor
+    lists its models, part of a name the models it is part of, a number picks from the
+    last list), then the nozzle, since Orca has one printer per nozzle size. `first` is
+    an answer already given."""
+    names = presets.names("printer")
     shown: list[str] = []
+    question = f"   Which printer is it? {_dim('(part of its name; Enter to skip)')} "
     while True:
-        answer = _ask("Which printer do you have? Part of its name will do, or a number from the list (Enter to skip): ")
+        answer, first = (first, None) if first else (_ask(question), None)
         if not answer:
             return None
         if answer.isdigit() and shown:
-            if 1 <= int(answer) <= len(shown):
-                return shown[int(answer) - 1]
-            print(f"Choose a number from 1 to {len(shown)}.")
-            continue
-        vendor = presets.vendor(answer)
-        names = presets.names("printer")
-        found = sorted(presets.vendors[vendor].names("printer")) if vendor else [n for n in names if answer.lower() in n.lower()]
-        exact = [n for n in found if n.lower() == answer.lower()]
-        if len(found) == 1 or exact:
-            return (exact or found)[0]
-        if not found:
-            close = difflib.get_close_matches(answer.lower(), [n.lower() for n in names], n=3, cutoff=0.6)
-            lower = {n.lower(): n for n in names}
-            hint = f" Did you mean: {', '.join(lower[c] for c in close)}?" if close else " Try the maker's name, such as Prusa, Creality or Voron."
-            print(f"Orca has no printer called '{answer}'.{hint}")
-            continue
-        if len(found) > 40:
-            makers = sorted({v for n in found if (v := presets.vendor_of("printer", n))}, key=str.lower)
-            listed = (", ".join(makers[:5]) + " and others") if len(makers) > 6 else " and ".join([", ".join(makers[:-1]), makers[-1]]) if len(makers) > 1 else ""
-            print(f"{len(found)} printers match '{answer}'" + (f", from {listed}" if len(makers) > 1 else "") + "; say more, such as the model.")
-            continue
-        shown = found
-        for number, name in enumerate(found, 1):
-            print(f"  {number:>2}. {name}")
-        print("The number at the end of each is the nozzle size; most printers come with 0.4 mm.")
+            if not 1 <= int(answer) <= len(shown):
+                print(f"   Choose a number from 1 to {len(shown)}.")
+                continue
+            model = shown[int(answer) - 1]
+        else:
+            vendor = presets.vendor(answer)
+            found = presets.vendors[vendor].names("printer") if vendor else [n for n in names if orca_install.matches(answer, n)]
+            if not found:
+                lower = {n.lower(): n for n in names}
+                close = difflib.get_close_matches(answer.lower(), list(lower), n=3, cutoff=0.6)
+                hint = f" Did you mean: {', '.join(lower[c] for c in close)}?" if close else " Try the maker's name, such as Bambu, Prusa, Creality or Voron."
+                print(f"   Orca has no printer called '{answer}'.{hint}")
+                continue
+            models = sorted({_model_and_nozzle(n)[0] for n in found}, key=str.lower)
+            if len(models) > 40:
+                makers = sorted({v for n in found if (v := presets.vendor_of("printer", n))}, key=str.lower)
+                listed = (", ".join(makers[:5]) + " and others") if len(makers) > 6 else " and ".join([", ".join(makers[:-1]), makers[-1]]) if len(makers) > 1 else ""
+                print(f"   {len(models)} printers match '{answer}'" + (f", from {listed}" if len(makers) > 1 else "") + "; say more, such as the model.")
+                continue
+            if len(models) > 1:  # even when one is exactly what was typed: "Elegoo Centauri" is also in "... Centauri Carbon"
+                shown = models
+                for number, model in enumerate(models, 1):
+                    print(f"     {_dim(f'{number:>2}.')} {model}")
+                question = f"   Which one? {_dim('(a number, or more of the name)')} "
+                continue
+            model = models[0]
+        return _pick_nozzle(names, model)
+
+
+def _pick_nozzle(names: list[str], model: str, known: float | None = None, named: bool = False) -> str:
+    """Orca's printer for a model with the right nozzle: the one the printer reported,
+    else asked, Enter taking the 0.4 mm most printers come with. `named`: the model has
+    just been shown, so the question need not name it again."""
+    nozzles = sorted(((nozzle, name) for name in names if (split := _model_and_nozzle(name))[0] == model and (nozzle := split[1])),
+                     key=lambda pair: float(pair[0]))
+    if not nozzles:
+        return model  # a name without a nozzle in it is a printer of its own
+    if len(nozzles) == 1:
+        return nozzles[0][1]
+    sizes = [nozzle for nozzle, _ in nozzles]
+    if known is not None and (same := [name for nozzle, name in nozzles if float(nozzle) == known]):
+        return same[0]
+    usual = "0.4" if "0.4" in sizes else sizes[0]
+    if not named:
+        print(f"   {model}")
+    while True:
+        answer = _ask(f"   Which nozzle? {', '.join(sizes[:-1])} or {sizes[-1]} mm {_dim(f'(Enter for {usual}, which most printers come with)')} ")
+        choice = (answer or usual).lower().removesuffix("mm").strip()
+        match = [name for nozzle, name in nozzles if nozzle == choice or (choice.replace(".", "", 1).isdigit() and float(nozzle) == float(choice))]
+        if match:
+            return match[0]
+        print(f"   {model} comes with a {', '.join(sizes[:-1])} or {sizes[-1]} mm nozzle in Orca's printers.")
+
+
+def _orca_name(kind: str, name: str | None) -> str | None:
+    """How a library profile is shown in deli setup: Orca's name for it when it has one."""
+    if not name or name not in library.names(kind):
+        return name
+    return library.read_settings(library.find(kind, name)).get(library.ID_KEYS[kind], "").strip('"') or name
+
+
+def _describe(found) -> str:
+    """One line for what answered at an address."""
+    if found.kind == "moonraker":
+        known = [f"{found.nozzle:g} mm nozzle" if found.nozzle else "",
+                 f"{found.bed[0]:g} x {found.bed[1]:g} mm bed" if found.bed else "",
+                 f"{found.height:g} mm tall" if found.height else "", found.structure or ""]
+        return f"Klipper {('(' + found.hint + ')') if found.hint else ''}: " + ", ".join(k for k in known if k)
+    if found.kind == "elegoo":
+        return f"{found.model or 'an Elegoo printer'}" + (f" ({found.details})" if found.details else "")
+    if found.kind == "octoprint":
+        return "OctoPrint"
+    return "a Bambu Lab printer"
+
+
+def _pick_for(presets: orca_install.Presets, found, asking: bool) -> str | None:
+    """Orca's printer for what answered: by its model where it says one (Elegoo), else the
+    printers that fit what it reported (Klipper), best guess first; else by name."""
+    names = presets.names("printer")
+    if found.model:
+        models = sorted({_model_and_nozzle(n)[0] for n in names if _model_and_nozzle(n)[0].lower() == found.model.lower()})
+        if models:
+            variants = [n for n in names if _model_and_nozzle(n)[0] == models[0]]
+            if asking or len(variants) == 1 or found.nozzle:
+                return _pick_nozzle(names, models[0], found.nozzle, named=True)
+            return None  # without a terminal, the nozzle cannot be asked
+    fits = presets.fitting_printers(found.nozzle, found.bed, found.structure) if found.nozzle and found.bed else []
+    if not fits:
+        return _pick_printer(presets) if asking else None
+
+    def likely(name: str):
+        # A name close to the printer's own goes first ("troodon" is not "Trident"); the
+        # rest alphabetically, since nothing else it reports tells them apart reliably.
+        words = [w.rstrip("0123456789") for w in re.split(r"[^a-z0-9]+", (found.hint or "").lower()) if len(w) > 2]
+        named = max((difflib.SequenceMatcher(None, w, part).ratio() for w in words for part in name.lower().split()), default=0)
+        return (-named if named >= 0.8 else 0, name.lower())
+
+    fits.sort(key=likely)
+    # A name like the printer's own for another nozzle is worth saying: Orca's "Troodon 2.0"
+    # comes with a 0.4 mm nozzle only, say, so the Troodon gets the printer it is built like.
+    if found.hint:
+        stem = re.sub(r"\d+$", "", found.hint.lower())
+        like = {_model_and_nozzle(n)[0] for n in names if stem and len(stem) > 3 and stem in n.lower()}
+        with_nozzle = {model for n in names if (model := _model_and_nozzle(n)[0]) in like and _model_and_nozzle(n)[1] and float(_model_and_nozzle(n)[1]) == found.nozzle}
+        other = sorted(like - with_nozzle)
+        if other:
+            print(f"   {_dim('Orca has ' + ', '.join(other) + ' only with another nozzle; these fit what the printer reports:')}")
+    if not asking:
+        return fits[0] if len(fits) == 1 else None
+    for number, name in enumerate(fits, 1):
+        print(f"     {_dim(f'{number:>2}.')} {name}")
+    while True:
+        answer = _ask(f"   Which one? {_dim('(a number, or part of a name to search instead)')} ")
+        if not answer:
+            return None
+        if answer.isdigit() and 1 <= int(answer) <= len(fits):
+            return fits[int(answer) - 1]
+        if not answer.isdigit():
+            return _pick_printer(presets, answer)
+        print(f"   Choose a number from 1 to {len(fits)}.")
+
+
+def _fit_to(printer: str, found) -> list[str]:
+    """Make a newly imported printer match what the machine reported: no taller prints than
+    its Z travel, and the material passed to a Klipper PRINT_START that reads it."""
+    path = library.find("printer", printer)
+    current = library.read_settings(path)
+    changes, said = {}, []
+    try:
+        if found.height and float(current.get("max_print_height", 0)) > found.height:
+            changes["max_print_height"] = f"{found.height:g}"
+            said.append(f"print height lowered to {found.height:g} mm, the printer's Z travel")
+    except ValueError:
+        pass
+    start = current.get("start_gcode", "")
+    if "MATERIAL" in found.start_params and "PRINT_START" in start and "MATERIAL=" not in start:
+        changes["start_gcode"] = re.sub(r"(PRINT_START[^\\\n]*)", r"\1 MATERIAL=[filament_type]", start, count=1)
+        said.append("PRINT_START is given MATERIAL=[filament_type], which your macro reads")
+    if changes:
+        library.update(path, changes)
+    return said
 
 
 def _setup(args: argparse.Namespace) -> int:
-    """`deli setup`: tab completion for this shell, your printer with its process and
-    filament, and how to reach it. Asks only at a terminal; every answer can be a flag."""
+    """`deli setup`: tab completion for this shell, then the printer: from its address,
+    which is asked what it is, else by name; imported with Orca's process and filament,
+    fitted to what the machine reported, and its address kept for deli send. Asks only at
+    a terminal; every answer can be given as an option."""
+    import contextlib
+    import io
+
+    from deli import probe
+
     asking = sys.stdin.isatty() and sys.stdout.isatty()
+    steps = (["Tab completion"] if not args.no_completion else []) + ["Your printer"]
+    step = iter(f"{number}. {title}" for number, title in enumerate(steps, 1))
+    print(_title("Setting up deli"))
 
     # 1. Tab completion.
     if not args.no_completion:
+        print(f"\n{_title(next(step))}")
         _setup_completion(args.shell or Path(os.environ.get("SHELL", "")).name, asking)
 
-    # 2. The printer, made the default with Orca's process and filament for it.
-    printer = None
-    if args.printer or asking:
-        presets = orca_install.Presets(github=orca_install.ORCA_REF)
-        wanted = args.printer or _pick_printer(presets)
-        if wanted:
-            print()
-            printer = _from_library_or_orca(project.read(), "printer", wanted)
-            config.set_value(config.DEFAULT_PRINTER, printer)
-            about = config.printer(printer)
-            print(f"Your printer is '{printer}': new prints start with it")
-            for kind in ("process", "filament"):
-                if about.get(kind):
-                    print(f"  {kind}: {about[kind]}; another with: deli {kind} <name> --default")
-    printer = printer or config.default_printer()
-
-    # 3. Where it is, for deli send.
-    host = args.host
-    if printer and not host and asking and not config.printer(printer).get("host"):
-        print()
-        host = _ask("How does deli reach it, for deli send? An address such as moonraker://voron.local,\n"
-                    "octoprint://octopi.local or elegoo://192.168.1.50 (Enter to skip): ")
-    if host:
-        if not printer:
-            raise CommandError("--host is for your printer; name it too with --printer")
+    # 2. The printer: what answers at its address, else by name.
+    print(f"\n{_title(next(step))}")
+    found = None
+    if args.host:
         try:
-            parsed = send.parse_host(host, where="the address")
-        except send.SendError as err:
-            raise CommandError(str(err)) from None
-        config.set_value(f"printers.{printer}.host", host)
-        print(f"deli send sends to the {parsed.kind} host at {parsed.url}")
-        if parsed.kind == "octoprint" and asking and not config.printer(printer).get("api_key"):
-            if key := _ask("OctoPrint's API key (Enter to skip): "):
+            found = probe.probe(args.host)
+        except probe.NotFound as err:
+            raise CommandError(f"{err}; nothing was saved") from None
+    elif asking and not args.printer:
+        while True:
+            address = _ask(f"   Its address, a hostname or IP: {_dim('(Enter if it has none deli can reach)')} ")
+            if not address:
+                break
+            print(f"   {_dim('Asking ' + address + ' what it is...')}")
+            try:
+                found = probe.probe(address)
+                break
+            except probe.NotFound as err:
+                print(f"   {err}.")
+    if found:
+        _done(_describe(found))
+        if found.kind == "bambu":
+            print("   deli can't send to Bambu printers yet; it will write the G-code for you to copy over.")
+        elif found.kind == "octoprint":
+            print(f"   {_dim('OctoPrint does not say which printer it drives.')}")
+
+    printer = None
+    if args.printer or asking or found:
+        presets = orca_install.Presets(github=orca_install.ORCA_REF)
+        wanted = args.printer or (_pick_for(presets, found, asking) if found else _pick_printer(presets))
+        if found and not wanted and not asking:
+            raise CommandError("several of Orca's printers fit what answered there; name yours with --printer")
+        if wanted:
+            had = set(library.names("printer"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                printer = _from_library_or_orca(project.read(), "printer", wanted)
+            about = config.printer(printer)
+            _done(_orca_name("printer", printer))
+            for kind in ("process", "filament"):
+                print(f"     {kind:<9} {_orca_name(kind, about.get(kind)) or _dim('none yet; choose one with: deli ' + kind)}")
+            if found and printer not in had:
+                for line in _fit_to(printer, found):
+                    print(f"     {_dim(line)}")
+    if printer and found and found.kind != "bambu":
+        config.set_value(f"printers.{printer}.host", found.host)
+        _done(f"deli send sends to {found.host}")
+        if found.kind == "octoprint" and asking and not config.printer(printer).get("api_key"):
+            if key := _ask(f"   OctoPrint's API key: {_dim('(Enter to skip)')} "):
                 config.set_value(f"printers.{printer}.api_key", key)
 
-    print("\nNext, in a folder with a model: deli add <model.stl>, then deli send --print" if printer
-          else "\nChoose your printer when you are ready: deli vendor, then deli printer \"<name>\" --default")
+    # The default printer: set when there is none; another one is replaced only on a yes.
+    if printer:
+        default = config.default_printer()
+        if default in (None, printer) or (asking and _ask(f"   Make it the printer new prints start with, instead of {_orca_name('printer', default)}? [y/N] ").lower() in ("y", "yes")):
+            config.set_value(config.DEFAULT_PRINTER, printer)
+            _done("new prints start with it")
+        else:
+            print(f"   {_dim('Your default printer is still ' + str(_orca_name('printer', default)) + '; a print chooses this one with: deli printer ' + printer)}")
+        bambu = found.kind == "bambu" if found else (_orca_name("printer", printer) or "").startswith("Bambu Lab")
+        print(f"\n{_title('All set.')} In a folder with a model:")
+        print("   deli add model.stl\n   " + ("deli slice -o .   (then copy the .gcode file to the printer)" if bambu or not config.printer(printer).get("host")
+                                              else "deli send --print"))
+    elif not found:
+        print("   Skipped. Find it later with: deli vendor, then deli printer \"<name>\" --default")
     return 0
 
 
@@ -1475,13 +1658,14 @@ def build_parser() -> argparse.ArgumentParser:
     setup_ = commands.add_parser(
         "setup",
         help="set deli up: tab completion, your printer, and how to reach it",
-        description="Set deli up for you: tab completion for your shell, your printer (found by any part of its name, "
-        "with OrcaSlicer's process and filament for it, made the defaults for new prints), and its address for deli "
-        "send. It asks at a terminal; each answer can be given as an option instead, and nothing is asked when input "
+        description="Set deli up for you: tab completion for your shell, then your printer: give its hostname or IP "
+        "address and deli asks it what it is (Klipper, Elegoo, OctoPrint; Bambu is recognised but cannot be sent to "
+        "yet), or find it by any part of its name. It is imported with OrcaSlicer's process and filament for it, fitted "
+        "to what the machine reports, and its address kept for deli send. It asks at a terminal; each answer can be given as an option instead, and nothing is asked when input "
         "is not a terminal. Run it again to add or change a printer.",
     )
     setup_.add_argument("--printer", help="your printer: Orca's name for it or a part of it, or one in your library")
-    setup_.add_argument("--host", help="its address for deli send: moonraker://, octoprint:// or elegoo://")
+    setup_.add_argument("--host", help="your printer's hostname or IP address; deli asks it what it is, and keeps the address for deli send")
     setup_.add_argument("--shell", choices=["bash", "zsh", "fish"], help="set up tab completion for this shell (default: yours, from $SHELL)")
     setup_.add_argument("--no-completion", action="store_true", help="leave tab completion alone")
     setup_.set_defaults(run=_setup)
