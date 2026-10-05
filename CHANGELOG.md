@@ -5,6 +5,12 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.3.0 (2026-10-05)
+
+- The wheels carry the licences of the software compiled into them
+  ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)); 0.1.0 and 0.2.0 did not.
 - Choose a printer, filament or process by name straight from OrcaSlicer's presets:
   `deli printer "centauri carbon 0.6"` fetches and converts it if it is not in your
   library yet, with Orca's default process and filament for it, and makes them the
