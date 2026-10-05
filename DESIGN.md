@@ -28,8 +28,8 @@ only ones in the file.
 Your config names a default printer, and a filament and process for each printer, so
 that a new print does not have to choose them again. They are defaults and nothing
 more. A print that chooses something else is sliced and sent like any other, and deli
-never checks a print's choices against your defaults, the filament on hand or anything
-else. (An early check that a print's filament matched the printer's default was taken
+never checks a print's choices against your defaults or anything else, and keeps no
+record of what is on your shelf: that would only ever be out of date. (An early check that a print's filament matched the printer's default was taken
 out: defaults exist so you need not re-enter things, not to make you keep two names in
 step.)
 

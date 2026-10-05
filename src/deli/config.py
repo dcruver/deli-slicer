@@ -11,7 +11,6 @@ that has chosen something else is never held to them.
     api_key = "..."                       # for hosts that need one (DELI_API_KEY overrides)
     filament = "elegoo-petg-cf-ecc"       # the default filament for new prints
     process = "0.30mm-standard-elegoo-cc-0.6-nozzle"   # the default process for new prints
-    filaments = ["elegoo-pla-ecc", "elegoo-petg-cf-ecc"]  # spools on hand
 
 `deli config` reads and writes it by dotted key, like `git config`.
 """
@@ -26,8 +25,11 @@ from tomlkit.exceptions import TOMLKitError
 from deli import library
 
 DEFAULT_PRINTER = "printer"  # the top-level key that names the printer new prints start with
-# The keys a printer's table may hold, and whether each is a list.
-PRINTER_KEYS = {"host": False, "api_key": False, "filament": False, "process": False, "filaments": True}
+# The keys a printer's table may hold.
+PRINTER_KEYS = ("host", "api_key", "filament", "process")
+# Keys deli once kept and no longer reads, ignored in old files and still removable with
+# --unset: `filaments`, the spools on hand (deli is not an inventory, and it would always be out of date).
+RETIRED_KEYS = ("filaments",)
 
 
 class ConfigError(Exception):
@@ -63,12 +65,13 @@ def printer(name: str, doc: tomlkit.TOMLDocument | None = None) -> dict:
     if not isinstance(table, dict):
         raise ConfigError(f"{path()}: 'printers.{name}' should be a table")
     for key, value in table.items():
-        wants_list = PRINTER_KEYS.get(key)
-        if wants_list is None:
+        if key in RETIRED_KEYS:
+            continue
+        if key not in PRINTER_KEYS:
             raise ConfigError(f"{path()}: 'printers.{name}.{key}' is not a setting deli knows; the keys are " + ", ".join(PRINTER_KEYS))
-        if wants_list != isinstance(value, list) or (wants_list and not all(isinstance(v, str) for v in value)):
-            raise ConfigError(f"{path()}: 'printers.{name}.{key}' should be " + ("a list of names" if wants_list else "one value"))
-    return dict(table)
+        if not isinstance(value, str):
+            raise ConfigError(f"{path()}: 'printers.{name}.{key}' should be one value")
+    return {key: value for key, value in table.items() if key not in RETIRED_KEYS}
 
 
 def default_printer(doc: tomlkit.TOMLDocument | None = None) -> str | None:
@@ -79,11 +82,13 @@ def default_printer(doc: tomlkit.TOMLDocument | None = None) -> str | None:
     return name
 
 
-def split_key(key: str) -> tuple[str, str]:
-    """A dotted key `printers.<name>.<key>` into the printer's name and the key."""
+def split_key(key: str, retired: bool = False) -> tuple[str, str]:
+    """A dotted key `printers.<name>.<key>` into the printer's name and the key; with
+    `retired`, a key deli no longer keeps is accepted too, for removing it."""
     parts = key.split(".")
     # A printer's name may itself hold dots: printers.elegoo-centauri-carbon-0.6-nozzle.host
-    if len(parts) < 3 or parts[0] != "printers" or parts[-1] not in PRINTER_KEYS:
+    known = PRINTER_KEYS + RETIRED_KEYS if retired else PRINTER_KEYS
+    if len(parts) < 3 or parts[0] != "printers" or parts[-1] not in known:
         raise ConfigError(f"'{key}' is not a key deli knows; the keys are {DEFAULT_PRINTER} and printers.<printer name>.<" + "|".join(PRINTER_KEYS) + ">")
     return library.slug(".".join(parts[1:-1])), parts[-1]
 
@@ -106,7 +111,7 @@ def set_value(key: str, value: str) -> None:
     printer(name, doc)  # validates what is there
     printers = doc.setdefault("printers", tomlkit.table())
     table = printers.setdefault(name, tomlkit.table())
-    table[field] = [v.strip() for v in value.split(",") if v.strip()] if PRINTER_KEYS[field] else value
+    table[field] = value
     write(doc)
 
 
@@ -119,7 +124,7 @@ def unset(key: str) -> bool:
         del doc[DEFAULT_PRINTER]
         write(doc)
         return True
-    name, field = split_key(key)
+    name, field = split_key(key, retired=True)
     doc = read()
     table = doc.get("printers", {}).get(name, {})
     if field not in table:

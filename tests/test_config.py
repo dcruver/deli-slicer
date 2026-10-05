@@ -34,16 +34,16 @@ def home(tmp_path, monkeypatch):
 
 def test_set_get_list_and_unset(home, capsys):
     assert main(["config", HOST, "elegoo://mk3.local"]) == 0
-    assert main(["config", f"printers.{MK3}.filaments", f"{ABS}, spare-pla"]) == 0
+    assert main(["config", f"printers.{MK3}.filament", "spare-pla"]) == 0
 
     data = tomllib.loads((home / "config.toml").read_text())
-    assert data == {"printers": {MK3: {"host": "elegoo://mk3.local", "filaments": [ABS, "spare-pla"]}}}
+    assert data == {"printers": {MK3: {"host": "elegoo://mk3.local", "filament": "spare-pla"}}}
 
     capsys.readouterr()
     main(["config", HOST])
     assert capsys.readouterr().out == "elegoo://mk3.local\n"
     main(["config"])
-    assert capsys.readouterr().out.splitlines() == [f"{HOST} = elegoo://mk3.local", f"printers.{MK3}.filaments = {ABS}, spare-pla"]
+    assert capsys.readouterr().out.splitlines() == [f"{HOST} = elegoo://mk3.local", f"printers.{MK3}.filament = spare-pla"]
 
     assert main(["config", "--unset", HOST]) == 0
     assert "host" not in tomllib.loads((home / "config.toml").read_text())["printers"][MK3]
@@ -141,15 +141,24 @@ def test_default_missing_from_the_library_is_noted(home, capsys):
     assert "filament" not in tomllib.loads(Path("deli.toml").read_text())
 
 
-def test_filament_listing_shows_the_default_and_what_is_on_hand(home, capsys):
+def test_filament_listing_shows_the_default(home, capsys):
     main(["config", f"printers.{MK3}.filament", "spare-pla"])
-    main(["config", f"printers.{MK3}.filaments", f"{ABS},spare-pla"])
     main(["printer", MK3])
     capsys.readouterr()
 
     main(["filament"])
 
-    assert capsys.readouterr().out.splitlines() == [f"  {ABS} (on hand)", "* spare-pla (the default for this printer)"]
+    assert capsys.readouterr().out.splitlines() == [f"  {ABS}", "* spare-pla (the default for this printer)"]
+
+
+def test_the_retired_list_of_filaments_on_hand_is_ignored_and_can_be_removed(home, capsys):
+    (home / "config.toml").parent.mkdir(parents=True, exist_ok=True)
+    (home / "config.toml").write_text(f'[printers.{MK3}]\nfilament = "spare-pla"\nfilaments = ["{ABS}", "spare-pla"]\n')
+
+    assert config.printer(MK3) == {"filament": "spare-pla"}
+    assert main(["config", "--unset", f"printers.{MK3}.filaments"]) == 0
+    assert "filaments" not in (home / "config.toml").read_text()
+    assert main(["config", f"printers.{MK3}.filaments", ABS]) == 1  # no longer kept
 
 
 def test_send_takes_the_host_from_the_config_and_the_environment_overrides(home, monkeypatch):

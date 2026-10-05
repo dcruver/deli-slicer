@@ -94,7 +94,7 @@ def test_options_after_a_dash():
 
 def test_config_keys_and_values():
     assert complete("config", "printers.original", new_word=False) == [
-        f"printers.original-prusa-i3-mk3.{field}" for field in ("api_key", "filament", "filaments", "host", "process")
+        f"printers.original-prusa-i3-mk3.{field}" for field in ("api_key", "filament", "host", "process")
     ]
     assert complete("config", "printers.original-prusa-i3-mk3.filament") == ["generic-abs"]
     assert complete("config", "printer", new_word=False)[0] == "printer"

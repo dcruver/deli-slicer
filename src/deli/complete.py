@@ -131,7 +131,7 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command == "config":
         if position == 0:
             return _config_keys()
-        if position == 1 and typed[0].endswith((".filament", ".filaments")):
+        if position == 1 and typed[0].endswith(".filament"):
             return _quiet(lambda: library.names("filament"), [])
         if position == 1 and typed[0].endswith(".process"):
             return _quiet(lambda: library.names("process"), [])

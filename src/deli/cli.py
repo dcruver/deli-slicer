@@ -186,8 +186,6 @@ def _list_kind(doc, kind: str) -> int:
             notes.append("your default" if kind == "printer" else "the default for this printer")
         elif default is None and shown == orca_default:
             notes.append("Orca's default")
-        if kind == "filament" and name is not None and name != default and name in about.get("filaments", []):
-            notes.append("on hand")
         note = f" ({'; '.join(notes)})" if notes else ""
         print(f"{'*' if name is not None and name == current.get('name') else ' '} {shown}{note}")
     if generic:
@@ -1021,10 +1019,8 @@ def _config(args: argparse.Namespace) -> int:
         config.set_value(args.key, library.slug(args.value))
         return 0
     name, field = config.split_key(args.key)
-    kinds = {"filament": "filament", "filaments": "filament", "process": "process"}
-    if field in kinds:
-        for one in args.value.split(","):
-            library.find(kinds[field], library.slug(one.strip()))  # must be in the library
+    if field in ("filament", "process"):
+        library.find(field, library.slug(args.value))  # must be in the library
     elif field == "host" and not args.value.startswith(("http://", "https://")):
         send.parse_host(args.value, where=args.key)  # a plain http host is checked against the printer's host_type when sending
     config.set_value(args.key, args.value)
@@ -1417,7 +1413,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="read or change your deli configuration (~/.config/deli/config.toml)",
         description="Read or change ~/.config/deli/config.toml, which names the printer new prints start with and says "
         "what each printer in your library is connected to and which filament and process a new print on it starts "
-        "with. Keys are printer and printers.<printer>.<host|api_key|filament|process|filaments>. "
+        "with. Keys are printer and printers.<printer>.<host|api_key|filament|process>. "
         "Without a key, list everything; with a key, show it; with a key and a value, set it.",
     )
     config_.add_argument("key", nargs="?", help="such as printers.elegoo-centauri-carbon-0.6-nozzle.host")

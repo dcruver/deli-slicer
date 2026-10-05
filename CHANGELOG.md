@@ -5,7 +5,15 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
-Nothing yet.
+- `deli setup`: tab completion for your shell, your printer (found by any part of its
+  name, picked from a numbered list) with OrcaSlicer's process and filament for it as
+  the defaults, and its address for `deli send`. It asks at a terminal; `--printer`,
+  `--host`, `--shell` and `--no-completion` give the answers instead.
+- **Changed:** the config no longer keeps a list of filaments on hand
+  (`printers.<printer>.filaments`), and `deli filament` no longer marks them. An old
+  list is ignored; `deli config --unset printers.<printer>.filaments` removes it.
+- A printer for which OrcaSlicer names no default process (95 of them) gets the
+  standard process made for it, so its first print slices.
 
 ## 0.3.0 (2026-10-05)
 
