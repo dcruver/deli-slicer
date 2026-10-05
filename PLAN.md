@@ -469,8 +469,11 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
     match, so new users never type `import`. The library stays, rather than converting
     on every slice: a converter fix must not silently change a printer prints rely on,
     edits (`print_flow_ratio`, `gcode_footer`) need a home, `deli load` and `--local`
-    feed it too, and slicing stays offline. Browsing is still `deli import orca list`;
-    a name outside `import` for it is open. What follows describes the first version.
+    feed it too, and slicing stays offline. Browsing is `deli vendor`, and `deli
+    printer|filament|process` without a name list Orca's and the library's together:
+    users should not have to know whether something is in the library or still to be
+    imported (`deli import orca list` and `--available` were tried and dropped). What
+    follows describes the first version.
   - `--github [REF]` (default `main`) reads the same files from OrcaSlicer's repository
     instead: the vendor list from GitHub's contents API (60 requests an hour without a
     token, and it answers with a 301 that must be followed), each vendor's index

@@ -114,9 +114,9 @@ three. You don't need OrcaSlicer installed.
 ### 1. Find your printer
 
 ```
-deli import orca list                      # Orca's vendors, with how many printers each
-deli import orca list Elegoo               # one vendor's printers
-deli import orca list "centauri carbon"    # or any part of a name: the printers that match
+deli vendor                      # the vendors, with how many printers each
+deli vendor Elegoo               # one vendor's printers
+deli vendor "centauri carbon"    # or any part of a name: the printers that match
 ```
 
 Orca's printer names end with the nozzle size, such as `Elegoo Centauri Carbon 0.6
@@ -158,23 +158,28 @@ your default printer, and a filament you chose yourself stays chosen. Once impor
 printer is in your library (`~/.config/deli/`), and choosing it again reads it from
 there: a newer deli or a newer Orca never changes a printer under you.
 
-### 3. Other processes and filaments
+### 3. Other filaments and processes
 
 ```
-deli import orca list "Elegoo Centauri Carbon 0.6 nozzle"   # the processes and filaments made for it
-deli filament "Elegoo PETG-CF @ECC"
-deli process "0.18mm Fine @Elegoo CC 0.6 nozzle"
+deli filament                              # the filaments for your printer, the one in use marked
+deli filament "Elegoo PETG-CF @ECC"        # choose one
+deli process                               # the processes for your printer
+deli process "0.18mm fine"                 # choose one
 ```
 
-These work the same way: from your library if it has one by that name, else from Orca,
-converted for this print's printer. Orca's Generic filaments (`Generic PETG @System` and
-so on) fit any printer. `--default` makes it what new prints start with instead of
+`deli filament` lists the filaments made for the print's printer (or your default one),
+with any you have used or loaded yourself, and marks the one in use and the default.
+`deli process` does the same for processes, and `deli printer` lists your printer's
+vendor's printers. It makes no difference whether one has been used before: choose any
+of them by name, or a part of it, and deli fetches and converts it as needed, for your
+printer. Orca's Generic filaments (`Generic PETG @System` and so on) fit any printer; the
+list counts them. `--default` makes a choice what new prints start with instead of
 choosing it for this one.
 
 ### `deli import`: more control
 
-`deli import orca printer|process|filament "<name>"` converts one of Orca's presets into
-your library without choosing it, and says more about the conversion: the notes on what
+`deli import orca printer|process|filament "<name>"` converts one of Orca's presets
+without choosing it, and says more about the conversion: the notes on what
 deli did, and with `-v` every Orca setting left out. Run it again to replace a profile
 with a fresh conversion, after a deli upgrade that fixes the converter, say.
 `--printer "<name>"` converts a process or filament for another printer than the one it
@@ -343,7 +348,7 @@ check the file arrived and start it from the printer's own screen.
 | | |
 |---|---|
 | `deli printer\|filament\|process [name]` | choose one for this print, from your library or else OrcaSlicer's (imported as it is chosen; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
-| `deli import orca list [vendor\|printer]` | list Orca's vendors, a vendor's printers, or what fits a printer |
+| `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
 | `deli add <file> [--count N]` | add a model, or more copies of it |

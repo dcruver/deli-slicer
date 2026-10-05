@@ -290,7 +290,7 @@ def test_a_default_that_differs_from_one_of_the_same_name_is_stored_apart(home, 
 
 
 def test_list_shows_vendors_with_printers(github, capsys):
-    assert main(["import", "orca", "list"]) == 0
+    assert main(["vendor"]) == 0
 
     out = capsys.readouterr().out
     assert "BBL       1 printer    (Bambu Lab X1 Carbon)\n" in out  # BBL's printers go by another name
@@ -298,13 +298,13 @@ def test_list_shows_vendors_with_printers(github, capsys):
 
 
 def test_list_a_vendor_in_any_case_shows_its_printers(github, capsys):
-    assert main(["import", "orca", "list", "elegoo"]) == 0
+    assert main(["vendor", "elegoo"]) == 0
 
     assert capsys.readouterr().out.splitlines()[0] == MACHINE
 
 
 def test_list_a_printer_shows_what_fits_it_and_its_defaults(github, capsys):
-    assert main(["import", "orca", "list", "centauri"]) == 0
+    assert main(["vendor", "centauri"]) == 0
 
     out = capsys.readouterr().out
     assert f"  {PROCESS}   (Orca's default)" in out
@@ -313,19 +313,19 @@ def test_list_a_printer_shows_what_fits_it_and_its_defaults(github, capsys):
 
 
 def test_list_part_of_several_printers_lists_them(github, capsys):
-    assert main(["import", "orca", "list", "carbon"]) == 0  # Elegoo Centauri Carbon and Bambu Lab X1 Carbon
+    assert main(["vendor", "carbon"]) == 0  # Elegoo Centauri Carbon and Bambu Lab X1 Carbon
 
     assert "Orca has 2 printers matching 'carbon':" in capsys.readouterr().out
 
 
 def test_list_suggests_a_vendor_for_a_typo(github, capsys):
-    assert main(["import", "orca", "list", "elgoo"]) == 1
+    assert main(["vendor", "elgoo"]) == 1
 
     assert "did you mean Elegoo?" in capsys.readouterr().err
 
 
 def test_ref_is_for_github_only(capsys):
-    assert main(["import", "orca", "list", "--local", "--ref", "main"]) == 1
+    assert main(["vendor", "--local", "--ref", "main"]) == 1
 
     assert "--ref is for Orca's presets on GitHub" in capsys.readouterr().err
 
@@ -419,3 +419,38 @@ def test_a_name_nobody_has_gets_suggestions(github, home, print_dir, capsys):
     assert main(["printer", "Elegoo Centuari Carbon 0.6 nozzle"]) == 1
 
     assert f"did you mean: {MACHINE}?" in capsys.readouterr().err
+
+
+# ------------------------------------------------- lists that do not care where things live
+
+
+def test_printer_lists_its_vendors_printers_by_orcas_names(github, home, print_dir, capsys):
+    assert main(["printer", "centauri"]) == 0
+    capsys.readouterr()
+
+    assert main(["printer"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert f"* {MACHINE} (your default)" in lines
+
+
+def test_filament_lists_those_made_for_the_printer_and_marks_the_default(github, home, print_dir, capsys):
+    assert main(["printer", "centauri"]) == 0
+    capsys.readouterr()
+
+    assert main(["filament"]) == 0
+
+    assert "* Elegoo PLA @ECC (the default for this printer)" in capsys.readouterr().out.splitlines()
+
+
+def test_process_lists_orcas_and_yours_alike(github, home, print_dir, capsys):
+    assert main(["printer", "centauri"]) == 0
+    assert main(["import", "orca", "process", "mine", "--orca", str(FIXTURE), "--name", "thick walls"]) == 0
+    capsys.readouterr()
+
+    assert main(["process"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert f"* {PROCESS} (the default for this printer)" in lines
+    assert f"  {PROCESS} - Mine" in lines  # made for it, not chosen yet
+    assert "  thick-walls" in lines  # yours, under the name you gave it

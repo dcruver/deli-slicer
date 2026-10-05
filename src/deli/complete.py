@@ -93,10 +93,11 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command == "import":
         if position == 2:
             presets = _orca_presets(before)
-            if typed[1] == "list":
-                return _quiet(lambda: [*presets().vendors, *presets().names("printer")], [])
             return _quiet(lambda: presets().names(typed[1]), [])
         return []
+    if command == "vendor":
+        presets = _orca_presets(before)
+        return _quiet(lambda: [*presets().vendors, *presets().names("printer")], []) if position == 0 else []
     if command in library.KINDS:
         if position != 0:
             return []
