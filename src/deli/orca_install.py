@@ -1,5 +1,5 @@
-"""`deli import orca`: convert a preset from the OrcaSlicer installed on this machine,
-or straight from OrcaSlicer's repository on GitHub.
+"""`deli import orca`: convert a preset from OrcaSlicer's repository on GitHub, or from
+the OrcaSlicer installed on this machine.
 
 Orca keeps its presets as JSON: the ones it ships under `system/<vendor>/` and the
 user's own under `user/default/`, each with `machine/`, `process/` and `filament/`
@@ -7,12 +7,21 @@ folders. A preset may `inherit` another by name. The same files live in the
 repository under `resources/profiles/<vendor>/`, with `<vendor>.json` beside them
 listing every preset's name and path. `deli.orca` does the converting; this module
 finds the presets and puts the result in the library.
+
+From GitHub the presets are read at one of Orca's releases, `ORCA_REF` unless asked
+otherwise: the release `PRINTERS.md` was made from, so that what it says slices is what
+is imported. A release's files never change, so what is fetched for one is kept in
+`$XDG_CACHE_HOME/deli/orca/<release>/` and not fetched again.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
+import difflib
+import hashlib
 import json
 import os
+import re
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +29,11 @@ from pathlib import Path
 from deli import library, orca
 
 REPOSITORY = "SoftFever/OrcaSlicer"
+# The Orca release presets are imported from by default. ci/sweep.py's run in the wheel
+# workflow (ORCA_REF there) must use the same one; a test checks that it does.
+ORCA_REF = "v2.4.2"
+# Orca's folder of filaments for every printer; it has no printers of its own.
+LIBRARY = "OrcaFilamentLibrary"
 _RAW = "https://raw.githubusercontent.com/{repo}/{ref}/resources/profiles/{path}"
 _LISTING = "https://api.github.com/repos/{repo}/contents/resources/profiles?ref={ref}"
 
@@ -59,6 +73,44 @@ def _fetch(url: str) -> str:
         raise OrcaError(str(err)) from None
 
 
+def _settled(ref: str) -> bool:
+    """Whether a ref names files that never change: a release tag or a commit, not a branch."""
+    return bool(re.fullmatch(r"v\d+(\.\d+)*(-[\w.]+)?|[0-9a-f]{40}", ref))
+
+
+def _cache_dir() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "deli" / "orca"
+
+
+class _Cached:
+    """Fetches for one ref, kept on disk when the ref is settled. With `offline`, only what
+    is kept is used: shell completion must not wait on the network."""
+
+    def __init__(self, ref: str, offline: bool = False):
+        self.folder = _cache_dir() / ref if _settled(ref) else None
+        self.offline = offline
+
+    def __call__(self, url: str) -> str:
+        file = self.folder / hashlib.sha256(url.encode()).hexdigest()[:32] if self.folder else None
+        if file is not None:
+            try:
+                return file.read_text()
+            except OSError:
+                pass
+        if self.offline:
+            raise OrcaError(f"not fetched yet: {url}")
+        text = _fetch(url)
+        if file is not None:
+            try:
+                file.parent.mkdir(parents=True, exist_ok=True)
+                partial = file.with_suffix(".part")
+                partial.write_text(text)
+                partial.replace(file)
+            except OSError:
+                pass  # a cache that cannot be written only costs another fetch
+        return text
+
+
 def _is_base(name: str) -> bool:
     """Orca's bases, which other presets inherit from and nobody prints with, are named fdm_*."""
     return name.startswith("fdm_")
@@ -77,13 +129,17 @@ class LocalVendor:
     def get(self, key: tuple[str, str]) -> orca.Orca | None:
         return self.index.get(key)
 
+    def has(self, key: tuple[str, str]) -> bool:
+        return key in self.index
+
 
 class GitHubVendor:
     """One vendor's presets in OrcaSlicer's repository: the index is fetched when first
     needed, and each preset's file only when it is asked for."""
 
-    def __init__(self, vendor: str, ref: str = "main", repo: str = REPOSITORY):
+    def __init__(self, vendor: str, ref: str = ORCA_REF, repo: str = REPOSITORY, fetch=None):
         self.vendor, self.ref, self.repo = vendor, ref, repo
+        self.fetch = fetch or _Cached(ref)
         self._paths: dict[tuple[str, str], str] | None = None
         self._files: dict[tuple[str, str], orca.Orca] = {}
 
@@ -98,7 +154,11 @@ class GitHubVendor:
     def paths(self) -> dict[tuple[str, str], str]:
         if self._paths is None:
             try:
-                index = json.loads(_fetch(self.url(f"{self.vendor}.json")))
+                index = json.loads(self.fetch(self.url(f"{self.vendor}.json")))
+            except OrcaError:
+                if not getattr(self.fetch, "offline", False):
+                    raise
+                index = {}  # offline, a vendor not fetched yet has nothing to offer
             except ValueError:
                 raise OrcaError(f"the index of Orca's '{self.vendor}' presets on GitHub is not JSON") from None
             self._paths = {}
@@ -111,22 +171,31 @@ class GitHubVendor:
     def names(self, kind: str) -> list[str]:
         return [name for orca_kind, name in self.paths if orca_kind == KINDS[kind] and not _is_base(name)]
 
+    def has(self, key: tuple[str, str]) -> bool:
+        return key in self.paths
+
     def get(self, key: tuple[str, str]) -> orca.Orca | None:
         if key not in self.paths:
             return None
         if key not in self._files:
             try:
-                data = json.loads(_fetch(self.url(self.paths[key])))
+                data = json.loads(self.fetch(self.url(self.paths[key])))
             except ValueError:
                 raise OrcaError(f"Orca's preset file {self.paths[key]} on GitHub is not JSON") from None
             self._files[key] = data if isinstance(data, dict) else {}
         return self._files[key]
 
+    def prefetch(self, keys) -> None:
+        """Fetch several preset files at once, for listing what fits a printer."""
+        missing = [key for key in keys if key in self.paths and key not in self._files]
+        with concurrent.futures.ThreadPoolExecutor(32) as pool:
+            list(pool.map(self.get, missing))
 
-def github_vendors(ref: str = "main", repo: str = REPOSITORY) -> list[str]:
+
+def github_vendors(ref: str = ORCA_REF, repo: str = REPOSITORY, fetch=None) -> list[str]:
     """The vendors with presets in OrcaSlicer's repository, from the folder listing."""
     try:
-        listing = json.loads(_fetch(_LISTING.format(repo=repo, ref=ref)))
+        listing = json.loads((fetch or _Cached(ref))(_LISTING.format(repo=repo, ref=ref)))
     except ValueError:
         raise OrcaError("GitHub's listing of Orca's profiles folder is not JSON") from None
     if not isinstance(listing, list):
@@ -150,15 +219,17 @@ class Presets:
     (`fdm_process_common`, say) with different contents, and a preset's `inherits`
     chain must stay within its vendor."""
 
-    def __init__(self, extra: list[Path] = (), search: bool = True, github: str | None = None, vendor: str | None = None):
+    def __init__(self, extra: list[Path] = (), search: bool = True, github: str | None = None, vendor: str | None = None, offline: bool = False):
         """`extra` folders are read as vendors, before those of the Orca installs found when
-        `search` is on. With `github` (a branch or tag), the vendors are read from
-        OrcaSlicer's repository instead: all of them, or only `vendor`."""
+        `search` is on. With `github` (a release, branch or commit), the vendors are read
+        from OrcaSlicer's repository instead: all of them, or only `vendor`; with `offline`,
+        only as far as they are already kept on disk."""
         self.vendors: dict[str, LocalVendor | GitHubVendor] = {}
         user_roots = []
         if github:
-            vendors = [vendor] if vendor else github_vendors(github)
-            self.vendors = {name: GitHubVendor(name, github) for name in vendors}
+            fetch = _Cached(github, offline)
+            vendors = [vendor] if vendor else github_vendors(github, fetch=fetch)
+            self.vendors = {name: GitHubVendor(name, github, fetch=fetch) for name in vendors}
         else:
             folders = list(extra)
             if search:
@@ -171,7 +242,7 @@ class Presets:
                     self.vendors[folder.name] = LocalVendor(folder)
         self.user = orca.load_index(user_roots)
         if not self.user and not self.vendors:
-            raise OrcaError("no OrcaSlicer presets found on this machine; point at some with --orca DIR, or use --github")
+            raise OrcaError("no OrcaSlicer presets found on this machine; point at some with --orca DIR, or leave out --local to use Orca's on GitHub")
 
     def _vendors_for(self, name: str) -> list[str]:
         """The vendors in the order worth looking: those whose name begins the preset's first,
@@ -179,8 +250,67 @@ class Presets:
         first = [v for v in self.vendors if name.lower().startswith(v.lower())]
         return first + [v for v in self.vendors if v not in first]
 
+    def vendor(self, name: str) -> str | None:
+        """The vendor of that name, in any case; None if there is none."""
+        return next((v for v in self.vendors if v.lower() == name.lower()), None)
+
+    def close_vendors(self, name: str) -> list[str]:
+        """Vendors whose names are close to one that is not a vendor's, for a suggestion."""
+        lower = {v.lower(): v for v in self.vendors}
+        return [lower[match] for match in difflib.get_close_matches(name.lower(), list(lower), n=3, cutoff=0.6)]
+
+    def _read_all(self) -> None:
+        """Every vendor's index from GitHub at once, rather than one after another."""
+        remote = [v for v in self.vendors.values() if isinstance(v, GitHubVendor)]
+        with concurrent.futures.ThreadPoolExecutor(16) as pool:
+            list(pool.map(lambda v: v.paths, remote))
+
+    def printer_counts(self) -> dict[str, int]:
+        """Each vendor that has printers, with how many."""
+        self._read_all()
+        counts = {vendor: len(found.names("printer")) for vendor, found in self.vendors.items()}
+        return {vendor: n for vendor, n in counts.items() if n}
+
+    def vendor_of(self, kind: str, name: str) -> str | None:
+        key = (KINDS[kind], name)
+        return next((v for v in self._vendors_for(name) if self.vendors[v].has(key)), None)
+
+    def defaults(self, printer: str) -> dict[str, str]:
+        """The process and filament Orca starts a printer with, by kind, where it has them."""
+        machine = self.resolve("printer", printer)
+        found = {}
+        for kind, key in (("process", "default_print_profile"), ("filament", "default_filament_profile")):
+            name = orca._first(machine.get(key) or "")
+            if name and name in self.names(kind):
+                found[kind] = name
+        return found
+
+    def fitting(self, kind: str, printer: str) -> tuple[list[str], int]:
+        """The presets of a kind from the printer's own vendor that name it as one they fit,
+        and how many more there are for any printer: the vendor's that name no printer, and
+        for filaments those in Orca's shared library, which is for every printer and is
+        counted rather than read, since reading it means fetching hundreds of files."""
+        vendor = self.vendor_of("printer", printer)
+        candidates = self.vendors[vendor].names(kind) if vendor else []
+        if vendor and isinstance(self.vendors[vendor], GitHubVendor):
+            self.vendors[vendor].prefetch([(KINDS[kind], name) for name in candidates])
+        named, anywhere = [], 0
+        for name in candidates:
+            try:
+                compatible = self.resolve(kind, name).get("compatible_printers") or []
+            except OrcaError:
+                continue
+            if printer in compatible:
+                named.append(name)
+            elif not compatible:
+                anywhere += 1
+        if kind == "filament" and LIBRARY in self.vendors and vendor != LIBRARY:
+            anywhere += len(self.vendors[LIBRARY].names(kind))
+        return sorted(set(named)), anywhere
+
     def names(self, kind: str) -> list[str]:
         """Presets of a kind that can be used as they are: not the bases others inherit from."""
+        self._read_all()
         found = {name for (orca_kind, name), data in self.user.items()
                  if orca_kind == KINDS[kind] and str(data.get("instantiation", "true")).lower() != "false"}  # fmt: skip
         for vendor in self.vendors.values():

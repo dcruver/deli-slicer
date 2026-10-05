@@ -151,6 +151,20 @@ def load(kind: str, source: str, name: str | None = None) -> Loaded:
     return store(kind, text, source, name=name, fallback=Path(url.path).stem)
 
 
+def path_of(kind: str, name: str) -> Path:
+    """Where the library keeps the one of a kind with that name (slugged), whether or not it is there."""
+    return library_dir() / _FOLDERS[kind] / f"{slug(name)}.ini"
+
+
+def settings_in(kind: str, text: str) -> dict[str, str]:
+    """The settings `store` would keep from INI `text`, for comparing with what is stored."""
+    groups, unknown = _engine.split_config(text)
+    settings = {key: value for key, value in groups.get(kind, {}).items() if not is_connection(key)}
+    given = parse(text)
+    settings.update({key: own_value(key, given[key]) for key in unknown if OWN.get(key) == kind})
+    return settings
+
+
 def store(kind: str, text: str, source: str, name: str | None = None, fallback: str = "") -> Loaded:
     """Put the settings of one kind from INI `text` into the library, named `name`, else
     as the text names itself, else `fallback`. `source` is recorded in the file."""

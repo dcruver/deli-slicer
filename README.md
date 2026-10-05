@@ -9,8 +9,7 @@ is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs 
 installed.
 
 ```
-deli import orca printer "Elegoo Centauri Carbon 0.6 nozzle" --github
-deli printer elegoo-centauri-carbon-0.6-nozzle
+deli import orca printer "Elegoo Centauri Carbon 0.6 nozzle"   # once: printer, process and filament
 deli add bracket.stl --count 2
 deli set infill 20%
 deli scale x 110%
@@ -95,39 +94,90 @@ deli completion fish > ~/.config/fish/completions/deli.fish
 
 ## Set up a printer
 
-deli needs a **printer**, a **process** (layer height, speeds, infill: what OrcaSlicer
-calls a process and PrusaSlicer calls print settings) and a **filament**. Each is a
-PrusaSlicer INI file kept in your library in `~/.config/deli/`.
+To slice, deli needs three things for your printer: the **printer** itself (bed size,
+nozzle, start and end G-code), a **process** (layer height, speeds, infill: what
+PrusaSlicer calls print settings) and a **filament**. You don't write any of them.
+deli converts them from [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)'s
+presets, which cover over a thousand printers, and one command gets all three. You
+don't need OrcaSlicer installed.
 
-**The usual way** is to convert OrcaSlicer's presets, which cover most printers.
-Nothing needs to be installed: `--github` fetches them from OrcaSlicer's repository.
+### 1. Find your printer
 
 ```
-deli import orca printer  "Elegoo Centauri Carbon 0.6 nozzle" --github
-deli import orca process  "0.30mm Standard @Elegoo CC 0.6 nozzle" --github --vendor Elegoo
-deli import orca filament "Elegoo PETG-CF @ECC" --github --vendor Elegoo
-deli import orca printer --github --vendor Elegoo      # lists that vendor's printers
+deli import orca list                      # Orca's vendors, with how many printers each
+deli import orca list Elegoo               # one vendor's printers
+deli import orca list "centauri carbon"    # or any part of a name: the printers that match
 ```
 
-[PRINTERS.md](PRINTERS.md) lists every printer Orca 2.4.2 ships and whether deli can
-convert it and slice with it (`--github v2.4.2` imports from that release). A name can be any unique part of Orca's name, in any case. `--vendor` (Elegoo, BBL,
-Creality, Prusa, Voron, ...) saves fetching every vendor's list; without it, a name
-that begins with the vendor's is found just as quickly. Processes and filaments are
-converted for the printer they say they fit; `--printer` chooses another.
+Orca's printer names end with the nozzle size, such as `Elegoo Centauri Carbon 0.6
+nozzle`. Pick the one with the nozzle your printer has; most printers ship with 0.4 mm.
+Vendor names are Orca's folder names, so Bambu Lab's printers are under `BBL`; the
+list shows what a vendor's printers are called when it differs.
 
-`--github` reads OrcaSlicer's `main` branch; `--github v2.3.1` pins a release. It
-fetches only the few files a preset needs, and the library records each one's GitHub
-page as its source. The one call that lists the vendors goes through GitHub's API,
-which allows 60 requests an hour without signing in; `--vendor` avoids it.
+### 2. Import it
 
-If OrcaSlicer is installed, leave off `--github` and its own presets are used. That
-is also the only way to convert presets you have edited or created in Orca, since
-GitHub has only the bundled ones.
+```
+deli import orca printer "Elegoo Centauri Carbon 0.6 nozzle"
+```
 
-**Otherwise**, load a ready-made file. This repository ships the Elegoo Centauri Carbon
-(0.6 mm nozzle) and the Bambu Lab P1S (0.4 mm nozzle) in `profiles/`, and `deli load`
-takes a path, a `file://` URL or an `https://` URL, including a link to a file's page
-on GitHub:
+Any part of the name that is enough to tell it apart will do (`"centauri carbon 0.6"`),
+in any case. That one command imports the printer and the process and filament
+OrcaSlicer starts it with, and makes them the defaults for new prints:
+
+```
+Imported printer 'elegoo-centauri-carbon-0.6-nozzle' from Orca's 'Elegoo Centauri Carbon 0.6 nozzle' (56 settings)
+  bed 256 x 256 mm, height 256 mm, nozzle 0.6 mm, firmware klipper
+  ...
+Imported process '0.30mm-standard-elegoo-cc-0.6-nozzle', Orca's default for this printer (104 settings; ...)
+  and made it the default process for new prints on 'elegoo-centauri-carbon-0.6-nozzle'
+Imported filament 'elegoo-pla-ecc', Orca's default for this printer (27 settings; ...)
+  and made it the default filament for new prints on 'elegoo-centauri-carbon-0.6-nozzle'
+Made 'elegoo-centauri-carbon-0.6-nozzle' your default printer for new prints
+```
+
+You can slice now. The lines about Orca settings "left out" list what PrusaSlicer's
+engine has no equivalent for; they are there to be read, not acted on.
+[PRINTERS.md](PRINTERS.md) says which of Orca's printers deli has converted and sliced
+with, and why the rest fail. That is all it says: only the Elegoo Centauri Carbon has
+printed what deli sliced so far.
+
+Defaults are only filled in where you have none, so importing a second printer does not
+change your default printer, and a filament you chose yourself stays chosen.
+`--printer-only` imports the printer alone.
+
+### 3. Other processes and filaments
+
+```
+deli import orca list "Elegoo Centauri Carbon 0.6 nozzle"   # the processes and filaments made for it
+deli import orca filament "Elegoo PETG-CF @ECC"
+deli import orca process "0.18mm Fine @Elegoo CC 0.6 nozzle"
+```
+
+A process or filament is converted for the printer it says it fits; `--printer
+"<name>"` converts it for another. Orca's Generic filaments (`Generic PETG @System` and
+so on) fit any printer. To use one for a print, see [Print something](#print-something);
+to make it what new prints start with, `deli filament <name> --default`.
+
+### Where the presets come from
+
+deli reads Orca's presets from its GitHub repository at release 2.4.2, the release
+[PRINTERS.md](PRINTERS.md) was made from. A release never changes, so what is fetched
+is kept in `~/.cache/deli/orca/` and read from there afterwards. Other sources:
+
+- `--ref main` (or any tag) reads another version of Orca's presets, for printers newer
+  than the release. Only releases are kept; `main` is fetched each time.
+- `--local` reads the OrcaSlicer installed on this machine instead, **including presets
+  you have edited or created in Orca**, which only exist there. `--orca DIR` adds a
+  folder of Orca presets.
+
+Listing every vendor makes one call to GitHub's API, which allows 60 an hour without
+signing in, and is then kept like the rest.
+
+### Without OrcaSlicer's presets
+
+`deli load` takes a PrusaSlicer INI file from a path, a `file://` URL or an `https://`
+URL, including a link to a file's page on GitHub. This repository ships the Elegoo
+Centauri Carbon (0.6 mm nozzle) and the Bambu Lab P1S (0.4 mm nozzle) in `profiles/`:
 
 ```
 deli load printer  https://github.com/dcruver/deli-slicer/blob/main/profiles/printers/elegoo-centauri-carbon-0.6-nozzle.ini
@@ -136,14 +186,20 @@ deli load filament https://github.com/dcruver/deli-slicer/blob/main/profiles/fil
 ```
 
 Anyone can host a printer this way: a PrusaSlicer INI file at any `https://` address.
+Imported or loaded, a file never carries a printer's network address or API key; those
+go in your config (below).
 
-Either way, loaded files never carry a printer's network address or API key; those go
-in your config (below).
+### Tell deli where your printer is
 
-### Tell deli about your printer
+To send prints to it, deli needs its address:
 
 ```
 deli config printers.elegoo-centauri-carbon-0.6-nozzle.host elegoo://192.168.1.50
+```
+
+And to change what new prints start with:
+
+```
 deli printer elegoo-centauri-carbon-0.6-nozzle --default        # the printer new prints start with
 deli filament elegoo-petg-cf-ecc --default                      # the filament new prints on it start with
 deli process 0.30mm-standard-elegoo-cc-0.6-nozzle --default     # its usual process
@@ -262,7 +318,8 @@ check the file arrived and start it from the printer's own screen.
 
 | | |
 |---|---|
-| `deli import orca <kind> "<name>" [--github]` | convert an OrcaSlicer preset into your library |
+| `deli import orca list [vendor\|printer]` | list Orca's vendors, a vendor's printers, or what fits a printer |
+| `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library; a printer brings its default process and filament |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
 | `deli printer\|filament\|process [name]` | choose one for this print, or list them; `--default` makes it the default for new prints instead |
 | `deli add <file> [--count N]` | add a model, or more copies of it |

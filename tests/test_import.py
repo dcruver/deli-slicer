@@ -161,7 +161,7 @@ def test_bundled_centauri_profiles_match_the_shipped_ones(home):
 
 @pytest.fixture
 def github(monkeypatch):
-    """OrcaSlicer's repository as `--github` sees it, served from tests/data/orca: a vendor
+    """OrcaSlicer's repository at the default release, as `deli import orca` sees it, served from tests/data/orca: a vendor
     listing, a vendor index, and the preset files. Records what was fetched."""
     vendor = "Elegoo"
     paths = {}
@@ -172,14 +172,14 @@ def github(monkeypatch):
             index[f"{kind}_list"].append({"name": name, "sub_path": f"{kind}/{file.name}"})
             paths[f"{vendor}/{kind}/{file.name}"] = file.read_text()
     pages = {
-        orca_install._LISTING.format(repo=orca_install.REPOSITORY, ref="main"): json.dumps(
+        orca_install._LISTING.format(repo=orca_install.REPOSITORY, ref=orca_install.ORCA_REF): json.dumps(
             [{"name": "Elegoo.json", "type": "file"}, {"name": "Elegoo", "type": "dir"}, {"name": "BBL.json", "type": "file"}]
         ),
-        orca_install._RAW.format(repo=orca_install.REPOSITORY, ref="main", path="Elegoo.json"): json.dumps(index),
-        orca_install._RAW.format(repo=orca_install.REPOSITORY, ref="main", path="BBL.json"): json.dumps({"machine_list": [{"name": "Bambu Lab X1 Carbon", "sub_path": "machine/x1c.json"}]}),
+        orca_install._RAW.format(repo=orca_install.REPOSITORY, ref=orca_install.ORCA_REF, path="Elegoo.json"): json.dumps(index),
+        orca_install._RAW.format(repo=orca_install.REPOSITORY, ref=orca_install.ORCA_REF, path="BBL.json"): json.dumps({"machine_list": [{"name": "Bambu Lab X1 Carbon", "sub_path": "machine/x1c.json"}]}),
     }
     for path, text in paths.items():
-        pages[orca_install._RAW.format(repo=orca_install.REPOSITORY, ref="main", path=__import__("urllib.parse").parse.quote(path))] = text
+        pages[orca_install._RAW.format(repo=orca_install.REPOSITORY, ref=orca_install.ORCA_REF, path=__import__("urllib.parse").parse.quote(path))] = text
     fetched = []
 
     def fetch(url):
@@ -193,7 +193,7 @@ def github(monkeypatch):
 
 
 def test_github_lists_vendors_and_their_presets(github):
-    presets = orca_install.Presets(github="main")
+    presets = orca_install.Presets(github=orca_install.ORCA_REF)
 
     assert list(presets.vendors) == ["BBL", "Elegoo"]
     assert presets.names("printer") == ["Bambu Lab X1 Carbon", MACHINE]
@@ -201,27 +201,27 @@ def test_github_lists_vendors_and_their_presets(github):
 
 
 def test_github_fetches_only_the_files_a_preset_needs(github):
-    presets = orca_install.Presets(github="main")
+    presets = orca_install.Presets(github=orca_install.ORCA_REF)
 
     imported = presets.convert("process", "mine")
 
     assert imported.converted.settings["perimeters"] == "3"
-    assert imported.source == f"https://github.com/SoftFever/OrcaSlicer/blob/main/resources/profiles/Elegoo/process/mine.json"
+    assert imported.source == f"https://github.com/SoftFever/OrcaSlicer/blob/{orca_install.ORCA_REF}/resources/profiles/Elegoo/process/mine.json"
     files = [url for url in github if url.endswith(".json") and "/Elegoo/" in url]
     assert len(files) == 3  # mine.json, its parent, and the machine it fits; not the filament or the base
 
 
 def test_github_import_records_the_page_as_the_source(github, home, capsys):
-    assert main(["import", "orca", "printer", MACHINE, "--github"]) == 0
+    assert main(["import", "orca", "printer", MACHINE, "--printer-only"]) == 0
 
     stored = library.find("printer", "elegoo-centauri-carbon-0.6-nozzle").read_text()
-    assert "# source: https://github.com/SoftFever/OrcaSlicer/blob/main/resources/profiles/Elegoo/machine/centauri-0.6.json" in stored
+    assert f"# source: https://github.com/SoftFever/OrcaSlicer/blob/{orca_install.ORCA_REF}/resources/profiles/Elegoo/machine/centauri-0.6.json" in stored
     assert "Imported printer" in capsys.readouterr().out
     assert not any("BBL.json" in url for url in github)  # the name begins with the vendor's, so only its index was read
 
 
 def test_github_vendor_narrows_the_search(github):
-    presets = orca_install.Presets(github="main", vendor="Elegoo")
+    presets = orca_install.Presets(github=orca_install.ORCA_REF, vendor="Elegoo")
 
     assert list(presets.vendors) == ["Elegoo"]
     assert presets.find("printer", "carbon") == MACHINE
@@ -229,7 +229,133 @@ def test_github_vendor_narrows_the_search(github):
 
 
 def test_github_missing_preset_is_an_error(github):
-    presets = orca_install.Presets(github="main")
+    presets = orca_install.Presets(github=orca_install.ORCA_REF)
 
     with pytest.raises(orca_install.OrcaError, match="no printer named or containing 'voron'"):
         presets.find("printer", "voron")
+
+
+# ------------------------------------------------- a printer brings its process and filament
+
+
+def test_a_printer_comes_with_orcas_default_process_and_filament(home, capsys):
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE)]) == 0
+
+    assert library.names("process") == ["0.30mm-standard-elegoo-cc-0.6-nozzle"]
+    assert library.names("filament") == ["elegoo-pla-ecc"]
+    out = capsys.readouterr().out
+    assert "Imported process '0.30mm-standard-elegoo-cc-0.6-nozzle', Orca's default for this printer" in out
+    assert "Made 'elegoo-centauri-carbon-0.6-nozzle' your default printer" in out
+    from deli import config
+
+    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
+    assert config.printer("elegoo-centauri-carbon-0.6-nozzle") == {"process": "0.30mm-standard-elegoo-cc-0.6-nozzle", "filament": "elegoo-pla-ecc"}
+
+
+def test_printer_only_leaves_out_the_defaults(home):
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE), "--printer-only"]) == 0
+
+    assert library.names("printer") == ["elegoo-centauri-carbon-0.6-nozzle"]
+    assert library.names("process") == [] and library.names("filament") == []
+
+
+def test_defaults_already_chosen_in_the_config_are_kept(home):
+    from deli import config
+
+    config.set_value("printer", "my-voron")
+    config.set_value("printers.elegoo-centauri-carbon-0.6-nozzle.filament", "my-petg")
+
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE)]) == 0
+
+    assert config.default_printer() == "my-voron"
+    assert config.printer("elegoo-centauri-carbon-0.6-nozzle")["filament"] == "my-petg"
+
+
+def test_a_default_that_differs_from_one_of_the_same_name_is_stored_apart(home, capsys):
+    """A process converted for another printer, which prints may rely on, is not replaced."""
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE)]) == 0
+    process = library.find("process", "0.30mm-standard-elegoo-cc-0.6-nozzle")
+    process.write_text(process.read_text() + "perimeters = 9\n")
+    capsys.readouterr()
+
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE), "--name", "second"]) == 0
+
+    assert "perimeters = 9" in process.read_text()
+    assert "0.30mm-standard-elegoo-cc-0.6-nozzle-second" in library.names("process")
+    out = capsys.readouterr().out
+    assert "Orca's default filament for this printer, 'elegoo-pla-ecc', is already in your library" in out
+
+
+# ---------------------------------------------------------------- listing
+
+
+def test_list_shows_vendors_with_printers(github, capsys):
+    assert main(["import", "orca", "list"]) == 0
+
+    out = capsys.readouterr().out
+    assert "BBL       1 printer    (Bambu Lab X1 Carbon)\n" in out  # BBL's printers go by another name
+    assert "Elegoo    1 printer \n" in out
+
+
+def test_list_a_vendor_in_any_case_shows_its_printers(github, capsys):
+    assert main(["import", "orca", "list", "elegoo"]) == 0
+
+    assert capsys.readouterr().out.splitlines()[0] == MACHINE
+
+
+def test_list_a_printer_shows_what_fits_it_and_its_defaults(github, capsys):
+    assert main(["import", "orca", "list", "centauri"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"  {PROCESS}   (Orca's default)" in out
+    assert "  Elegoo PLA @ECC   (Orca's default)" in out
+    assert "fdm_process_base" not in out
+
+
+def test_list_part_of_several_printers_lists_them(github, capsys):
+    assert main(["import", "orca", "list", "carbon"]) == 0  # Elegoo Centauri Carbon and Bambu Lab X1 Carbon
+
+    assert "Orca has 2 printers matching 'carbon':" in capsys.readouterr().out
+
+
+def test_list_suggests_a_vendor_for_a_typo(github, capsys):
+    assert main(["import", "orca", "list", "elgoo"]) == 1
+
+    assert "did you mean Elegoo?" in capsys.readouterr().err
+
+
+def test_ref_is_for_github_only(capsys):
+    assert main(["import", "orca", "list", "--local", "--ref", "main"]) == 1
+
+    assert "--ref is for Orca's presets on GitHub" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- the release, kept
+
+
+def test_a_release_is_fetched_once_and_kept(github):
+    orca_install.Presets(github=orca_install.ORCA_REF).find("printer", "centauri")
+    github.clear()
+
+    orca_install.Presets(github=orca_install.ORCA_REF).find("printer", "centauri")
+
+    assert github == []
+
+
+def test_a_branch_is_not_kept():
+    fetch = orca_install._Cached("main")
+
+    assert fetch.folder is None
+
+
+def test_offline_reads_only_what_is_kept(github):
+    with pytest.raises(orca_install.OrcaError, match="not fetched yet"):
+        orca_install.Presets(github=orca_install.ORCA_REF, offline=True)
+    assert github == []
+
+
+def test_the_sweep_tests_the_release_deli_imports_from():
+    """PRINTERS.md says which printers slice; it must be about the presets deli imports."""
+    workflow = (ROOT / ".github/workflows/wheels.yml").read_text()
+
+    assert f"ORCA_REF: {orca_install.ORCA_REF}\n" in workflow

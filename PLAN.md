@@ -67,7 +67,7 @@ Do not reopen these without a reason.
   tests the wheels and publishes them as a GitHub release (`release` job); a mismatched
   tag fails in the first minute. PyPI is for later, once there are wheels for more than
   Linux x86-64 (and `deli` may be taken there). *Printers*
-  are not shipped a thousand at a time: `deli import orca --github` converts any of
+  are not shipped a thousand at a time: `deli import orca` converts any of
   Orca's on demand, and a sweep over all of them is to publish which convert and slice.
   **Matching OrcaSlicer's output is a guide, not a requirement:** compare with it to find
   what deli gets wrong, but do not chase a 1:1 match for its own sake. Whether a printer
@@ -457,6 +457,14 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
     vendor it reaches. Indexing everything together gave the Centauri process a
     different vendor's base (3 walls, other speeds) and was the first bug found.
   - Presets with `instantiation = false` (the bases) are not listed or matched.
+  - (2026-10-05) GitHub is now the default, at the release `ORCA_REF` (v2.4.2, the one
+    the sweep tests) rather than `main`; `--ref` picks another and `--local` reads the
+    installed Orca. `--github` and `--vendor` are gone: the user wanted the vendor to be
+    a plain argument (`deli import orca list Elegoo`) and flags consistent across
+    commands, and a release's files are cached on disk, so searching every vendor's
+    index costs about two seconds once. `deli import orca printer` also imports Orca's
+    default process and filament (`default_print_profile`, `default_filament_profile`)
+    and fills the config's defaults. What follows describes the first version.
   - `--github [REF]` (default `main`) reads the same files from OrcaSlicer's repository
     instead: the vendor list from GitHub's contents API (60 requests an hour without a
     token, and it answers with a 301 that must be followed), each vendor's index

@@ -56,6 +56,25 @@ def _config_keys() -> list[str]:
     return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS)})
 
 
+def _orca_presets(before: list[str]):
+    """Orca's presets as `deli import` would read them, from the installed Orca with --local
+    or --orca, else from GitHub as far as they are kept on disk: completion does not fetch."""
+    from deli import orca_install
+
+    cached = {}
+
+    def presets():
+        if "presets" not in cached:
+            if "--local" in before or "--orca" in before:
+                cached["presets"] = orca_install.Presets()
+            else:
+                ref = before[before.index("--ref") + 1] if "--ref" in before[:-1] else orca_install.ORCA_REF
+                cached["presets"] = orca_install.Presets(github=ref, offline=True)
+        return cached["presets"]
+
+    return presets
+
+
 def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str]) -> list[str]:
     """Candidates for the positional the cursor is on, given the positionals already typed."""
     typed = [w for w in before if not w.startswith("-")]
@@ -68,9 +87,10 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
         return [FILES] if position == 1 else []
     if command == "import":
         if position == 2:
-            from deli import orca_install
-
-            return _quiet(lambda: orca_install.Presets().names(typed[1]), [])
+            presets = _orca_presets(before)
+            if typed[1] == "list":
+                return _quiet(lambda: [*presets().vendors, *presets().names("printer")], [])
+            return _quiet(lambda: presets().names(typed[1]), [])
         return []
     if command in library.KINDS:
         return _quiet(lambda: library.names(command), []) if position == 0 else []
@@ -114,9 +134,7 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
 def _option_value(command: str, option: str) -> list[str]:
     """Candidates for the value of an option that takes one."""
     if command == "import" and option == "--printer":
-        from deli import orca_install
-
-        return _quiet(lambda: orca_install.Presets().names("printer"), [])
+        return _quiet(lambda: _orca_presets([])().names("printer"), [])
     if command == "config" and option == "--unset":
         return [key for key, _ in _quiet(config.entries, [])]
     if command == "slice" and option in ("-o", "--output"):

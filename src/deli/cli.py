@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -651,8 +652,78 @@ def _slice(args: argparse.Namespace) -> int:
     return 0
 
 
+def _orca_presets(args: argparse.Namespace) -> orca_install.Presets:
+    """Orca's presets from GitHub at a release, or with --local (or --orca) from this machine."""
+    if args.local or args.orca:
+        if args.ref is not None:
+            raise CommandError("--ref is for Orca's presets on GitHub; leave it out with --local")
+        return orca_install.Presets([Path(folder) for folder in args.orca])
+    return orca_install.Presets(github=args.ref or orca_install.ORCA_REF)
+
+
+def _import_list(presets: orca_install.Presets, what: str | None) -> int:
+    """Orca's vendors; a vendor's printers; or what fits one printer."""
+    if what is None:
+        counts = presets.printer_counts()
+        width = max(map(len, counts), default=0)
+        for vendor in sorted(counts, key=str.lower):
+            # A vendor whose printers go by another name (BBL's are Bambu Lab's) says so.
+            names = presets.vendors[vendor].names("printer")
+            common = " ".join(os.path.commonprefix([name.split() for name in names])).rstrip(" -")
+            if len(names) > 1:
+                common += " ..."
+            called = f"   ({common})" if len(common) >= 4 and not common.lower().startswith(vendor.lower()) else ""
+            print(f"{vendor:<{width}}  {counts[vendor]:>3} printer{'s' if counts[vendor] != 1 else ' '}{called}")
+        print("\nA vendor's printers: deli import orca list <vendor>")
+        return 0
+
+    vendor = presets.vendor(what)
+    if vendor is not None:
+        names = sorted(presets.vendors[vendor].names("printer"))
+        if not names:
+            raise CommandError(f"Orca's '{vendor}' presets have no printers")
+        for name in names:
+            print(name)
+        print('\nWhat fits one: deli import orca list "<printer>"; to import one with its process and filament: deli import orca printer "<printer>"')
+        return 0
+
+    printers = [name for name in presets.names("printer") if what.lower() in name.lower()]
+    exact = [name for name in printers if name.lower() == what.lower()]
+    if len(printers) > 1 and not exact:
+        print(f"Orca has {len(printers)} printers matching '{what}':")
+        for name in printers:
+            print(f"  {name}")
+        return 0
+    if not printers:
+        close = presets.close_vendors(what)
+        hint = f"; did you mean {' or '.join(close)}?" if close else "; the vendors are listed by: deli import orca list"
+        raise CommandError(f"Orca has no vendor or printer called '{what}'{hint}")
+
+    printer = (exact or printers)[0]
+    defaults = presets.defaults(printer)
+    print(printer)
+    for kind, plural in (("process", "Processes"), ("filament", "Filaments")):
+        named, anywhere = presets.fitting(kind, printer)
+        default = defaults.get(kind)
+        # Orca's default may be one for any printer (its Generic PLA, say), so not among those made for it.
+        shown = named + ([default] if default and default not in named else [])
+        generic = f"{anywhere} that fit any printer" + (", such as Orca's Generic ones" if kind == "filament" else "")
+        if not shown:
+            print(f"\n{plural}: {generic if anywhere else 'none'}")
+            continue
+        print(f"\n{plural} for it:")
+        for name in shown:
+            print(f"  {name}" + ("   (Orca's default)" if name == default else ""))
+        if anywhere:
+            print(f"  and {generic}")
+    print(f'\nTo import it with its default process and filament: deli import orca printer "{printer}"')
+    return 0
+
+
 def _import(args: argparse.Namespace) -> int:
-    presets = orca_install.Presets([Path(folder) for folder in args.orca], github=args.github, vendor=args.vendor)
+    presets = _orca_presets(args)
+    if args.kind == "list":
+        return _import_list(presets, args.name)
     if args.name is None:
         # Like `deli printer`: without a name, list what there is.
         for name in presets.names(args.kind):
@@ -684,7 +755,45 @@ def _import(args: argparse.Namespace) -> int:
     if converted.dropped:
         print(f"  {len(converted.dropped)} Orca settings have no PrusaSlicer equivalent and were left out:")
         print(textwrap.fill(", ".join(sorted(converted.dropped)), width=96, initial_indent="    ", subsequent_indent="    "))
+    if args.kind == "printer" and not args.output and not args.printer_only:
+        _import_defaults(presets, imported.orca_name, loaded.name)
     return 0
+
+
+def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: str) -> None:
+    """With a printer, the process and filament Orca starts it with, and those made the
+    config's defaults for it (and it the default printer) where the config names none."""
+    defaults = presets.defaults(orca_printer)
+    doc = config.read()
+    mine = config.printer(printer, doc)
+    for kind in ("process", "filament"):
+        if kind not in defaults:
+            print(f"Orca names no default {kind} for this printer; see what fits it with: deli import orca list \"{orca_printer}\"")
+            continue
+        imported = presets.convert(kind, defaults[kind], orca_printer)
+        # Converted for this printer, it may differ from one of the same name converted for
+        # another, which prints already made rely on; that one is kept, and this named apart.
+        name = imported.orca_name
+        existing = library.path_of(kind, name)
+        if existing.exists():
+            if library.read_settings(existing) == library.settings_in(kind, orca_install.ini(imported)):
+                print(f"Orca's default {kind} for this printer, '{existing.stem}', is already in your library")
+                name = None
+            else:
+                name = f"{name} {printer}"
+        if name is not None:
+            loaded = orca_install.into_library(imported, name)
+            name = loaded.name
+            left_out = f"; {len(imported.converted.dropped)} Orca settings left out" if imported.converted.dropped else ""
+            print(f"Imported {kind} '{name}', Orca's default for this printer ({len(loaded.settings)} settings{left_out})")
+        else:
+            name = existing.stem
+        if not mine.get(kind):
+            config.set_value(f"printers.{printer}.{kind}", name)
+            print(f"  and made it the default {kind} for new prints on '{printer}'")
+    if config.default_printer(doc) is None:
+        config.set_value(config.DEFAULT_PRINTER, printer)
+        print(f"Made '{printer}' your default printer for new prints")
 
 
 def _size_of(path: Path) -> str:
@@ -958,22 +1067,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     import_ = commands.add_parser(
         "import",
-        help="convert a preset from the OrcaSlicer on this machine into your library",
-        description="Convert one of OrcaSlicer's presets, bundled or your own, into a PrusaSlicer-style printer, "
-        "process or filament in your library. The name can be part of Orca's name for it, if that is enough to "
-        "tell it apart. Without a name, list Orca's presets of that kind. With --github, OrcaSlicer need not "
-        "be installed: the presets are fetched from its repository.",
+        help="convert one of OrcaSlicer's presets into your library",
+        description="Convert one of OrcaSlicer's printers, processes or filaments into a PrusaSlicer-style one in "
+        "your library. The presets are read from OrcaSlicer's repository on GitHub, at the release deli's "
+        "printers page was tested against, so OrcaSlicer need not be installed; with --local, from the "
+        "OrcaSlicer on this machine, your own presets included. A name can be any part of Orca's name that is "
+        "enough to tell it apart. A printer comes with Orca's default process and filament for it. "
+        "'deli import orca list' lists Orca's vendors; 'list <vendor>' a vendor's printers; 'list <printer>' "
+        "the processes and filaments made for one.",
     )
     import_.add_argument("app", choices=["orca"], help="the slicer to import from")
-    import_.add_argument("kind", choices=library.KINDS)
-    import_.add_argument("name", nargs="?", help="Orca's name for the preset, or part of it")
+    import_.add_argument("kind", choices=["list", *library.KINDS], help="what to import, or list to see what there is")
+    import_.add_argument("name", nargs="?", help="Orca's name for the preset, or part of it; after list, a vendor or a printer")
     import_.add_argument("--printer", help="Orca's printer to convert a process or filament for (default: the first it fits)")
+    import_.add_argument("--printer-only", action="store_true", help="import the printer alone, without Orca's default process and filament for it")
     import_.add_argument("--name", dest="name_as", help="name to store it under (default: Orca's name)")
     import_.add_argument("-o", "--output", help="write the converted INI file here instead of into your library")
-    import_.add_argument("--orca", action="append", default=[], metavar="DIR", help="a folder of Orca presets to look in as well")
-    import_.add_argument("--github", nargs="?", const="main", metavar="REF",
-                         help="read the presets from OrcaSlicer's GitHub repository instead of this machine, at a branch or tag (default: main)")  # fmt: skip
-    import_.add_argument("--vendor", help="only this vendor's presets (Elegoo, BBL, Creality, ...); saves fetching every vendor's index with --github")
+    import_.add_argument("--local", action="store_true", help="read the OrcaSlicer installed on this machine, your own presets included, instead of GitHub")
+    import_.add_argument("--orca", action="append", default=[], metavar="DIR", help="a folder of Orca presets to look in as well (implies --local)")
+    import_.add_argument("--ref", help=f"the OrcaSlicer release, branch or commit to read from GitHub (default: {orca_install.ORCA_REF})")
     import_.set_defaults(run=_import)
 
     send_ = commands.add_parser(

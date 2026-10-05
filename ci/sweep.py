@@ -126,7 +126,7 @@ def report(results: list[dict], label: str, ref: str | None = None) -> str:
         f"Every printer preset in {label}, converted by deli and used to slice a 20 mm cube",
         f"on {datetime.date.today().isoformat()}. This page is written by `ci/sweep.py`.",
         "",
-        f"**What it tells you:** whether `deli import orca printer \"<name>\" --github{' ' + ref if ref else ''}` gives you a printer",
+        f"**What it tells you:** whether `deli import orca printer \"<name>\"{'' if ref in (None, orca_install.ORCA_REF) else ' --ref ' + ref}` gives you a printer",
         "deli can slice for. **What it does not:** whether the G-code prints well. Only the Elegoo",
         "Centauri Carbon has been printed on; if you print on another, please say how it went.",
         "",

@@ -3,7 +3,7 @@
 Every printer preset in OrcaSlicer 2.4.2, converted by deli and used to slice a 20 mm cube
 on 2026-10-04. This page is written by `ci/sweep.py`.
 
-**What it tells you:** whether `deli import orca printer "<name>" --github v2.4.2` gives you a printer
+**What it tells you:** whether `deli import orca printer "<name>"` gives you a printer
 deli can slice for. **What it does not:** whether the G-code prints well. Only the Elegoo
 Centauri Carbon has been printed on; if you print on another, please say how it went.
 
