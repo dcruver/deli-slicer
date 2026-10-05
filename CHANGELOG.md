@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.4.0 (2026-10-05)
 
 - `deli setup`: tab completion for your shell, then your printer from its hostname or IP
   address alone: deli asks the printer what it is (Klipper says its nozzle, bed and
