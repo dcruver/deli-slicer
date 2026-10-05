@@ -19,9 +19,10 @@ deli view
 deli send --print                                   # slices first if the print has changed
 ```
 
-![deli view in a browser: a sliced 3DBenchy on the Centauri Carbon's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
+![deli view in a browser: a sliced 3DBenchy building up layer by layer on the Centauri Carbon's bed, coloured by what each extrusion is for, lighter above a pause at layer 40, then turning around](images/demo-viewer.gif)
 
-`deli view` after `deli slice`: the sliced print on the printer's bed, in your browser.
+`deli view` after `deli slice`: the sliced print on the printer's bed, in your browser,
+layer by layer.
 
 Status: early. Everything above works, and has so far been used on one machine and
 for two real prints on an Elegoo Centauri Carbon, sliced and sent with
@@ -311,6 +312,8 @@ print changes. The page is served in the background until it has been closed for
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
 `deli slice` draws one into the G-code for the printer's screen; the Centauri Carbon
 shows it.
+
+![deli view in a browser: a sliced 3DBenchy on the Centauri Carbon's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli move` and `deli pause` without arguments show what
