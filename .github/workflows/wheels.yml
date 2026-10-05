@@ -150,9 +150,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Homebrew's libpng is in /usr/local on Intel Macs, where the compiler finds its png.h
+      # before the one built with the dependencies, whose symbols carry a prusaslicer_ prefix.
       - name: Build tools
         run: |
           brew install autoconf automake libtool texinfo
+          brew uninstall --ignore-dependencies libpng || true
           python -m pip install cmake ninja delocate
 
       - name: Which PrusaSlicer
