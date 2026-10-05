@@ -8,21 +8,16 @@ is: a few commands in a shell, a file you can read, and nothing else to open. Sl
 is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs to be
 installed.
 
-![Finding a printer with deli vendor, choosing it with deli printer (its process and filament come with it), adding a Benchy and slicing it](images/demo-setup.gif)
+![Finding a printer with deli vendor, choosing it with deli printer (its process and filament come with it), adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, then deli send --print](images/demo.gif)
 
 ```
-deli printer "Voron 2.4 350 0.4 nozzle"            # once: OrcaSlicer's printer, process and filament
-deli add bracket.stl --count 2
-deli set infill 20%
-deli scale x 110%
-deli view
-deli send --print                                   # slices first if the print has changed
+deli vendor "voron 2.4 350"                 # find your printer
+deli printer "Voron 2.4 350 0.4 nozzle"     # once: OrcaSlicer's printer, process and filament
+deli add 3DBenchy.stl
+deli slice                                  # how long it will take, and how much filament
+deli view                                   # the sliced Benchy in your browser, layer by layer
+deli send --print                           # to the printer, and start it
 ```
-
-![deli view in a browser: a sliced 3DBenchy building up layer by layer on the printer's bed, coloured by what each extrusion is for, lighter above a pause at layer 40, then turning around](images/demo-viewer.gif)
-
-`deli view` after `deli slice`: the sliced print on the printer's bed, in your browser,
-layer by layer.
 
 Status: early. Everything above works; deli converts and slices for most of the
 printers OrcaSlicer knows, but has printed on only one so far. See "Not done yet" at the
@@ -262,20 +257,23 @@ prints you already have alone. `deli printer` marks your default in its list, an
 In a new directory:
 
 ```
-deli add bracket.stl                            # STL, OBJ, 3MF or AMF; the print starts with your default printer, filament and process
-deli printer bambu-lab-p1s-0.4-nozzle           # or choose another printer for this print
-deli add bracket.stl --count 3                  # three more of it
-deli add lid.stl
-deli set infill 20%                             # or any PrusaSlicer setting by name
-deli supports organic                           # automatic supports; on, off, grid, snug, organic
-deli scale lid 110%                             # name the part when there is more than one
-deli rotate lid 45
-deli move lid 60 80                             # put it there; the other parts are arranged around it
-deli pause 30                                   # pause once layer 30 is done: drop in a magnet, or change the filament
-deli view                                       # shows the parts on the bed in your browser, live; the shell stays free
-deli slice                                      # how long it takes and how much filament; the view then shows it layer by layer
-deli send                                       # uploads it, slicing first if needed; add --print to start printing
+deli add 3DBenchy.stl                 # STL, OBJ, 3MF or AMF; the print starts with your default printer, filament and process
+deli filament "generic petg"          # another filament than your default, for this print
+deli set infill 20%                   # or any PrusaSlicer setting by name
+deli supports organic                 # automatic supports, for a model that needs them: on, off, grid, snug, organic
+deli scale 150%                       # a bigger boat
+deli rotate 45                        # turned on the bed
+deli move 60 80                       # put it there instead of in the middle
+deli pause 40                         # pause once layer 40 is done: change the filament for a two-colour boat
+deli view                             # the Benchy on the bed in your browser, live; the shell stays free
+deli slice                            # how long it takes and how much filament; the view then shows it layer by layer
+deli send                             # uploads it, slicing first if needed; add --print to start printing
 ```
+
+A print can hold several models, each added the same way, and copies of one:
+`deli add 3DBenchy.stl --count 4` prints four, arranged on the bed for you. With more
+than one model, `scale`, `rotate` and `move` take the model's name first
+(`deli scale 3DBenchy 150%`).
 
 The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
 `deli send` and `deli view` find it there, and `deli send` slices again by itself when
@@ -289,7 +287,7 @@ overhangs steeper than that, and `--buildplate-only` keeps them off the part its
 are ordinary settings (`support_material`, `support_material_style`, ...), so
 `deli set` shows them and `deli unset supports` turns them off.
 
-Parts are arranged on the bed for you, a single part in the middle. `deli move lid 60 80`
+Parts are arranged on the bed for you, a single part in the middle. `deli move 60 80`
 puts the middle of a part at x 60, y 80 instead, in millimetres from the bed's origin
 (the axes `deli view` draws), and the parts you have not moved are arranged around it.
 `deli move z -0.25` sinks a part a quarter of a millimetre into the bed, which is what
@@ -324,19 +322,15 @@ is chosen. `deli remove`, `deli unset`, `deli scale 100%`, `deli rotate 0`,
 is plain TOML you can edit, comment and commit:
 
 ```toml
-pause = [30]
+pause = [40]
 
 [printer]
 name = "voron-2.4-350-0.4-nozzle"
 sha256 = "9510435c7c2100a23514b823aaab26fc37e9efe6a7e8031c1a2e03ecb687192c"
 
 [[part]]
-file = "bracket.stl"
-count = 4
-
-[[part]]
-file = "lid.stl"
-scale = [1.1, 1.1, 1.1]
+file = "3DBenchy.stl"
+scale = [1.5, 1.5, 1.5]
 rotate = [0, 0, 45]
 at = [60, 80]
 

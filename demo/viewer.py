@@ -1,7 +1,7 @@
 """Record the deli viewer frame by frame: zoom in, build the print up layer by layer, orbit.
 
     deli view --no-browser     # in a sliced print's directory; note the address
-    python demo/viewer.py http://127.0.0.1:PORT/ frames [ZOOM]
+    python demo/viewer.py http://127.0.0.1:PORT/ frames [ZOOM] [--turn]
     ffmpeg -framerate 25 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p images/demo-viewer.mp4
 
 Needs Playwright (`pip install playwright && playwright install chromium`). It takes a
@@ -12,7 +12,12 @@ import sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-url, out = sys.argv[1], Path(sys.argv[2])
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+url, out = args[0], Path(args[1])
+zoom = int(args[2]) if len(args) > 2 else 6
+# Half a turn around the print at the end. It makes a GIF several times bigger: every
+# pixel of the bed changes in every frame.
+turn = "--turn" in sys.argv
 out.mkdir(parents=True, exist_ok=True)
 frame = 0
 
@@ -36,7 +41,7 @@ with sync_playwright() as p:
     n = int(page.eval_on_selector("#layer", "e => e.max"))
     # Closer to the boat, before anything moves.
     page.mouse.move(640, 400)
-    for _ in range(int(sys.argv[3]) if len(sys.argv) > 3 else 6):
+    for _ in range(zoom):
         page.mouse.wheel(0, -120); page.wait_for_timeout(80)
     page.wait_for_timeout(800)
     show(1); snap(25)
@@ -45,10 +50,12 @@ with sync_playwright() as p:
     for i in range(1, steps + 1):
         show(max(1, round(n * i / steps))); snap()
     snap(25)
-    # Half a turn around it, level.
-    page.mouse.move(400, 360); page.mouse.down()
-    for i in range(100):
-        page.mouse.move(400 + i * 5, 360); snap()
-    page.mouse.up(); snap(40)
+    if turn:
+        page.mouse.move(400, 360); page.mouse.down()
+        for i in range(100):
+            page.mouse.move(400 + i * 5, 360); snap()
+        page.mouse.up(); snap(40)
+    else:
+        snap(15)
     print(n, "layers,", frame, "frames")
     b.close()

@@ -1,5 +1,5 @@
 # A print's commands: a Benchy with a setting changed, a pause, sliced and viewed. Run
-# from demo/ with VHS after setup.tape, which leaves a printer chosen:  vhs terminal.tape
+# from demo/ with VHS after record-readme.sh, which leaves a printer chosen:  vhs terminal.tape
 Output ../images/demo-terminal.gif
 
 Set Shell "bash"
@@ -22,7 +22,7 @@ Show
 Type "deli add 3DBenchy.stl" Sleep 300ms Enter Sleep 2.5s
 Type "deli set infill 20%" Sleep 300ms Enter Sleep 1.8s
 Type "deli pause 40" Sleep 300ms Enter Sleep 1.5s
-Type "deli slice" Sleep 300ms Enter Sleep 6s
+Type "deli slice" Sleep 300ms Enter Sleep 9s
 Type "deli view" Sleep 300ms Enter Sleep 3s
 Hide
 Type "deli view --stop" Enter Sleep 500ms
