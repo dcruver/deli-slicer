@@ -51,18 +51,28 @@ the name is not quite right, deli suggests the ones that are close.
 deli is a Python package with PrusaSlicer's slicing engine compiled in. You need
 Python 3.12 or newer and [`uv`](https://docs.astral.sh/uv/) (or `pipx`).
 
-### From a release (Linux x86-64)
+### From a release
 
-Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel with the
-engine inside; nothing else needs building. For 0.1.0:
+Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
+platform with the engine inside; nothing else needs building. Install the one for your
+machine (for 0.2.0):
 
 ```
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.1.0/deli-0.1.0-cp312-abi3-manylinux_2_28_x86_64.whl
+# Linux, x86-64 (most PCs)
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.2.0/deli-0.2.0-cp312-abi3-manylinux_2_28_x86_64.whl
+# Linux, ARM64 (Raspberry Pi 4/5 on a 64-bit OS, ARM servers)
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.2.0/deli-0.2.0-cp312-abi3-manylinux_2_28_aarch64.whl
+# macOS, Apple Silicon (M1 and later)
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.2.0/deli-0.2.0-cp312-abi3-macosx_11_0_arm64.whl
+# macOS, Intel
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.2.0/deli-0.2.0-cp312-abi3-macosx_10_15_x86_64.whl
 ```
 
-(`pipx install` takes the same URL.) That puts `deli` on your PATH. The wheel needs
-glibc 2.28 or newer, which most distributions from 2019 on have: Debian 10, Ubuntu
-18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. There are no macOS or Windows wheels yet.
+(`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
+need glibc 2.28 or newer, which most distributions from 2019 on have: Debian 10,
+Ubuntu 18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. The macOS wheels need macOS 11
+(Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer. There is no
+Windows wheel yet.
 
 ### From source
 
@@ -366,8 +376,8 @@ Things that a user would notice, roughly in the order they matter:
   Bambu Lab P1S have been compared with Orca's own output.
 - **Bambu printers can't be sent to.** `deli send` does not speak Bambu's LAN or cloud
   protocols; copy the G-code over by hand (SD card, or another program's send).
-- **Wheels for Linux x86-64 only.** No macOS, Windows or Linux ARM64 wheels yet;
-  there, deli has to be built from source.
+- **No Windows wheel.** Linux (x86-64, ARM64) and macOS (Apple Silicon, Intel) have
+  wheels; on Windows, `deli view`'s background server needs porting first.
 - **Settings apply to the whole print**, not to one part.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.
