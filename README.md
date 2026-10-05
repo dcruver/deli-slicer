@@ -8,6 +8,8 @@ is: a few commands in a shell, a file you can read, and nothing else to open. Sl
 is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs to be
 installed.
 
+![Finding a printer with deli vendor, choosing it with deli printer (its process and filament come with it), adding a Benchy and slicing it](images/demo-setup.gif)
+
 ```
 deli printer "Elegoo Centauri Carbon 0.6 nozzle"   # once: OrcaSlicer's printer, process and filament
 deli add bracket.stl --count 2
