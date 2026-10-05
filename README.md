@@ -127,16 +127,21 @@ OrcaSlicer starts it with, and makes them the defaults for new prints:
 ```
 Imported printer 'elegoo-centauri-carbon-0.6-nozzle' from Orca's 'Elegoo Centauri Carbon 0.6 nozzle' (56 settings)
   bed 256 x 256 mm, height 256 mm, nozzle 0.6 mm, firmware klipper
-  ...
-Imported process '0.30mm-standard-elegoo-cc-0.6-nozzle', Orca's default for this printer (104 settings; ...)
+  stored in ~/.config/deli/printers/elegoo-centauri-carbon-0.6-nozzle.ini
+  note: bed_exclude_area 246x0,256x0,256x20,246x20 is cut out of bed_shape, so parts are kept off it.
+  note: change_filament_gcode was not converted: single-filament prints only.
+  note: host_type 'elegoolink' has no PrusaSlicer equivalent.
+  23 Orca settings have no PrusaSlicer equivalent and were left out (-v lists them)
+Imported process '0.30mm-standard-elegoo-cc-0.6-nozzle', Orca's default for this printer (104 settings, 32 left out)
   and made it the default process for new prints on 'elegoo-centauri-carbon-0.6-nozzle'
-Imported filament 'elegoo-pla-ecc', Orca's default for this printer (27 settings; ...)
+Imported filament 'elegoo-pla-ecc', Orca's default for this printer (27 settings, 10 left out)
   and made it the default filament for new prints on 'elegoo-centauri-carbon-0.6-nozzle'
 Made 'elegoo-centauri-carbon-0.6-nozzle' your default printer for new prints
 ```
 
-You can slice now. The lines about Orca settings "left out" list what PrusaSlicer's
-engine has no equivalent for; they are there to be read, not acted on.
+You can slice now. The settings "left out" are ones PrusaSlicer's engine has no
+equivalent for (`-v` names them); the notes say what deli did about the ones that
+matter. Neither needs anything from you.
 [PRINTERS.md](PRINTERS.md) says which of Orca's printers deli has converted and sliced
 with, and why the rest fail. That is all it says: only the Elegoo Centauri Carbon has
 printed what deli sliced so far.

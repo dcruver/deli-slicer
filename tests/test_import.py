@@ -359,3 +359,13 @@ def test_the_sweep_tests_the_release_deli_imports_from():
     workflow = (ROOT / ".github/workflows/wheels.yml").read_text()
 
     assert f"ORCA_REF: {orca_install.ORCA_REF}\n" in workflow
+
+
+def test_left_out_settings_are_counted_and_named_with_verbose(home, capsys):
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE), "--printer-only"]) == 0
+    quiet = capsys.readouterr().out
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE), "--printer-only", "-v"]) == 0
+    verbose = capsys.readouterr().out
+
+    assert "were left out (-v lists them)" in quiet and "z_hop_types" not in quiet
+    assert "were left out:" in verbose and "z_hop_types" in verbose

@@ -62,7 +62,7 @@ def _load(args: argparse.Namespace) -> int:
     print(f"{verb} {loaded.kind} '{loaded.name}' ({len(loaded.settings)} settings) from {loaded.source}")
     if summary := _SUMMARIES[loaded.kind](loaded.settings):
         print(f"  {summary}")
-    print(f"  stored in {loaded.path}")
+    print(f"  stored in {_home_relative(loaded.path)}")
     for kind, count in loaded.others.items():
         print(f"  the file also has {count} {kind} settings: deli load {kind} {args.source}")
     if loaded.connection:
@@ -745,16 +745,20 @@ def _import(args: argparse.Namespace) -> int:
         print(f"{verb} {args.kind} '{loaded.name}' from Orca's '{imported.orca_name}'{for_printer} ({len(loaded.settings)} settings)")
         if summary := _SUMMARIES[args.kind](loaded.settings):
             print(f"  {summary}")
-        print(f"  stored in {loaded.path}")
+        print(f"  stored in {_home_relative(loaded.path)}")
         if loaded.connection:
             print(f"  left out its connection settings: {', '.join(loaded.connection)}")
     for note in converted.notes:
         print(f"  note: {note}")
+    # What was left out is counted; the names are for those who ask (-v), since a first
+    # import is the first thing a new user sees.
     if unknown:
-        print(f"  ignored {len(unknown)} converted settings this engine does not know: {', '.join(unknown)}")
-    if converted.dropped:
+        print(f"  ignored {len(unknown)} converted settings this engine does not know" + (f": {', '.join(unknown)}" if args.verbose else ""))
+    if converted.dropped and args.verbose:
         print(f"  {len(converted.dropped)} Orca settings have no PrusaSlicer equivalent and were left out:")
         print(textwrap.fill(", ".join(sorted(converted.dropped)), width=96, initial_indent="    ", subsequent_indent="    "))
+    elif converted.dropped:
+        print(f"  {len(converted.dropped)} Orca settings have no PrusaSlicer equivalent and were left out (-v lists them)")
     if args.kind == "printer" and not args.output and not args.printer_only:
         _import_defaults(presets, imported.orca_name, loaded.name)
     return 0
@@ -784,7 +788,7 @@ def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: 
         if name is not None:
             loaded = orca_install.into_library(imported, name)
             name = loaded.name
-            left_out = f"; {len(imported.converted.dropped)} Orca settings left out" if imported.converted.dropped else ""
+            left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
             print(f"Imported {kind} '{name}', Orca's default for this printer ({len(loaded.settings)} settings{left_out})")
         else:
             name = existing.stem
@@ -794,6 +798,14 @@ def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: 
     if config.default_printer(doc) is None:
         config.set_value(config.DEFAULT_PRINTER, printer)
         print(f"Made '{printer}' your default printer for new prints")
+
+
+def _home_relative(path: Path) -> str:
+    """A path under the home directory as ~/..., which is shorter to read."""
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def _size_of(path: Path) -> str:
@@ -1085,6 +1097,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_.add_argument("-o", "--output", help="write the converted INI file here instead of into your library")
     import_.add_argument("--local", action="store_true", help="read the OrcaSlicer installed on this machine, your own presets included, instead of GitHub")
     import_.add_argument("--orca", action="append", default=[], metavar="DIR", help="a folder of Orca presets to look in as well (implies --local)")
+    import_.add_argument("-v", "--verbose", action="store_true", help="name the Orca settings that were left out, not only count them")
     import_.add_argument("--ref", help=f"the OrcaSlicer release, branch or commit to read from GitHub (default: {orca_install.ORCA_REF})")
     import_.set_defaults(run=_import)
 
