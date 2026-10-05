@@ -1,4 +1,4 @@
-# The README's clip, part 3 of 3: sending the print. The printer is
+# The README's clip, part 3 of 3: sending the print, to the address deli setup was given:
 # fake_moonraker.py, which record-readme.sh starts on port 7125.
 Output work/part3.mp4
 
@@ -12,7 +12,7 @@ Set TypingSpeed 50ms
 Set CursorBlink false
 
 Hide
-Type "export PS1='$ ' HOME=$PWD/work/home; unset XDG_CONFIG_HOME XDG_CACHE_HOME; cd work/print && deli config printers.voron-2.4-350-0.4-nozzle.host moonraker://localhost:7125 && clear" Enter
+Type "export PS1='$ ' HOME=$PWD/work/home; unset XDG_CONFIG_HOME XDG_CACHE_HOME; cd work/print && clear" Enter
 Sleep 1s
 Show
 

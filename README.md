@@ -8,15 +8,14 @@ is: a few commands in a shell, a file you can read, and nothing else to open. Sl
 is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs to be
 installed.
 
-![Finding a printer with deli vendor, choosing it with deli printer (its process and filament come with it), adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, then deli send --print](images/demo.gif)
+![deli setup finding a Voron 2.4 by part of its name and taking its address, then adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
 
 ```
-deli vendor "voron 2.4 350"                 # find your printer
-deli printer "Voron 2.4 350 0.4 nozzle"     # once: OrcaSlicer's printer, process and filament
+deli setup                # once: tab completion, your printer, and how to reach it
 deli add 3DBenchy.stl
-deli slice                                  # how long it will take, and how much filament
-deli view                                   # the sliced Benchy in your browser, layer by layer
-deli send --print                           # to the printer, and start it
+deli slice                # how long it will take, and how much filament
+deli view                 # the sliced Benchy in your browser, layer by layer
+deli send --print         # to the printer, and start it
 ```
 
 Status: early. Everything above works; deli converts and slices for most of the

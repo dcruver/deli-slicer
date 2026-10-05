@@ -1,4 +1,4 @@
-# The README's clip, part 1 of 3: from no printer to the sliced Benchy, ending with deli
+# The README's clip, part 1 of 3: deli setup, then the sliced Benchy, ending with deli
 # view. record-readme.sh runs it, records the viewer, then send.tape, and joins them.
 Output work/part1.mp4
 
@@ -19,14 +19,13 @@ Type "export PS1='$ ' BROWSER=true HOME=$PWD/work/home; unset XDG_CONFIG_HOME XD
 Sleep 1s
 Show
 
-Type 'deli vendor "voron 2.4 350"' Sleep 400ms Enter Sleep 3.5s
+Type "deli setup" Sleep 400ms Enter Sleep 2.5s
+Type "voron 2.4 350" Sleep 400ms Enter Sleep 2s
+Type "4" Sleep 600ms Enter Sleep 5s
+Type "moonraker://localhost:7125" Sleep 400ms Enter Sleep 3s
 Hide
 Type "clear" Enter Sleep 300ms
 Show
-Type 'deli printer "voron 2.4 350 0.4"' Sleep 400ms Enter Sleep 6s
-Hide
-Type "clear" Enter Sleep 300ms
-Show
-Type "deli add 3DBenchy.stl" Sleep 300ms Enter Sleep 2s
+Type "deli add 3DBenchy.stl" Sleep 300ms Enter Sleep 2.5s
 Type "deli slice" Sleep 300ms Enter Sleep 9s
 Type "deli view" Sleep 300ms Enter Sleep 2.5s
