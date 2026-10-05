@@ -11,7 +11,7 @@ installed.
 ![Finding a printer with deli vendor, choosing it with deli printer (its process and filament come with it), adding a Benchy and slicing it](images/demo-setup.gif)
 
 ```
-deli printer "Elegoo Centauri Carbon 0.6 nozzle"   # once: OrcaSlicer's printer, process and filament
+deli printer "Voron 2.4 350 0.4 nozzle"            # once: OrcaSlicer's printer, process and filament
 deli add bracket.stl --count 2
 deli set infill 20%
 deli scale x 110%
@@ -19,15 +19,14 @@ deli view
 deli send --print                                   # slices first if the print has changed
 ```
 
-![deli view in a browser: a sliced 3DBenchy building up layer by layer on the Centauri Carbon's bed, coloured by what each extrusion is for, lighter above a pause at layer 40, then turning around](images/demo-viewer.gif)
+![deli view in a browser: a sliced 3DBenchy building up layer by layer on the printer's bed, coloured by what each extrusion is for, lighter above a pause at layer 40, then turning around](images/demo-viewer.gif)
 
 `deli view` after `deli slice`: the sliced print on the printer's bed, in your browser,
 layer by layer.
 
-Status: early. Everything above works, and has so far been used on one machine and
-for two real prints on an Elegoo Centauri Carbon, sliced and sent with
-`deli send --print`: a cube, and a Benchy with a pause part-way. See "Not done yet" at
-the end.
+Status: early. Everything above works; deli converts and slices for most of the
+printers OrcaSlicer knows, but has printed on only one so far. See "Not done yet" at the
+end.
 
 ## Motivation
 
@@ -117,43 +116,42 @@ three. You don't need OrcaSlicer installed.
 
 ```
 deli vendor                      # the vendors, with how many printers each
-deli vendor Elegoo               # one vendor's printers
-deli vendor "centauri carbon"    # or any part of a name: the printers that match
+deli vendor Voron                # one vendor's printers
+deli vendor "voron 2.4"          # or any part of a name: the printers that match
 ```
 
-Orca's printer names end with the nozzle size, such as `Elegoo Centauri Carbon 0.6
-nozzle`. Pick the one with the nozzle your printer has; most printers ship with 0.4 mm.
+Orca's printer names end with the nozzle size, such as `Voron 2.4 350 0.4 nozzle`. Pick the one with the nozzle your printer has; most printers ship with 0.4 mm.
 Vendor names are Orca's folder names, so Bambu Lab's printers are under `BBL`; the
 list shows what a vendor's printers are called when it differs.
 
 ### 2. Choose it
 
 ```
-deli printer "Elegoo Centauri Carbon 0.6 nozzle"
+deli printer "Voron 2.4 350 0.4 nozzle"
 ```
 
-Any part of the name that is enough to tell it apart will do (`"centauri carbon 0.6"`),
+Any part of the name that is enough to tell it apart will do (`"voron 2.4 350 0.4"`),
 in any case. A printer that is not in your library yet is imported from Orca as it is
 chosen, with the process and filament OrcaSlicer starts it with, and all three become
 the defaults for new prints:
 
 ```
-Imported printer 'elegoo-centauri-carbon-0.6-nozzle' from Orca 2.4.2's 'Elegoo Centauri Carbon 0.6 nozzle' (56 settings, 23 left out)
-Imported process '0.30mm-standard-elegoo-cc-0.6-nozzle', Orca's default for this printer (104 settings, 32 left out)
-  and made it the default process for new prints on 'elegoo-centauri-carbon-0.6-nozzle'
-Imported filament 'elegoo-pla-ecc', Orca's default for this printer (27 settings, 10 left out)
-  and made it the default filament for new prints on 'elegoo-centauri-carbon-0.6-nozzle'
-Made 'elegoo-centauri-carbon-0.6-nozzle' your default printer for new prints
-Printer set to 'elegoo-centauri-carbon-0.6-nozzle'
-  bed 256 x 256 mm, height 256 mm, nozzle 0.6 mm, firmware klipper
-  Filament set to 'elegoo-pla-ecc', from your config for this printer
-  Process set to '0.30mm-standard-elegoo-cc-0.6-nozzle', from your config for this printer
+Imported printer 'voron-2.4-350-0.4-nozzle' from Orca 2.4.2's 'Voron 2.4 350 0.4 nozzle' (51 settings, 7 left out)
+Imported process '0.20mm-standard-voron', Orca's default for this printer (93 settings, 16 left out)
+  and made it the default process for new prints on 'voron-2.4-350-0.4-nozzle'
+Imported filament 'generic-pla-system', Orca's default for this printer (27 settings, 20 left out)
+  and made it the default filament for new prints on 'voron-2.4-350-0.4-nozzle'
+Made 'voron-2.4-350-0.4-nozzle' your default printer for new prints
+Printer set to 'voron-2.4-350-0.4-nozzle'
+  bed 350 x 350 mm, height 325 mm, nozzle 0.4 mm, firmware klipper
+  Filament set to 'generic-pla-system', from your config for this printer
+  Process set to '0.20mm-standard-voron', from your config for this printer
 ```
 
 You can slice now. The settings "left out" are ones PrusaSlicer's engine has no
 equivalent for; they need nothing from you. [PRINTERS.md](PRINTERS.md) says which of
-Orca's printers deli has converted and sliced with, and why the rest fail. That is all
-it says: only the Elegoo Centauri Carbon has printed what deli sliced so far.
+Orca's printers deli has converted and sliced with, and why the rest fail. Slicing is
+not the same as printing well; see "Not done yet" for what has actually been printed.
 
 Defaults are only filled in where you have none, so a second printer does not change
 your default printer, and a filament you chose yourself stays chosen. Once imported, a
@@ -164,9 +162,9 @@ there: a newer deli or a newer Orca never changes a printer under you.
 
 ```
 deli filament                              # the filaments for your printer, the one in use marked
-deli filament "Elegoo PETG-CF @ECC"        # choose one
+deli filament "Generic PETG @System"       # choose one
 deli process                               # the processes for your printer
-deli process "0.18mm fine"                 # choose one
+deli process "0.15mm optimal"              # choose one
 ```
 
 `deli filament` lists the filaments made for the print's printer (or your default one),
@@ -207,14 +205,20 @@ signing in, and is then kept like the rest.
 ### Without OrcaSlicer's presets
 
 `deli load` takes a PrusaSlicer INI file from a path, a `file://` URL or an `https://`
-URL, including a link to a file's page on GitHub. This repository ships the Elegoo
-Centauri Carbon (0.6 mm nozzle) and the Bambu Lab P1S (0.4 mm nozzle) in `profiles/`:
+URL, including a link to a file's page on GitHub:
 
 ```
-deli load printer  https://github.com/dcruver/deli-slicer/blob/main/profiles/printers/elegoo-centauri-carbon-0.6-nozzle.ini
-deli load process  https://github.com/dcruver/deli-slicer/blob/main/profiles/processes/0.30mm-standard-elegoo-cc-0.6-nozzle.ini
-deli load filament https://github.com/dcruver/deli-slicer/blob/main/profiles/filaments/elegoo-pla-ecc.ini
+deli load printer  ~/Downloads/my-printer.ini --name my-printer   # a PrusaSlicer export, say
+deli load filament https://example.com/profiles/my-petg.ini        # or a file someone hosts
+deli printer my-printer                                            # then choose it as usual
 ```
+
+Without `--name`, a profile is named as the file names it (PrusaSlicer's
+`printer_settings_id` and the like), and `deli load` says what that is.
+
+A full PrusaSlicer export holds a printer, a process and a filament; `deli load printer`
+keeps only the printer's settings, so load it once for each. This repository's
+`profiles/` has a few to try, converted from Orca's and checked to slice.
 
 Anyone can host a printer this way: a PrusaSlicer INI file at any `https://` address.
 Imported or loaded, a file never carries a printer's network address or API key; those
@@ -225,20 +229,20 @@ go in your config (below).
 To send prints to it, deli needs its address:
 
 ```
-deli config printers.elegoo-centauri-carbon-0.6-nozzle.host elegoo://192.168.1.50
+deli config printers.voron-2.4-350-0.4-nozzle.host moonraker://voron.local
 ```
 
 And to change what new prints start with:
 
 ```
-deli printer elegoo-centauri-carbon-0.6-nozzle --default        # the printer new prints start with
-deli filament elegoo-petg-cf-ecc --default                      # the filament new prints on it start with
-deli process 0.30mm-standard-elegoo-cc-0.6-nozzle --default     # its usual process
+deli printer voron-2.4-350-0.4-nozzle --default   # the printer new prints start with
+deli filament "Generic PETG @System" --default     # the filament new prints on it start with
+deli process "0.15mm Optimal @Voron" --default     # its usual process
 ```
 
 This writes `~/.config/deli/config.toml`, which you can also edit by hand. `host` is
 where `deli send` sends; its scheme says what kind of host the printer is:
-`elegoo://` (Elegoo Centauri Carbon), `moonraker://` (Klipper) or `octoprint://`
+`moonraker://` (Klipper), `octoprint://` or `elegoo://` (Elegoo's Centauri Carbon)
 (`api_key` alongside, if the host needs one). `filament` and `process` are what a new
 print on that printer starts with, so you do not choose them again for every print.
 They are defaults and nothing more: a print that chooses another filament is sliced
@@ -279,8 +283,7 @@ the print has changed since. `deli slice -o FILE` (or `-o DIR`, `-o .` for here)
 writes a copy where you want it, to put on an SD card or open in another program.
 
 Supports are PrusaSlicer's automatic ones. `deli supports on` uses the style the
-process came with (Orca's tuning carries over: organic for the P1S, grid for the
-Centauri); `organic`, `snug` or `grid` pick one and turn them on; `--angle 45` supports
+process came with (Orca's tuning for the printer carries over); `organic`, `snug` or `grid` pick one and turn them on; `--angle 45` supports
 overhangs steeper than that, and `--buildplate-only` keeps them off the part itself.
 `deli supports` alone says what is in force and where it comes from. Underneath these
 are ordinary settings (`support_material`, `support_material_style`, ...), so
@@ -297,8 +300,8 @@ same command under another name. A part with copies cannot be given a place.
 `deli pause 30` has the printer pause once layer 30 is done, to drop in a magnet or a
 nut, or to change the filament: deli has no separate colour-change command, because a
 pause is where you change it. What is written is the printer's own pause G-code (on
-the Centauri Carbon that is `M600`, the filament-change command itself; `deli set
-pause_print_gcode` changes it). Layers are counted as the slider in `deli view` counts
+many printers `M600`, the filament-change command itself; `deli set pause_print_gcode`
+changes it). Layers are counted as the slider in `deli view` counts
 them, so slide to the last layer you want printed before the pause and use that
 number. `deli slice` reports each pause with its height, and refuses a pause after a
 layer the print does not have.
@@ -310,10 +313,9 @@ slider to go through the layers. The colours turn lighter where the print pauses
 a box in the legend shows the travel moves. It goes back to the parts as soon as the
 print changes. The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
-`deli slice` draws one into the G-code for the printer's screen; the Centauri Carbon
-shows it.
+`deli slice` draws one into the G-code for the printer's screen.
 
-![deli view in a browser: a sliced 3DBenchy on the Centauri Carbon's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
+![deli view in a browser: a sliced 3DBenchy on the printer's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli move` and `deli pause` without arguments show what
@@ -325,7 +327,7 @@ is plain TOML you can edit, comment and commit:
 pause = [30]
 
 [printer]
-name = "elegoo-centauri-carbon-0.6-nozzle"
+name = "voron-2.4-350-0.4-nozzle"
 sha256 = "9510435c7c2100a23514b823aaab26fc37e9efe6a7e8031c1a2e03ecb687192c"
 
 [[part]]
@@ -380,23 +382,23 @@ check the file arrived and start it from the printer's own screen.
 
 Things that a user would notice, roughly in the order they matter:
 
-- **Two real prints so far**, both on the Centauri Carbon with its converted profile,
-  sent with `deli send --print`: a cube in PLA, which printed well, and a Benchy in
-  PETG-CF with a pause, which ran to the end but came out stringy with lines in the
-  hull, from a spool that was probably damp. Nothing with supports has been printed,
-  and `deli send` to Moonraker and OctoPrint hosts has only been tested against fakes.
+- **One printer has printed deli's G-code so far**: an Elegoo Centauri Carbon, with
+  its profile converted from Orca's and the files sent with `deli send --print`. A cube
+  in PLA printed well; a Benchy in PETG-CF stopped at its `deli pause`, parked the head,
+  carried on when resumed and ran to the end, but came out stringy, from a spool that
+  was probably damp. Nothing with supports has been printed, and `deli send` to
+  Moonraker and OctoPrint hosts has only been tested against fakes. If you print with
+  another printer, please say how it went (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 - **Converted profiles differ from Orca in small ways.** The first layer's layer-change
   G-code is skipped; one bridge speed instead of two; no brim where Orca would add one
   automatically. `PLAN.md` has the full list with measurements.
-- **Remaining time on the Centauri Carbon is untried.** Its screen showed none for
-  deli's first prints. The G-code now carries the `M73` lines Orca's files have, which
-  is where it should get it from; nobody has watched a print since. The layer count now
-  shows in the printer's file list: it comes from the printer profile's `gcode_footer`,
-  comment lines deli adds to the end of the file, which converted printers have.
+- **What printers' screens show is barely checked.** The G-code carries the `M73`
+  remaining-time lines and, for converted printers, the comment lines Orca's files end
+  with (the profile's `gcode_footer`), where some firmware reads the layer count. The
+  Centauri Carbon shows the layer count; its remaining time has not been watched yet.
 - **Other printers.** Of the 1,001 printers OrcaSlicer 2.4.2 ships, 789 convert and slice a
-  test cube; [PRINTERS.md](PRINTERS.md) lists every one, and why the rest fail. That
-  is all it says: only the Centauri Carbon has been printed on, and only it and the
-  Bambu Lab P1S have been compared with Orca's own output.
+  test cube; [PRINTERS.md](PRINTERS.md) lists every one, and why the rest fail. Only
+  the Centauri Carbon and the Bambu Lab P1S have been compared with Orca's own output.
 - **Bambu printers can't be sent to.** `deli send` does not speak Bambu's LAN or cloud
   protocols; write the G-code out with `deli slice -o .` and copy it over by hand (SD
   card, or another program's send).
@@ -407,8 +409,6 @@ Things that a user would notice, roughly in the order they matter:
   elsewhere, which is untested.
 - **One filament per print.** A change by hand at a `deli pause` is the only kind;
   filament-change G-code for multi-material printers is not converted.
-- **Pauses have been seen once.** A Centauri Carbon stopped where `deli pause 90` said,
-  with the head parked, and carried on when resumed. Other printers are untried.
 - **Parts you place yourself are not checked against each other**, only against the
   bed, so two moved parts can overlap.
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
@@ -425,7 +425,7 @@ GUI is built. `PLAN.md` has the build details and the project's current state.
 
 [DESIGN.md](DESIGN.md) says how deli is meant to work and why; [CONTRIBUTING.md](CONTRIBUTING.md)
 says how to build it, test it and send a change, and what help is most wanted (printing
-with a printer other than the Centauri Carbon, above all). [CHANGELOG.md](CHANGELOG.md)
+with a printer that has not printed deli's G-code yet, above all). [CHANGELOG.md](CHANGELOG.md)
 lists what changed in each release.
 
 ## License
