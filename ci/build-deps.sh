@@ -12,10 +12,13 @@ export CFLAGS="${CFLAGS:-} -std=gnu17 -fPIC"
 export CXXFLAGS="${CXXFLAGS:-} -fPIC -include cstdint"
 
 # The GUI's packages are not needed. Nor is OpenCASCADE, the largest of them all, since
-# deli builds the engine without STEP files; except on macOS, where libslic3r links it.
+# deli builds the engine without STEP files.
 excludes="wxWidgets;OpenCSG;Catch2;OCCT"
-if [ "$(uname)" = Darwin ]; then
-    excludes="wxWidgets;OpenCSG;Catch2"
+
+# On macOS the oldest version the wheel is to run on, from MACOSX_DEPLOYMENT_TARGET.
+osx=()
+if [ "$(uname)" = Darwin ] && [ -n "${MACOSX_DEPLOYMENT_TARGET:-}" ]; then
+    osx=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET")
 fi
 
 # gmplib.org does not answer GitHub's machines, so GMP comes from GNU's own server. The
@@ -26,8 +29,9 @@ if [ ! -f "$gmp" ]; then
     curl -fL --retry 3 -o "$gmp" https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.bz2
 fi
 
+# ${osx[@]+...}: macOS's bash 3.2 calls an empty array unbound under set -u.
 cmake -S vendor/PrusaSlicer/deps -B build/deps -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    "-DPrusaSlicer_deps_PACKAGE_EXCLUDES=$excludes"
+    "-DPrusaSlicer_deps_PACKAGE_EXCLUDES=$excludes" ${osx[@]+"${osx[@]}"}
 
 # On Linux the superbuild takes zlib and libpng from the system, which links them into the
 # engine as shared libraries a wheel may not depend on. Build both statically into the same

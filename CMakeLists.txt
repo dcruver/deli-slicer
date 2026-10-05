@@ -9,10 +9,13 @@ if (NOT EXISTS "${DELI_DEPS_PREFIX}")
                         "Build them first (see PLAN.md) or set DELI_DEPS_PREFIX.")
 endif ()
 list(PREPEND CMAKE_PREFIX_PATH "${DELI_DEPS_PREFIX}")
-# zlib and libpng are built statically into the same prefix (ci/build-deps.sh); a system's
-# shared copies, where there are any, must not be linked instead.
-set(ZLIB_USE_STATIC_LIBS ON)
-set(ZLIB_ROOT "${DELI_DEPS_PREFIX}")
+# On Linux zlib and libpng are built statically into the same prefix (ci/build-deps.sh);
+# a system's shared copies must not be linked instead. macOS always has zlib, and the
+# superbuild builds libpng there itself.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(ZLIB_USE_STATIC_LIBS ON)
+    set(ZLIB_ROOT "${DELI_DEPS_PREFIX}")
+endif ()
 set(PNG_ROOT "${DELI_DEPS_PREFIX}")
 
 # The engine is linked statically into a Python extension module.
@@ -33,10 +36,12 @@ endif ()
 set(CMAKE_FIND_PACKAGE_TARGETS_GLOBAL ON)
 
 # STEP files need OpenCASCADE, the largest of the dependencies by far, through a wrapper
-# library that PrusaSlicer loads at run time and deli does not ship. Leave both out, except
-# on macOS, where libslic3r links the wrapper directly.
-if (NOT APPLE)
-    set(SLIC3R_ENABLE_FORMAT_STEP OFF CACHE BOOL "" FORCE)
+# library that PrusaSlicer loads at run time and deli does not ship. Leave both out. On
+# macOS libslic3r links the wrapper directly instead of loading it, so there an empty
+# target stands in for it and src/deli/no_step.cpp for the one function it calls.
+set(SLIC3R_ENABLE_FORMAT_STEP OFF CACHE BOOL "" FORCE)
+if (APPLE)
+    add_library(OCCTWrapper INTERFACE)
 endif ()
 
 set(SLIC3R_GUI OFF CACHE BOOL "" FORCE)
@@ -53,6 +58,10 @@ target_link_libraries(_engine PRIVATE libslic3r slic3r-arrange-wrapper)
 if (CMAKE_COMPILER_IS_GNUCXX)
     # Boost's quad-precision literals, as in PrusaSlicer's own build.
     target_compile_options(_engine PRIVATE -fext-numeric-literals)
+endif ()
+if (APPLE)
+    target_sources(_engine PRIVATE src/deli/no_step.cpp)
+    target_include_directories(_engine PRIVATE vendor/PrusaSlicer/src)
 endif ()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Fuzzy skin asks std::random_device for its entropy, which needs a newer libstdc++

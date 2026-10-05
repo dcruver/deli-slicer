@@ -27,11 +27,17 @@ jobs:
           fi
 
   linux:
-    name: Linux x86-64 wheel
+    name: Linux ${{ matrix.label }} wheel
     needs: version
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, label: x86-64, runner: ubuntu-24.04, jobs: 3 }
+          - { arch: aarch64, label: ARM64, runner: ubuntu-24.04-arm, jobs: 3 }
+    runs-on: ${{ matrix.runner }}
     # An old glibc, so the wheel loads on any distribution from about 2019 on.
-    container: quay.io/pypa/manylinux_2_28_x86_64
+    container: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
     timeout-minutes: 300
     steps:
       - name: System packages
@@ -57,7 +63,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/deps/destdir
-          key: deps-manylinux_2_28-x86_64-${{ steps.engine.outputs.sha }}-${{ hashFiles('ci/build-deps.sh') }}
+          key: deps-manylinux_2_28-${{ matrix.arch }}-${{ steps.engine.outputs.sha }}-${{ hashFiles('ci/build-deps.sh') }}
 
       - name: Build PrusaSlicer's dependencies
         if: steps.deps.outputs.cache-hit != 'true'
@@ -74,7 +80,7 @@ jobs:
       - name: Build the wheel
         env:
           # libslic3r's largest sources need several GB each; the runner has 16 GB.
-          SKBUILD_BUILD_TOOL_ARGS: -j3
+          SKBUILD_BUILD_TOOL_ARGS: -j${{ matrix.jobs }}
         run: python -m pip wheel . --no-deps -w dist
 
       - name: Make it a manylinux wheel
@@ -86,26 +92,133 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: unrepaired-linux-x86_64
+          name: unrepaired-linux-${{ matrix.arch }}
           path: dist/*.whl
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-linux-x86_64
+          name: wheel-linux-${{ matrix.arch }}
           path: wheelhouse/*.whl
 
   test-linux:
-    name: Tests on Ubuntu 22.04
+    name: Tests on Ubuntu 22.04 ${{ matrix.label }}
     needs: linux
-    # Older than the machine the wheel was built for by hand, which needed glibc 2.43.
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, label: x86-64, runner: ubuntu-22.04 }
+          - { arch: aarch64, label: ARM64, runner: ubuntu-22.04-arm }
+    # Older than the build machines, to show the wheel needs nothing newer.
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true   # the tests slice PrusaSlicer's own test models
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-linux-x86_64
+          name: wheel-linux-${{ matrix.arch }}
+          path: wheelhouse
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the wheel, not the source
+        run: python -m pip install wheelhouse/*.whl pytest
+      - name: Run the tests
+        run: python -m pytest -q
+
+  macos:
+    name: macOS ${{ matrix.label }} wheel
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon Macs all run macOS 11 or later; 10.15 is as old as PrusaSlicer goes.
+          - { arch: arm64, label: Apple Silicon, runner: macos-15, target: "11.0", jobs: 2 }
+          - { arch: x86_64, label: Intel, runner: macos-15-intel, target: "10.15", jobs: 3 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build tools
+        run: |
+          brew install autoconf automake libtool texinfo
+          python -m pip install cmake ninja delocate
+
+      - name: Which PrusaSlicer
+        id: engine
+        run: echo "sha=$(git rev-parse HEAD:vendor/PrusaSlicer)" >> "$GITHUB_OUTPUT"
+
+      - name: PrusaSlicer's dependencies, from an earlier run
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: build/deps/destdir
+          key: deps-macos-${{ matrix.arch }}-${{ matrix.target }}-${{ steps.engine.outputs.sha }}-${{ hashFiles('ci/build-deps.sh') }}
+
+      - name: Build PrusaSlicer's dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: ci/build-deps.sh
+
+      - name: Keep the dependencies for later runs
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/deps/destdir
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
+      - name: Build the wheel
+        env:
+          # The Apple Silicon runner has 7 GB, the Intel one 14.
+          SKBUILD_BUILD_TOOL_ARGS: -j${{ matrix.jobs }}
+        run: python -m pip wheel . --no-deps -w dist
+
+      # delocate is macOS's auditwheel: it copies in any library the engine needs that
+      # macOS does not have, and refuses one that needs a newer macOS than the target.
+      - name: Make it a portable wheel
+        run: |
+          delocate-listdeps --all dist/*.whl
+          delocate-wheel --require-archs ${{ matrix.arch }} -w wheelhouse -v dist/*.whl
+          ls -l wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: unrepaired-macos-${{ matrix.arch }}
+          path: dist/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+
+  test-macos:
+    name: Tests on macOS ${{ matrix.label }}
+    needs: macos
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, label: Apple Silicon, runner: macos-14 }
+          - { arch: x86_64, label: Intel, runner: macos-15-intel }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-macos-${{ matrix.arch }}
           path: wheelhouse
       - uses: actions/setup-python@v5
         with:
@@ -153,7 +266,7 @@ jobs:
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test-linux]
+    needs: [test-linux, test-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -175,8 +288,9 @@ jobs:
               pip install https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME/<wheel file>
               uv tool install https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME/<wheel file>
 
-          Each wheel serves Python 3.12 and later. The Linux wheel needs glibc 2.28 or later
-          (most distributions from 2019 on).
+          Each wheel serves Python 3.12 and later. The Linux wheels need glibc 2.28 or later
+          (most distributions from 2019 on); the macOS wheels need macOS 11 (Apple Silicon)
+          or 10.15 (Intel).
           NOTES
           # A tag such as v0.2.0-rc1 is published as a pre-release.
           case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; *) pre= ;; esac
