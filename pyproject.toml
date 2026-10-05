@@ -4,14 +4,32 @@ version = "0.2.0"
 description = "Git-style, shell-native slicer front end for 3D printing"
 readme = "README.md"
 license = "AGPL-3.0-only"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md", "licenses/*.txt"]
 authors = [
     { name = "Don Cruver", email = "donald@cruver.ai" }
 ]
 requires-python = ">=3.12"
+keywords = ["3d-printing", "slicer", "g-code", "prusaslicer", "orcaslicer", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Topic :: Printing",
+]
 dependencies = [
     "tomlkit>=0.15.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dcruver/deli-slicer"
+Changelog = "https://github.com/dcruver/deli-slicer/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dcruver/deli-slicer/issues"
+Printers = "https://github.com/dcruver/deli-slicer/blob/main/PRINTERS.md"
 
 [project.scripts]
 deli = "deli:main"

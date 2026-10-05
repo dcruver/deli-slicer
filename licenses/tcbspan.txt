@@ -1,0 +1,16 @@
+==> PrusaSlicer bundled_deps/tcbspan/tcbspan/span.hpp, lines 1-10 (licence block in the source; no separate licence file) <==
+
+
+/*
+This is an implementation of C++20's std::span
+http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/n4820.pdf
+*/
+
+//          Copyright Tristan Brindle 2018.
+// Distributed under the Boost Software License, Version 1.0.
+//    (See accompanying file ../../LICENSE_1_0.txt or copy at
+//          https://www.boost.org/LICENSE_1_0.txt)
+
+
+The Boost Software License 1.0 text is in boost.txt.
+

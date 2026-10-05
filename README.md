@@ -416,8 +416,16 @@ PrusaSlicer 2.9.6's source is vendored as a git submodule at `vendor/PrusaSlicer
 deli links its `libslic3r` into a Python extension module; nothing of PrusaSlicer's
 GUI is built. `PLAN.md` has the build details and the project's current state.
 
+## Contributing
+
+[DESIGN.md](DESIGN.md) says how deli is meant to work and why; [CONTRIBUTING.md](CONTRIBUTING.md)
+says how to build it, test it and send a change, and what help is most wanted (printing
+with a printer other than the Centauri Carbon, above all). [CHANGELOG.md](CHANGELOG.md)
+lists what changed in each release.
+
 ## License
 
-AGPL-3.0-only, the same licence as the PrusaSlicer code it links. See `LICENSE`.
-The profiles in `profiles/` are derived from OrcaSlicer's, which are AGPL-3.0 too;
-the viewer bundles three.js (MIT).
+AGPL-3.0-only, the same licence as the PrusaSlicer code it links. See [LICENSE](LICENSE).
+The profiles in `profiles/` are derived from OrcaSlicer's, which are AGPL-3.0 too. The
+libraries compiled into deli's wheels, and the three.js the viewer bundles, are listed
+with their licences in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
