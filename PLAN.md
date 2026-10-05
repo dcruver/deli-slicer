@@ -53,6 +53,16 @@ Do not reopen these without a reason.
   one call needing GLIBCXX_3.4.25, wrapped at link time (`src/deli/entropy.cpp`, answers
   0). Dependencies take about 15-27 minutes and are cached by PrusaSlicer's commit and
   `build-deps.sh`; the engine takes about 30 on every run.
+  Linux ARM64 (GitHub's ARM runners, aarch64 manylinux container) and macOS (macos-15
+  for arm64 / macOS 11+, macos-15-intel for 10.15+, made portable with delocate) build
+  and pass their tests as of 2026-10-05. macOS needed: no OpenCASCADE (an empty
+  `OCCTWrapper` target and `src/deli/no_step.cpp`, since libslic3r links the wrapper
+  directly there), and Homebrew's libpng uninstalled on the Intel runner, whose
+  `/usr/local/include/png.h` shadowed the dependencies' prefixed one. With cached
+  dependencies the wheel jobs took 16 (Apple Silicon) to 28 (Intel) minutes.
+  `ci/build-wheel.sh` builds through ccache, cached per platform, with precompiled
+  headers off (they defeat it), so a release that changes only Python should not
+  recompile the engine.
   Releases: pushing a tag `vX.Y.Z` that matches `pyproject.toml`'s version builds and
   tests the wheels and publishes them as a GitHub release (`release` job); a mismatched
   tag fails in the first minute. PyPI is for later, once there are wheels for more than

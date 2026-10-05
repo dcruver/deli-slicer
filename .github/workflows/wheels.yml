@@ -45,6 +45,7 @@ jobs:
           dnf install -y dbus-devel mesa-libGLU-devel \
             autoconf automake libtool m4 perl-core perl-IPC-Cmd git patch which file
           dnf install -y --enablerepo=powertools texinfo
+          dnf install -y epel-release && dnf install -y ccache
           /opt/python/cp312-cp312/bin/python -m pip install cmake ninja
           echo /opt/python/cp312-cp312/bin >> "$GITHUB_PATH"
           git config --global --add safe.directory '*'
@@ -77,11 +78,20 @@ jobs:
           path: build/deps/destdir
           key: ${{ steps.deps.outputs.cache-primary-key }}
 
+      # The engine's own objects, from earlier runs: a change to Python alone, which is most
+      # releases, then rebuilds it in minutes instead of half an hour.
+      - name: Compiled engine objects, from earlier runs
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-manylinux_2_28-${{ matrix.arch }}-${{ github.sha }}
+          restore-keys: ccache-manylinux_2_28-${{ matrix.arch }}-
+
       - name: Build the wheel
         env:
           # libslic3r's largest sources need several GB each; the runner has 16 GB.
           SKBUILD_BUILD_TOOL_ARGS: -j${{ matrix.jobs }}
-        run: python -m pip wheel . --no-deps -w dist
+        run: ci/build-wheel.sh
 
       - name: Make it a manylinux wheel
         run: |
@@ -156,6 +166,7 @@ jobs:
         run: |
           brew install autoconf automake libtool texinfo
           brew uninstall --ignore-dependencies libpng || true
+          brew install ccache
           python -m pip install cmake ninja delocate
 
       - name: Which PrusaSlicer
@@ -180,11 +191,20 @@ jobs:
           path: build/deps/destdir
           key: ${{ steps.deps.outputs.cache-primary-key }}
 
+      # The engine's own objects, from earlier runs: a change to Python alone, which is most
+      # releases, then rebuilds it in minutes instead of half an hour.
+      - name: Compiled engine objects, from earlier runs
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-macos-${{ matrix.arch }}-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: ccache-macos-${{ matrix.arch }}-${{ matrix.target }}-
+
       - name: Build the wheel
         env:
           # The Apple Silicon runner has 7 GB, the Intel one 14.
           SKBUILD_BUILD_TOOL_ARGS: -j${{ matrix.jobs }}
-        run: python -m pip wheel . --no-deps -w dist
+        run: ci/build-wheel.sh
 
       # delocate is macOS's auditwheel: it copies in any library the engine needs that
       # macOS does not have, and refuses one that needs a newer macOS than the target.
