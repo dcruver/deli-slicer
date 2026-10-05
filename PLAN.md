@@ -618,6 +618,40 @@ Converter changes it took, all general:
 - **`default_bed_type`** missing from a machine (all of Bambu's) now means Textured PEI
   Plate, as the filament conversion already assumed.
 
+### Sending to Bambu printers (researched 2026-10-05; on hold)
+
+Not built; the user set it aside. What two rounds of research found, so it need not be
+done again (sources were Bambu's wiki and blog, OrcaSlicer's and Bambu Studio's source,
+ha-bambulab, 3dmake, bambox, OpenBambuAPI):
+
+- **Licence:** a sender written in deli itself is AGPL-clean; it is only a network
+  protocol. Bambu's closed `libbambu_networking` plugin must not be linked or shipped.
+  OrcaSlicer sends everything, LAN printing and cloud login included, through that
+  plugin (`src/slic3r/Utils/BBLNetworkPlugin.cpp`, `PrintJob.cpp`), so it is no model.
+- **LAN protocol:** upload by implicit-TLS FTPS on 990, start by MQTT over TLS on 8883
+  (`device/<serial>/request`, a `project_file` command), user `bblp`, password the
+  access code on the printer's screen; the serial is in the printer's SSDP NOTIFY (port
+  2021) and its certificate's CN. Plain G-code is not accepted: it must be a
+  `.gcode.3mf` (G-code in `Metadata/plate_1.gcode` with an upper-case `.md5`, plus
+  metadata). Since Bambu's January 2025 Authorization Control, starting a print from
+  other software needs **Developer Mode** (LAN only: no cloud, no Handy), which the user
+  rejected as a handicap, or Bambu Connect.
+- **Without Developer Mode,** ranked: (1) write the `.gcode.3mf` and open it in **Bambu
+  Studio** (official on Linux as a Flatpak since 2026-03, and on Windows and macOS; AGPL,
+  a separate process), where the user picks the printer and sends; (2) the
+  `bambu-connect://import-file?path=<absolute path>&name=..&version=1.0.0` hand-off
+  (Windows and macOS only; the community Linux package is stale; Connect rejects a
+  3MF without Bambu Studio's full metadata, ~550 settings); (3) copy the file to the
+  printer's microSD card and start it on its screen (unaffected by the restrictions);
+  (4) FTPS upload without Developer Mode, then start on the screen: **unverified**, test
+  on an A1 with `curl --ssl-reqd -T x.gcode.3mf ftps://bblp:CODE@IP:990/`. Bambu Handy
+  cannot take a file from a phone, every third-party service needs Developer Mode to
+  send, and the reverse-engineered cloud API is out (terms of service, breakage).
+- **Before anything ships:** a `.gcode.3mf` writer (every route needs it), checked on a
+  real A1 from its SD card; the user and his beta tester Sungho each have an A1. deli
+  must never install Bambu Connect, Bambu Studio or any community package: it may only
+  write the file and open it, and say what to install if nothing answers.
+
 ## Profile conversion: what is settled and what is open
 
 `src/deli/orca.py` resolves Orca's `inherits` chain and converts machine, process and
