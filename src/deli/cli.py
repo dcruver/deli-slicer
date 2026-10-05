@@ -124,7 +124,8 @@ def _make_default(doc, kind: str, name: str) -> int:
 
 
 def _choose(args: argparse.Namespace) -> int:
-    """`deli printer`, `deli filament` and `deli process`: choose one from the library, or list them."""
+    """`deli printer`, `deli filament` and `deli process`: choose one from the library, or
+    from Orca's presets, imported as it is chosen; without a name, list the library's."""
     kind = args.command
     doc = project.read()
     current = project.selected(doc, kind)
@@ -135,7 +136,7 @@ def _choose(args: argparse.Namespace) -> int:
     if args.name is None:
         # Like `git branch`: list what there is and mark the one in use.
         if not loaded and not current:
-            print(f"No {kind} is loaded. Add one with: deli load {kind} <source>")
+            print(f'No {kind} in your library yet. Choose one of Orca\'s by name (see them with: deli import orca list), or: deli load {kind} <source>')
         about = config.printer(project.selected(doc, "printer").get("name", "")) if kind == "filament" else {}
         for name in sorted({*loaded, *filter(None, [current.get("name")])}):
             notes = []
@@ -154,7 +155,7 @@ def _choose(args: argparse.Namespace) -> int:
             print(f"{'*' if name == current.get('name') else ' '} {name}{note}")
         return 0
 
-    name = library.slug(args.name)
+    name = _from_library_or_orca(doc, kind, args.name)
     path = library.find(kind, name)
     if args.default:
         return _make_default(doc, kind, name)
@@ -764,6 +765,73 @@ def _import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _store_from_orca(presets: orca_install.Presets, kind: str, orca_name: str, orca_printer: str | None, printer: str | None) -> tuple[str, str | None]:
+    """Convert one of Orca's presets (a process or filament for `orca_printer`) into the
+    library, unless the same is there already. One that differs from a library entry of the
+    same name, converted for another printer, which prints may rely on, is stored under a
+    name with this printer's (`printer`, its library name) instead. Returns the library
+    name, and what was stored ("56 settings, 23 left out"), None if it was there already."""
+    imported = presets.convert(kind, orca_name, orca_printer)
+    name = imported.orca_name
+    existing = library.path_of(kind, name)
+    if existing.exists():
+        if library.read_settings(existing) == library.settings_in(kind, orca_install.ini(imported)):
+            return existing.stem, None
+        if printer is None:
+            raise CommandError(f"your library has a different {kind} named '{existing.stem}'; import Orca's under another name with: "
+                               f'deli import orca {kind} "{orca_name}" --name <name>')
+        name = f"{name} {printer}"
+    loaded = orca_install.into_library(imported, name)
+    left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
+    return loaded.name, f"{len(loaded.settings)} settings{left_out}"
+
+
+def _from_library_or_orca(doc, kind: str, wanted: str) -> str:
+    """The library's name for what `deli printer|filament|process NAME` asks for: one in the
+    library by its name or a part only it has; else one of Orca's presets (at the release
+    `deli import` reads), imported now, a printer with its default process and filament,
+    a process or filament converted for the print's printer."""
+    names = library.names(kind)
+    slug = library.slug(wanted)
+    if slug in names:
+        return slug
+    partial = [name for name in names if slug and slug in name]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        raise CommandError(f"your library has {len(partial)} {kind}s matching '{wanted}'; which one?\n  " + "\n  ".join(partial))
+
+    mine = f" (it has: {', '.join(names)})" if names else ""
+    try:
+        presets = orca_install.Presets(github=orca_install.ORCA_REF)
+        orca_name = presets.find(kind, wanted)
+    except orca_install.NotFound as err:
+        close = f"; did you mean: {', '.join(err.close)}?" if err.close else "; Orca's are listed by: deli import orca list"
+        raise CommandError(f"no {kind} '{wanted}' in your library{mine} or among Orca's presets{close}") from None
+    except orca_install.OrcaError as err:
+        raise CommandError(f"no {kind} '{wanted}' in your library{mine}, and Orca's presets could not be read: {err}") from None
+    release = orca_install.ORCA_REF.lstrip("v")
+    if kind == "printer":
+        imported = presets.convert(kind, orca_name)
+        loaded = orca_install.into_library(imported)
+        left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
+        print(f"Imported printer '{loaded.name}' from Orca {release}'s '{orca_name}' ({len(loaded.settings)} settings{left_out})")
+        _import_defaults(presets, orca_name, loaded.name)
+        return loaded.name
+
+    # Converted for the print's printer, when Orca has it (a converted printer carries Orca's name).
+    printer = project.selected(doc, "printer").get("name") or config.default_printer()
+    orca_printer = None
+    if printer and printer in library.names("printer"):
+        known = library.read_settings(library.find("printer", printer)).get(library.ID_KEYS["printer"], "").strip('"')
+        orca_printer = known if known in presets.names("printer") else None
+    name, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer)
+    if stored is not None:
+        for_printer = f", for '{printer}'" if orca_printer else ""
+        print(f"Imported {kind} '{name}' from Orca {release}'s '{orca_name}'{for_printer} ({stored})")
+    return name
+
+
 def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: str) -> None:
     """With a printer, the process and filament Orca starts it with, and those made the
     config's defaults for it (and it the default printer) where the config names none."""
@@ -774,24 +842,11 @@ def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: 
         if kind not in defaults:
             print(f"Orca names no default {kind} for this printer; see what fits it with: deli import orca list \"{orca_printer}\"")
             continue
-        imported = presets.convert(kind, defaults[kind], orca_printer)
-        # Converted for this printer, it may differ from one of the same name converted for
-        # another, which prints already made rely on; that one is kept, and this named apart.
-        name = imported.orca_name
-        existing = library.path_of(kind, name)
-        if existing.exists():
-            if library.read_settings(existing) == library.settings_in(kind, orca_install.ini(imported)):
-                print(f"Orca's default {kind} for this printer, '{existing.stem}', is already in your library")
-                name = None
-            else:
-                name = f"{name} {printer}"
-        if name is not None:
-            loaded = orca_install.into_library(imported, name)
-            name = loaded.name
-            left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
-            print(f"Imported {kind} '{name}', Orca's default for this printer ({len(loaded.settings)} settings{left_out})")
+        name, stored = _store_from_orca(presets, kind, defaults[kind], orca_printer, printer)
+        if stored is None:
+            print(f"Orca's default {kind} for this printer, '{name}', is already in your library")
         else:
-            name = existing.stem
+            print(f"Imported {kind} '{name}', Orca's default for this printer ({stored})")
         if not mine.get(kind):
             config.set_value(f"printers.{printer}.{kind}", name)
             print(f"  and made it the default {kind} for new prints on '{printer}'")
@@ -912,10 +967,14 @@ def _completion(args: argparse.Namespace) -> int:
 
 
 def _complete(args: argparse.Namespace) -> int:
-    """`deli __complete INDEX WORD...`, called by the shell completion scripts."""
+    """`deli __complete --line LINE` (bash, zsh) or `INDEX WORD...` (fish), called by the shell completion scripts."""
     from deli import complete
 
-    for candidate in complete.candidates(build_parser(), args.index, args.words):
+    if args.line is not None:
+        found = complete.for_line(build_parser(), args.line, args.breaks)
+    else:
+        found = complete.candidates(build_parser(), args.index, args.words)
+    for candidate in found:
         print(candidate)
     return 0
 
@@ -938,15 +997,18 @@ def build_parser() -> argparse.ArgumentParser:
     for kind, plural in plurals.items():
         choose = commands.add_parser(
             kind,
-            help=f"choose the {kind} for this print, or list the loaded {plural}",
-            description=f"Choose a loaded {kind} for the print in this directory. Without a name, list the loaded {plural}. "
+            help=f"choose the {kind} for this print, or list the {plural} in your library",
+            description=f"Choose a {kind} for the print in this directory: one in your library, by its name or a part of "
+            f"it only one has, or else one of OrcaSlicer's, imported into your library as it is chosen"
+            + (", with Orca's default process and filament for it" if kind == "printer" else ", converted for this print's printer")
+            + f" (see them with: deli import orca list). Without a name, list the {plural} in your library. "
             + (
                 "With --default, make it the printer new prints start with instead."
                 if kind == "printer"
                 else f"With --default, make it the {kind} that new prints on this print's printer, or on your default printer, start with instead."
             ),
         )
-        choose.add_argument("name", nargs="?", help=f"a {kind} in your library")
+        choose.add_argument("name", nargs="?", help=f"a {kind} in your library, or Orca's name for one, or part of either")
         choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
         choose.set_defaults(run=_choose)
 
@@ -1136,8 +1198,10 @@ def build_parser() -> argparse.ArgumentParser:
     completion.set_defaults(run=_completion)
 
     hidden = commands.add_parser("__complete", help=argparse.SUPPRESS)
-    hidden.add_argument("index", type=int)
+    hidden.add_argument("index", type=int, nargs="?", default=0)
     hidden.add_argument("words", nargs="*")
+    hidden.add_argument("--line")
+    hidden.add_argument("--breaks", default="")
     hidden.set_defaults(run=_complete)
     return parser
 

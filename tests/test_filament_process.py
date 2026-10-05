@@ -73,7 +73,7 @@ def test_one_that_is_not_loaded_is_an_error(kind, project, capsys):
     assert main([kind, "nylon"]) == 1
 
     err = capsys.readouterr().err
-    assert f"no {kind} named 'nylon'" in err
+    assert f"no {kind} 'nylon' in your library" in err
     assert NAMES[kind] in err  # says what is loaded
     assert not project.exists()
 

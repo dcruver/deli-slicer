@@ -117,3 +117,60 @@ def test_scripts_call_the_hidden_command(capsys):
 
     assert main(["__complete", "1", "deli", "pr"]) == 0
     assert capsys.readouterr().out.splitlines() == ["printer", "process"]
+
+
+# ------------------------------------------- names with spaces and @, as Orca's have
+
+
+@pytest.fixture
+def orca_names(monkeypatch):
+    """Orca's presets as completion sees them, without fetching anything."""
+    from deli import complete as module
+
+    class Presets:
+        vendors = {"Elegoo": None}
+
+        def names(self, kind):
+            return ["Generic PETG @System", "Generic PLA @System"] if kind == "filament" else ["Elegoo Centauri Carbon 0.6 nozzle"]
+
+    monkeypatch.setattr(module, "_orca_presets", lambda before: Presets)
+
+
+def test_a_line_is_split_as_the_shell_would():
+    from deli import complete as module
+
+    assert module._split("deli import orca filament Generic\\ PLA\\ @Sys") == (
+        ["deli", "import", "orca", "filament", "Generic PLA @Sys"], "Generic\\ PLA\\ @Sys", None)  # fmt: skip
+    assert module._split('deli import "Generic PL') == (["deli", "import", "Generic PL"], '"Generic PL', '"')
+    assert module._split("deli add ") == (["deli", "add", ""], "", None)
+
+
+def test_names_with_spaces_complete_escaped_or_inside_the_quote(orca_names):
+    from deli import complete as module
+
+    parser = build_parser()
+    assert module.for_line(parser, "deli import orca filament Generic\\ PL") == ["Generic\\ PLA\\ @System"]
+    assert module.for_line(parser, 'deli import orca filament "Generic PL') == ["Generic PLA @System"]
+    assert module.for_line(parser, "deli import orca filament 'Generic PE") == ["Generic PETG @System"]
+    assert module.for_line(parser, "deli import orca filament Nothing") == []
+
+
+def test_bash_gets_only_what_follows_its_last_word_break(orca_names):
+    """bash replaces the text after the last of its COMP_WORDBREAKS, keeping an @ in it."""
+    from deli import complete as module
+
+    breaks = " \t\n\"'@><=;|&(:"
+    assert module.for_line(build_parser(), "deli import orca filament Generic\\ PLA\\ @Sys", breaks) == ["@System"]
+    assert module.for_line(build_parser(), "deli import orca filament Generic\\ PLA\\ @Sys", "") == ["Generic\\ PLA\\ @System"]  # zsh
+
+
+def test_words_from_fish_lose_any_escapes(orca_names):
+    assert complete("import", "orca", "filament", "Generic\\ PL", new_word=False) == ["Generic PLA @System"]
+
+
+def test_the_bash_script_passes_the_line(capsys):
+    assert main(["completion", "bash"]) == 0
+    assert 'deli __complete --line "${COMP_LINE:0:COMP_POINT}"' in capsys.readouterr().out
+
+    assert main(["__complete", "--line", "deli pr"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["printer", "process"]

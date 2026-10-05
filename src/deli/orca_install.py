@@ -58,6 +58,14 @@ class OrcaError(Exception):
     """No Orca presets on this machine, or not the one asked for."""
 
 
+class NotFound(OrcaError):
+    """Orca has no preset by that name, nor one it is part of; `close` has names like it."""
+
+    def __init__(self, message: str, close: list[str] = ()):
+        super().__init__(message)
+        self.close = list(close)
+
+
 def _vendor_dirs(parent: Path) -> list[Path]:
     return sorted(child for child in parent.iterdir() if child.is_dir()) if parent.is_dir() else []
 
@@ -333,7 +341,9 @@ class Presets:
         if matches:
             shown = "\n  ".join(matches[:20]) + ("\n  ..." if len(matches) > 20 else "")
             raise OrcaError(f"Orca has {len(matches)} {kind}s matching '{name}'; which one?\n  {shown}")
-        raise OrcaError(f"Orca has no {kind} named or containing '{name}'")
+        lower = {found.lower(): found for found in names}
+        close = [lower[match] for match in difflib.get_close_matches(name.lower(), list(lower), n=3, cutoff=0.6)]
+        raise NotFound(f"Orca has no {kind} named or containing '{name}'" + (f"; did you mean: {', '.join(close)}?" if close else ""), close)
 
     def resolve(self, kind: str, name: str) -> orca.Orca:
         """A preset with its `inherits` chain flattened, the user's presets first and then

@@ -43,7 +43,7 @@ def test_printer_that_is_not_loaded_is_an_error(project, capsys):
     assert main(["printer", "voron"]) == 1
 
     err = capsys.readouterr().err
-    assert "no printer named 'voron'" in err
+    assert "no printer 'voron' in your library" in err
     assert MK3 in err  # says what is loaded
     assert not project.exists()
 

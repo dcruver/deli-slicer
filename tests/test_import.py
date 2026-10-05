@@ -369,3 +369,53 @@ def test_left_out_settings_are_counted_and_named_with_verbose(home, capsys):
 
     assert "were left out (-v lists them)" in quiet and "z_hop_types" not in quiet
     assert "were left out:" in verbose and "z_hop_types" in verbose
+
+
+# ------------------------------------- deli printer|filament|process, straight from Orca
+
+
+@pytest.fixture
+def print_dir(tmp_path, monkeypatch):
+    folder = tmp_path / "print"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    return folder
+
+
+def test_choosing_a_printer_orca_has_imports_it_with_its_defaults(github, home, print_dir, capsys):
+    assert main(["printer", "centauri"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"Imported printer 'elegoo-centauri-carbon-0.6-nozzle' from Orca {orca_install.ORCA_REF.lstrip('v')}'s '{MACHINE}'" in out
+    from deli import project
+
+    doc = project.read()
+    assert project.selected(doc, "printer")["name"] == "elegoo-centauri-carbon-0.6-nozzle"
+    assert project.selected(doc, "process")["name"] == "0.30mm-standard-elegoo-cc-0.6-nozzle"
+    assert project.selected(doc, "filament")["name"] == "elegoo-pla-ecc"
+
+
+def test_a_filament_orca_has_is_converted_for_the_prints_printer(github, home, print_dir, capsys):
+    assert main(["printer", "centauri", "--default"]) == 0
+    library.path_of("filament", "elegoo-pla-ecc").unlink()
+    capsys.readouterr()
+
+    assert main(["filament", "Elegoo PLA @ECC"]) == 0
+
+    assert "for 'elegoo-centauri-carbon-0.6-nozzle'" in capsys.readouterr().out
+    assert library.names("filament") == ["elegoo-pla-ecc"]
+
+
+def test_the_library_is_looked_in_first(github, home, print_dir):
+    assert main(["printer", "centauri"]) == 0
+    github.clear()
+
+    assert main(["process", "0.30mm"]) == 0  # part of the library's name only one has
+
+    assert github == []
+
+
+def test_a_name_nobody_has_gets_suggestions(github, home, print_dir, capsys):
+    assert main(["printer", "Elegoo Centuari Carbon 0.6 nozzle"]) == 1
+
+    assert f"did you mean: {MACHINE}?" in capsys.readouterr().err
