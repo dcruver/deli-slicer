@@ -165,9 +165,20 @@ def settings_in(kind: str, text: str) -> dict[str, str]:
     return settings
 
 
-def store(kind: str, text: str, source: str, name: str | None = None, fallback: str = "") -> Loaded:
+def made_for(path: Path) -> str | None:
+    """The printer a converted process or filament was made for, as its file records it."""
+    for line in path.read_text().splitlines():
+        if line.startswith("# for: "):
+            return line[len("# for: "):].strip()
+        if not line.startswith("#"):
+            return None
+    return None
+
+
+def store(kind: str, text: str, source: str, name: str | None = None, fallback: str = "", made_for: str | None = None) -> Loaded:
     """Put the settings of one kind from INI `text` into the library, named `name`, else
-    as the text names itself, else `fallback`. `source` is recorded in the file."""
+    as the text names itself, else `fallback`. `source` is recorded in the file, and so is
+    `made_for`, the printer a converted process or filament was made for."""
     try:
         groups, unknown = _engine.split_config(text)
     except ValueError as err:
@@ -195,7 +206,7 @@ def store(kind: str, text: str, source: str, name: str | None = None, fallback: 
     path = library_dir() / _FOLDERS[kind] / f"{name}.ini"
     replaced = path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"# deli {kind}: {name}", f"# source: {source}"]
+    lines = [f"# deli {kind}: {name}", f"# source: {source}"] + ([f"# for: {made_for}"] if made_for else [])
     lines += [f"{key} = {value}" for key, value in sorted(settings.items())]
     path.write_text("\n".join(lines) + "\n")
 

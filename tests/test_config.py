@@ -322,3 +322,38 @@ def test_default_printer_is_listed_and_unset(home, capsys):
     main(["config", "--unset", "printer"])
     assert config.default_printer() is None
     assert config.printer(MK3) == {"host": "elegoo://mk3.local"}
+
+
+def test_changing_printer_brings_its_filament_and_process(home, capsys):
+    library.load("printer", str(EXPORT), name="other")
+    library.load("process", str(EXPORT), name="other-quality")
+    main(["config", "printers.other.filament", "spare-pla"])
+    main(["config", "printers.other.process", "other-quality"])
+    main(["printer", MK3])
+    main(["filament", ABS])
+    main(["process", QUALITY])
+    capsys.readouterr()
+
+    assert main(["printer", "other"]) == 0
+
+    from deli import project
+
+    doc = project.read()
+    assert project.selected(doc, "filament")["name"] == "spare-pla"
+    assert project.selected(doc, "process")["name"] == "other-quality"
+    out = capsys.readouterr().out
+    assert f"Filament set to 'spare-pla', the default for this printer (was '{ABS}'; choose it again with: deli filament {ABS})" in out
+
+
+def test_changing_to_a_printer_without_defaults_keeps_them_and_says_so(home, capsys):
+    library.load("printer", str(EXPORT), name="other")
+    main(["printer", MK3])
+    main(["filament", ABS])
+    capsys.readouterr()
+
+    assert main(["printer", "other"]) == 0
+
+    from deli import project
+
+    assert project.selected(project.read(), "filament")["name"] == ABS
+    assert f"Filament '{ABS}' kept from the previous printer" in capsys.readouterr().out

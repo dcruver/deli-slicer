@@ -276,7 +276,8 @@ In a new directory:
 
 ```
 deli add 3DBenchy.stl                 # STL, OBJ, 3MF or AMF; the print starts with your default printer, filament and process
-deli filament "generic petg"          # another filament than your default, for this print
+deli printer "bambu lab p1s 0.4"      # another printer for this print; its filament and process come with it
+deli filament "generic petg"          # another filament than its default, converted for this printer
 deli set infill 20%                   # or any PrusaSlicer setting by name
 deli supports organic                 # automatic supports, for a model that needs them: on, off, grid, snug, organic
 deli scale 150%                       # a bigger boat

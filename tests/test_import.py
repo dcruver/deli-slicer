@@ -509,3 +509,9 @@ def test_setup_adds_to_zshrc_only_when_told(home, print_dir, tmp_path, monkeypat
 
     assert not (tmp_path / ".zshrc").exists()
     assert 'eval "$(deli completion zsh)"' in capsys.readouterr().out
+
+
+def test_an_import_records_the_printer_it_was_converted_for(home):
+    assert main(["import", "orca", "process", "mine", "--orca", str(FIXTURE)]) == 0
+
+    assert library.made_for(library.find("process", library.names("process")[0])) == MACHINE

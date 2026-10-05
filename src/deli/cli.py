@@ -100,6 +100,27 @@ def _config_fills(doc, starting: bool) -> list[str]:
     return lines
 
 
+def _follow_printer(doc, printer: str) -> list[str]:
+    """When a print changes printer, its filament and process change with it, to the new
+    printer's defaults: a process is made for a printer's nozzle and a filament converted
+    for its bed, so the old printer's would not fit. What was chosen before is named, so
+    that a deliberate choice can be made again. Without defaults for the new printer the
+    old ones stay, and the lines say so."""
+    lines = []
+    about = config.printer(printer)
+    for kind in ("filament", "process"):
+        before = project.selected(doc, kind).get("name")
+        default = about.get(kind)
+        if not before or before == default:
+            continue
+        if default and default in library.names(kind):
+            project.select(doc, kind, default, library.fingerprint(library.find(kind, default)))
+            lines.append(f"{kind.capitalize()} set to '{default}', the default for this printer (was '{before}'; choose it again with: deli {kind} {before})")
+        else:
+            lines.append(f"{kind.capitalize()} '{before}' kept from the previous printer, which may not suit this one; see those for it with: deli {kind}")
+    return lines
+
+
 def _start(doc) -> None:
     """Called before a print is written by a command that may be the first in its directory:
     a print that is only now being started takes the config's defaults."""
@@ -214,10 +235,14 @@ def _choose(args: argparse.Namespace) -> int:
     if args.default:
         return _make_default(doc, kind, name)
     starting = not project.FILE.exists()
+    previous = project.selected(doc, kind).get("name")
     project.select(doc, kind, name, library.fingerprint(path))
     print(f"{kind.capitalize()} set to '{name}'")
     if summary := _SUMMARIES[kind](library.read_settings(path)):
         print(f"  {summary}")
+    if kind == "printer" and previous and previous != name:
+        for line in _follow_printer(doc, name):
+            print(f"  {line}")
     if kind == "printer" or starting:
         # The config's defaults fill in what the print has not chosen yet.
         for line in _config_fills(doc, starting):
@@ -877,6 +902,32 @@ def _store_from_orca(presets: orca_install.Presets, kind: str, orca_name: str, o
     return loaded.name, f"{len(loaded.settings)} settings{left_out}"
 
 
+def _for_this_printer(doc, kind: str, name: str) -> str:
+    """A process or filament in the library as it suits the print's printer. One converted
+    from Orca's for another printer (its file says which) is converted again for this one
+    and kept beside it; one converted for this printer, or not from Orca at all, or edited
+    by hand, is used as it is. Without Orca's presets at hand, as it is too."""
+    if kind == "printer":
+        return name
+    path = library.find(kind, name)
+    made_for = library.made_for(path)
+    printer = project.selected(doc, "printer").get("name") or config.default_printer()
+    if not made_for or not printer:
+        return name
+    try:
+        presets = orca_install.Presets(github=orca_install.ORCA_REF)
+        orca_printer = _orca_printer(presets, printer)
+        orca_name = library.read_settings(path).get(library.ID_KEYS[kind], "").strip('"')
+        if orca_printer is None or orca_printer == made_for or orca_name not in presets.names(kind):
+            return name
+        converted, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer)
+    except (orca_install.OrcaError, CommandError):
+        return name
+    if stored is not None:
+        print(f"Converted {kind} '{converted}' from Orca's '{orca_name}' for '{printer}' ({stored})")
+    return converted
+
+
 def _from_library_or_orca(doc, kind: str, wanted: str) -> str:
     """The library's name for what `deli printer|filament|process NAME` asks for: one in the
     library by its name or a part only it has; else one of Orca's presets (at the release
@@ -885,10 +936,10 @@ def _from_library_or_orca(doc, kind: str, wanted: str) -> str:
     names = library.names(kind)
     slug = library.slug(wanted)
     if slug in names:
-        return slug
+        return _for_this_printer(doc, kind, slug)
     partial = [name for name in names if slug and slug in name]
     if len(partial) == 1:
-        return partial[0]
+        return _for_this_printer(doc, kind, partial[0])
     if len(partial) > 1:
         raise CommandError(f"your library has {len(partial)} {kind}s matching '{wanted}'; which one?\n  " + "\n  ".join(partial))
 

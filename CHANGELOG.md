@@ -9,6 +9,11 @@ a command that works differently, are marked **Changed**.
   name, picked from a numbered list) with OrcaSlicer's process and filament for it as
   the defaults, and its address for `deli send`. It asks at a terminal; `--printer`,
   `--host`, `--shell` and `--no-completion` give the answers instead.
+- **Changed:** choosing another printer for a print brings that printer's default
+  filament and process with it, and says what they were before; until now the old
+  printer's stayed, which did not fit. Choosing a filament or process converted from
+  Orca's for another printer converts it again for the print's printer, kept beside the
+  first; a converted profile's file now records the printer it was made for.
 - **Changed:** the config no longer keeps a list of filaments on hand
   (`printers.<printer>.filaments`), and `deli filament` no longer marks them. An old
   list is ignored; `deli config --unset printers.<printer>.filaments` removes it.

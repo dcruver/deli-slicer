@@ -406,4 +406,5 @@ def ini(imported: Imported) -> str:
 
 
 def into_library(imported: Imported, name: str | None = None) -> library.Loaded:
-    return library.store(imported.kind, ini(imported), imported.source or f"orca:{imported.orca_name}", name=name, fallback=imported.orca_name)
+    return library.store(imported.kind, ini(imported), imported.source or f"orca:{imported.orca_name}", name=name,
+                         fallback=imported.orca_name, made_for=imported.printer_name)
