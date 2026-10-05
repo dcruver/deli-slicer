@@ -4,13 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from deli import library
+from deli import library, project
 from deli.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
 CUBE = ROOT / "vendor/PrusaSlicer/tests/data/test_stl/ASCII/20mmbox-LF.stl"
 # A complete configuration: Original Prusa i3 MK3, 0.20mm QUALITY MK3, Generic ABS.
 EXPORT = ROOT / "vendor/PrusaSlicer/tests/data/default_fff.ini"
+
+
+def sliced() -> Path:
+    """Where deli keeps this print's G-code."""
+    return project.gcode_path(project.read())
 NAMES = {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}
 
 
@@ -42,10 +47,11 @@ def test_slices_to_gcode_named_after_the_part(job, capsys):
 
     assert main(["slice"]) == 0
 
-    gcode = job / "cube.gcode"
+    gcode = sliced()
     assert layers(gcode) == 100
     out = capsys.readouterr().out.splitlines()
-    assert out[0] == "Sliced cube.stl to cube.gcode"
+    assert out[0] == "Sliced cube.stl"
+    assert sliced().name == "cube.gcode" and not (job / "cube.gcode").exists()  # kept out of the way
     assert re.fullmatch(r"  \d+ min \d\d s, \d+\.\d\d m of filament, \d+\.\d g", out[1])
 
 
@@ -55,7 +61,14 @@ def test_output_can_be_named(job, capsys):
     assert main(["slice", "--output", "out/first.gcode"]) == 0
 
     assert (job / "out" / "first.gcode").exists()
-    assert "Sliced cube.stl to out/first.gcode" in capsys.readouterr().out
+    assert "G-code written to out/first.gcode" in capsys.readouterr().out
+    assert sliced().exists()  # the copy is as well as, not instead of
+
+
+def test_output_can_be_a_directory(job, capsys):
+    assert main(["slice", "-o", "."]) == 0
+
+    assert (job / "cube.gcode").read_bytes() == sliced().read_bytes()
 
 
 def test_output_directory_that_does_not_exist_is_an_error(job, capsys):
@@ -67,12 +80,12 @@ def test_output_directory_that_does_not_exist_is_an_error(job, capsys):
 def test_scale_and_rotation_are_applied(job):
     main(["scale", "z", "50%"])
     main(["slice"])
-    assert layers(job / "cube.gcode") == 50
+    assert layers(sliced()) == 50
 
     main(["scale", "100%"])
     main(["rotate", "x", "45"])
     main(["slice"])
-    assert top_z(job / "cube.gcode") == pytest.approx(28.28, abs=0.2)
+    assert top_z(sliced()) == pytest.approx(28.28, abs=0.2)
 
 
 def test_changed_settings_are_applied(job):
@@ -80,7 +93,7 @@ def test_changed_settings_are_applied(job):
 
     main(["slice"])
 
-    assert ";TYPE:Internal infill" not in (job / "cube.gcode").read_text()
+    assert ";TYPE:Internal infill" not in (sliced()).read_text()
 
 
 @pytest.mark.parametrize("kind", list(NAMES))
@@ -91,7 +104,7 @@ def test_each_profile_must_be_chosen(kind, job, capsys):
     assert main(["slice"]) == 1
 
     assert f"no {kind} is chosen; choose one with: deli {kind} <name>" in capsys.readouterr().err
-    assert not (job / "cube.gcode").exists()
+    assert not (sliced()).exists()
 
 
 def test_profile_changed_in_the_library_is_refused_until_accepted(job, tmp_path, capsys):
@@ -103,7 +116,7 @@ def test_profile_changed_in_the_library_is_refused_until_accepted(job, tmp_path,
     err = capsys.readouterr().err
     assert "has changed in your library since it was chosen" in err
     assert f"deli printer {NAMES['printer']}" in err
-    assert not (job / "cube.gcode").exists()
+    assert not (sliced()).exists()
 
     main(["printer", NAMES["printer"]])
     assert main(["slice"]) == 0
@@ -141,7 +154,7 @@ def test_setting_written_by_hand_that_the_engine_does_not_know_is_an_error(job, 
     assert main(["slice"]) == 1
 
     assert "infil" in capsys.readouterr().err
-    assert not (job / "cube.gcode").exists()
+    assert not (sliced()).exists()
 
 
 def test_part_that_does_not_fit_is_an_error(job, capsys):
@@ -161,8 +174,8 @@ def test_several_parts_slice_together_into_a_file_named_after_the_directory(job,
     assert main(["slice"]) == 0
 
     out = capsys.readouterr().out
-    assert "Sliced cube.stl x 3, other.stl to job.gcode" in out  # the fixture added one, the test two more
-    gcode = (job / "job.gcode").read_text()
+    assert "Sliced cube.stl x 3, other.stl" in out and sliced().name == "job.gcode"  # the fixture added one, the test two more
+    gcode = (sliced()).read_text()
     assert len(set(re.findall(r"; printing object .*", gcode))) == 4  # three cubes and the other part
 
 
@@ -172,7 +185,7 @@ def test_print_flow_ratio_multiplies_the_filaments_flow(job, capsys):
 
     assert main(["slice"]) == 0
 
-    assert "; extrusion_multiplier = 0.95\n" in (job / "cube.gcode").read_text()  # the filament's own is 1
+    assert "; extrusion_multiplier = 0.95\n" in (sliced()).read_text()  # the filament's own is 1
 
 
 def test_a_print_flow_ratio_that_is_not_a_ratio_is_refused(job, capsys):
@@ -186,7 +199,7 @@ def test_the_printers_footer_goes_among_the_closing_figures(job, capsys):
 
     main(["slice"])
 
-    gcode = (job / "cube.gcode").read_text()
+    gcode = (sliced()).read_text()
     assert "\n; total layers count = 100\n; estimated printing time (normal mode) = " in gcode
     assert "gcode_footer" not in gcode  # the engine never sees it
 
@@ -194,7 +207,7 @@ def test_the_printers_footer_goes_among_the_closing_figures(job, capsys):
 def test_gcode_has_no_footer_unless_the_printer_has_one(job):
     main(["slice"])
 
-    assert "total layers count" not in (job / "cube.gcode").read_text()
+    assert "total layers count" not in (sliced()).read_text()
 
 
 def test_a_footer_must_be_comments(job, capsys):

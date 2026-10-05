@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import os
 import sys
 from pathlib import Path
@@ -675,14 +676,21 @@ def _write_footer(gcode: Path, footer: str, layers: int) -> None:
 
 
 def _slice(args: argparse.Namespace) -> int:
-    doc = project.read()
+    _slice_print(project.read(), Path(args.output) if args.output else None)
+    return 0
+
+
+def _slice_print(doc, copy_to: Path | None = None) -> Path:
+    """Slice the print into its G-code in deli's cache, where `deli send` and `deli view`
+    find it, and with `copy_to` (a file, or a directory to put it in) a copy there too."""
     parts = _parts_of(doc)
     config: dict[str, str] = {}
     for kind in library.KINDS:
         config |= _accepted_profile(doc, kind)
     config |= project.settings(doc)
 
-    output = Path(args.output) if args.output else Path(project.gcode_name(doc))
+    output = project.gcode_path(doc)
+    output.parent.mkdir(parents=True, exist_ok=True)
     ini = settings.for_engine(config)
     what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
     try:
@@ -693,9 +701,9 @@ def _slice(args: argparse.Namespace) -> int:
         raise CommandError(f"cannot slice {what}: {err}") from None
 
     if footer := config.get("gcode_footer"):
-        _write_footer(Path(result.gcode_path), footer, result.layers)
-    view.remember_output(Path(result.gcode_path))
-    print(f"Sliced {what} to {result.gcode_path}")
+        _write_footer(output, footer, result.layers)
+    project.keep_gcode(output)
+    print(f"Sliced {what}")
     used = f"{result.filament_mm / 1000:.2f} m of filament"
     if result.filament_g:
         used += f", {result.filament_g:.1f} g"
@@ -704,7 +712,14 @@ def _slice(args: argparse.Namespace) -> int:
         print(f"  pauses after layer {layer}, at {round(height, 2):g} mm")
     for warning in result.warnings:
         print(f"  warning: {warning}")
-    return 0
+    if copy_to is not None:
+        target = copy_to / output.name if copy_to.is_dir() else copy_to
+        try:
+            shutil.copyfile(output, target)
+        except OSError as err:
+            raise CommandError(f"sliced, but cannot write {target}: {err.strerror}") from None
+        print(f"  G-code written to {target}")
+    return output
 
 
 def _orca_presets(args: argparse.Namespace) -> orca_install.Presets:
@@ -949,18 +964,18 @@ def _send(args: argparse.Namespace) -> int:
         if not path.is_file():
             raise CommandError(f"no such file: {args.file}")
     else:
+        # The print's own G-code, sliced again first when the print has changed since.
         _parts_of(doc)
-        path = Path(project.gcode_name(doc))
-        if not path.is_file():
-            raise CommandError(f"{path} does not exist; slice first with: deli slice")
-        if project.FILE.exists() and project.FILE.stat().st_mtime > path.stat().st_mtime:
-            raise CommandError(f"deli.toml has changed since {path} was sliced; run deli slice again, or name the file to send")
+        path = project.fresh_gcode(doc)
+        if path is None:
+            print("Slicing first: " + ("the print has changed since it was sliced" if project.gcode_path(doc).exists() else "it has not been sliced yet"))
+            path = _slice_print(doc)
 
     printer = project.chosen_profile(doc, "printer")
     printer_name = project.selected(doc, "printer").get("name")
     host = send.host_for(printer_name, printer[1].get("host_type", "") if printer else "")
 
-    print(f"Sending {path} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
+    print(f"Sending {path.name} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
 
     def progress(sent: int, total: int) -> None:
         if total > send.CHUNK:
@@ -1207,10 +1222,12 @@ def build_parser() -> argparse.ArgumentParser:
     slice_ = commands.add_parser(
         "slice",
         help="slice the print to G-code",
-        description="Slice the parts with the chosen printer, filament and process and the changed settings, "
-        "writing G-code next to deli.toml: named after the part when there is one, after the directory otherwise.",
+        description="Slice the parts with the chosen printer, filament and process and the changed settings, and "
+        "say how long it takes and how much filament it uses. The G-code is kept in deli's cache, out of the "
+        "way, for deli send (which slices by itself when the print has changed) and deli view; -o writes a "
+        "copy where you want it, to put on an SD card, say.",
     )
-    slice_.add_argument("-o", "--output", help="where to write the G-code")
+    slice_.add_argument("-o", "--output", metavar="FILE|DIR", help="also write the G-code here: a file, or a directory to put it in (. for this one)")
     slice_.set_defaults(run=_slice)
 
     view_ = commands.add_parser(

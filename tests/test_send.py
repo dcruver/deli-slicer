@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from deli import library, send
+from deli import library, project, send
 from deli.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,8 +166,18 @@ def job(tmp_path, monkeypatch):
     shutil.copy(CUBE, job / "cube.stl")
     monkeypatch.chdir(job)
     main(["add", "cube.stl"])
+    # As if sliced: where deli keeps the print's G-code, and a copy here to name.
+    gcode = project.gcode_path(project.read())
+    gcode.parent.mkdir(parents=True)
+    gcode.write_bytes(b"G28\n" * 1000)
     (job / "cube.gcode").write_bytes(b"G28\n" * 1000)
     return job
+
+
+def choose_profiles():
+    for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
+        library.load(kind, str(EXPORT))
+        main([kind, name])
 
 
 @pytest.fixture
@@ -298,21 +308,28 @@ def test_print_reports_the_printers_refusal(elegoo, monkeypatch, capsys):
 # ---------------------------------------------------------------- the file
 
 
-def test_without_sliced_gcode_says_to_slice(job, capsys):
-    (job / "cube.gcode").unlink()
+def test_without_sliced_gcode_it_slices_first(job, elegoo, capsys):
+    choose_profiles()
+    project.gcode_path(project.read()).unlink()
+    capsys.readouterr()
 
-    assert main(["send"]) == 1
+    assert main(["send"]) == 0
 
-    assert "slice first with: deli slice" in capsys.readouterr().err
+    out = capsys.readouterr().out
+    assert "Slicing first: it has not been sliced yet" in out and "Sliced cube.stl" in out
+    (_, fields), = ElegooHTTP.received
+    assert b";TYPE:" in fields["File"]  # the sliced G-code, not the fixture's G28s
 
 
-def test_gcode_older_than_the_project_file_is_refused(job, elegoo, capsys):
+def test_a_print_changed_since_it_was_sliced_is_sliced_again(job, elegoo, capsys):
+    choose_profiles()
     main(["scale", "110%"])  # changes deli.toml after the slice
+    capsys.readouterr()
 
-    assert main(["send"]) == 1
-    assert "deli.toml has changed since cube.gcode was sliced" in capsys.readouterr().err
+    assert main(["send"]) == 0
+    assert "Slicing first: the print has changed since it was sliced" in capsys.readouterr().out
 
-    assert main(["send", "cube.gcode"]) == 0  # named explicitly, it goes
+    assert main(["send", "cube.gcode"]) == 0  # a file named is sent as it is
 
 
 # ---------------------------------------------------------------- other hosts

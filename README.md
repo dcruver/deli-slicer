@@ -14,8 +14,7 @@ deli add bracket.stl --count 2
 deli set infill 20%
 deli scale x 110%
 deli view
-deli slice
-deli send --print
+deli send --print                                   # slices first if the print has changed
 ```
 
 ![deli view in a browser: a sliced 3DBenchy on the Centauri Carbon's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
@@ -267,9 +266,14 @@ deli rotate lid 45
 deli move lid 60 80                             # put it there; the other parts are arranged around it
 deli pause 30                                   # pause once layer 30 is done: drop in a magnet, or change the filament
 deli view                                       # shows the parts on the bed in your browser, live; the shell stays free
-deli slice                                      # writes the G-code next to deli.toml; the view then shows it, layer by layer
-deli send                                       # uploads it; add --print to start printing
+deli slice                                      # how long it takes and how much filament; the view then shows it layer by layer
+deli send                                       # uploads it, slicing first if needed; add --print to start printing
 ```
+
+The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
+`deli send` and `deli view` find it there, and `deli send` slices again by itself when
+the print has changed since. `deli slice -o FILE` (or `-o DIR`, `-o .` for here) also
+writes a copy where you want it, to put on an SD card or open in another program.
 
 Supports are PrusaSlicer's automatic ones. `deli supports on` uses the style the
 process came with (Orca's tuning carries over: organic for the P1S, grid for the
@@ -359,9 +363,9 @@ check the file arrived and start it from the printer's own screen.
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli move [part] <x> <y>` | where the part's middle goes on the bed; `z -0.25` sinks it, `auto` has it arranged again. `deli translate` is the same command |
 | `deli pause [off] [layer ...]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
-| `deli slice [-o FILE]` | slice to G-code |
+| `deli slice [-o FILE\|DIR]` | slice, and say how long it takes and how much filament; `-o` writes a copy of the G-code |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
-| `deli send [FILE] [--print]` | upload to the printer in your config |
+| `deli send [FILE] [--print]` | upload to the printer in your config, slicing first if the print has changed |
 | `deli config [key] [value]` | your default printer, and your printers' addresses and default filament and process |
 | `deli completion bash\|zsh\|fish` | shell completion |
 
@@ -389,7 +393,8 @@ Things that a user would notice, roughly in the order they matter:
   is all it says: only the Centauri Carbon has been printed on, and only it and the
   Bambu Lab P1S have been compared with Orca's own output.
 - **Bambu printers can't be sent to.** `deli send` does not speak Bambu's LAN or cloud
-  protocols; copy the G-code over by hand (SD card, or another program's send).
+  protocols; write the G-code out with `deli slice -o .` and copy it over by hand (SD
+  card, or another program's send).
 - **No Windows wheel.** Linux (x86-64, ARM64) and macOS (Apple Silicon, Intel) have
   wheels; on Windows, `deli view`'s background server needs porting first.
 - **Settings apply to the whole print**, not to one part.

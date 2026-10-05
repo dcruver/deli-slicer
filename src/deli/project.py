@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import shutil
 from pathlib import Path
 
 import tomlkit
@@ -101,11 +104,53 @@ def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple[str, list[float], list
 
 
 def gcode_name(doc: tomlkit.TOMLDocument) -> str:
-    """Where `slice` writes: named after the part when there is one, after the directory otherwise."""
+    """What `slice` calls the G-code: after the part when there is one, after the directory otherwise."""
     found = parts(doc)
     if len(found) == 1:
         return Path(found[0]["file"]).with_suffix(".gcode").name
     return f"{Path.cwd().resolve().name}.gcode"
+
+
+def _gcode_cache() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "deli" / "gcode"
+
+
+def gcode_path(doc: tomlkit.TOMLDocument) -> Path:
+    """Where this directory's print keeps its G-code: in deli's cache, out of the way, one
+    folder per print directory. It can always be made again by slicing."""
+    here = Path.cwd().resolve()
+    return _gcode_cache() / f"{here.name}-{hashlib.sha256(str(here).encode()).hexdigest()[:12]}" / gcode_name(doc)
+
+
+def keep_gcode(path: Path) -> None:
+    """After a slice to `path`: the print keeps that one file only, its folder notes which
+    directory it is for, and the folders of print directories that are gone are removed."""
+    for other in path.parent.glob("*.gcode"):
+        if other != path:
+            other.unlink(missing_ok=True)
+    (path.parent / "directory").write_text(str(Path.cwd().resolve()))
+    for folder in _gcode_cache().iterdir():
+        try:
+            gone = not Path((folder / "directory").read_text()).is_dir()
+        except OSError:
+            continue
+        if gone:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+def fresh_gcode(doc: tomlkit.TOMLDocument) -> Path | None:
+    """The print's G-code, unless `deli.toml` or a part's file has changed since it was
+    sliced: it is then no longer the print."""
+    found = parts(doc)
+    path = gcode_path(doc)
+    if not found:
+        return None
+    try:
+        sliced = path.stat().st_mtime
+        sources = (FILE, *(Path(part["file"]) for part in found))
+        return path if all(source.stat().st_mtime <= sliced for source in sources) else None
+    except OSError:
+        return None
 
 
 def settings(doc: tomlkit.TOMLDocument) -> dict[str, str]:

@@ -179,7 +179,11 @@ def test_a_print_for_a_filament_other_than_the_default_is_sent_without_comment(h
     main(["printer", MK3])
     main(["filament", ABS])
     main(["add", "cube.stl"])
-    Path("cube.gcode").write_text("G28\n")
+    from deli import project
+
+    gcode = project.gcode_path(project.read())
+    gcode.parent.mkdir(parents=True)
+    gcode.write_text("G28\n")
     capsys.readouterr()
 
     assert main(["send", "--print"]) == 1  # only because the address cannot be reached

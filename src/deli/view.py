@@ -57,47 +57,13 @@ def _version() -> str:
     return hashlib.sha256("\n".join(stamps).encode()).hexdigest()[:16]
 
 
-def _output_record() -> Path:
-    """Where it is noted that `slice -o` last wrote this directory's G-code somewhere other than the usual place."""
-    state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "deli"
-    return state / f"sliced-{hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:16]}"
-
-
-def remember_output(gcode: Path) -> None:
-    """Called by `slice` with the file it wrote, so that the viewer finds G-code written elsewhere with `-o`."""
-    record = _output_record()
-    if gcode.resolve() == Path(project.gcode_name(project.read())).resolve():
-        record.unlink(missing_ok=True)
-    else:
-        record.parent.mkdir(parents=True, exist_ok=True)
-        record.write_text(str(gcode.resolve()))
-
-
 def _gcode_path(doc) -> Path:
-    """Where this print's G-code is: where `slice -o` last put it, if it is still there, else the usual place."""
-    try:
-        elsewhere = Path(_output_record().read_text())
-        if elsewhere.is_file():
-            return elsewhere
-    except OSError:
-        pass
-    return Path(project.gcode_name(doc))
+    return project.gcode_path(doc)
 
 
 def _gcode(doc) -> Path | None:
-    """The G-code `deli slice` wrote for this print, unless `deli.toml` or a part's file
-    has changed since: it is then no longer a picture of the print."""
-    found = project.parts(doc)
-    if not found:
-        return None
-    path = _gcode_path(doc)
-    try:
-        sliced = path.stat().st_mtime
-        sources = (project.FILE, *(Path(part["file"]) for part in found))
-        return path if all(source.stat().st_mtime <= sliced for source in sources) else None
-    except OSError:
-        return None
-
+    """The G-code `deli slice` wrote for this print, unless the print has changed since."""
+    return project.fresh_gcode(doc)
 
 def _bed(doc) -> tuple[list[list[float]], float, str | None]:
     """The chosen printer's bed outline, height and name; a plain bed when there is none."""

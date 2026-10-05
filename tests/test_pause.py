@@ -86,7 +86,9 @@ def test_slice_writes_the_printers_pause_before_the_next_layer(job, capsys):
     assert main(["slice"]) == 0
 
     assert "  pauses after layer 10, at 2 mm" in capsys.readouterr().out.splitlines()
-    gcode = (job / "cube.gcode").read_text()
+    from deli import project
+
+    gcode = project.gcode_path(project.read()).read_text()
     before, after = gcode.split(";PAUSE_PRINT\n")
     assert before.count(";LAYER_CHANGE") == 11  # ten layers printed, and the move up to the eleventh
     assert re.findall(r"^;Z:([\d.]+)$", before, re.M)[-1] == "2.2"
