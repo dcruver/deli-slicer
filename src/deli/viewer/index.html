@@ -16,6 +16,16 @@
   #info .options { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; }
   #info label { cursor: pointer; display: flex; align-items: center; gap: 0.5em; }
   #info input { margin: 0; }
+  #info .tools { display: flex; gap: 8px; align-items: center; }
+  #info .tools:not(:first-child) { margin-top: 8px; }
+  #info button { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px;
+                 padding: 2px 10px; cursor: pointer; }
+  #info button:hover { border-color: #8a9099; }
+  #info button[aria-pressed="true"] { background: #3e8fd9; border-color: #3e8fd9; color: #fff; }
+  #info .units { display: inline-flex; }
+  #info .units button { border-radius: 0; }
+  #info .units button:first-child { border-radius: 4px 0 0 4px; }
+  #info .units button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
   #info .swatch { display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.5em; border-radius: 2px; }
   #layers { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
             align-items: center; padding: 8px 14px; background: rgba(27, 30, 35, 0.85);

@@ -5,9 +5,11 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
-- `deli view` measures: tick Measure, or press M, and click two points on the part or the
-  sliced print to see the distance between them and how far apart they are along x, y and
-  z. On the part a point snaps to a nearby corner. Esc clears.
+- `deli view` measures: press the Measure button, or M, and click two points on the part or
+  the sliced print to see the distance between them and how far apart they are along x, y
+  and z, in millimetres or inches. After the first click the line follows the pointer until
+  the second. On the part a point snaps to a nearby corner. Esc clears; a right-click clears and
+  turns measuring off.
 
 ## 0.4.3 (2026-10-06)
 

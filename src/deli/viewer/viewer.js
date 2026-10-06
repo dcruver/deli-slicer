@@ -203,7 +203,9 @@ async function drawToolpaths(roles, pauses) {
 function options() {
   return '<div class="options">'
     + (paths ? `<label><input type="checkbox" id="travel"${showTravel ? ' checked' : ''}> Show travel moves</label>` : '')
-    + `<label><input type="checkbox" id="measuring"${measuring ? ' checked' : ''}> Measure <span class="dim">(M)</span></label></div>`;
+    + `<div class="tools"><button type="button" id="measuring" title="Measure (M)" aria-pressed="${measuring}">Measure</button>`
+    + `<span class="units">${Object.keys(UNITS).map(name =>
+        `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div></div>`;
 }
 
 function showLayers() {
@@ -214,20 +216,33 @@ function showLayers() {
     + (paths.pauses.includes(layer) ? ', then a pause' : '');
 }
 layerSlider.addEventListener('input', showLayers);
-info.addEventListener('change', event => {  // the info box is rewritten on every redraw, so the box listens for its checkboxes
-  if (event.target.id === 'measuring') setMeasuring(event.target.checked);
+// The info box is rewritten on every redraw, so the box listens for its checkbox and buttons.
+info.addEventListener('click', event => {
+  const button = event.target.closest('button');
+  if (button?.id === 'measuring') setMeasuring(!measuring);
+  else if (button?.dataset.units) setUnits(button.dataset.units);
+});
+info.addEventListener('change', event => {
   if (event.target.id !== 'travel') return;
   showTravel = event.target.checked;
   if (paths) paths.travel.visible = showTravel;
 });
 
-// Measuring: while it is on, a click on the part or on the sliced print marks a point and a
-// second click another, and the line between them is labelled with its length and how far
-// apart the points are along each axis. On the part, a point snaps to a corner of the triangle
-// clicked when one is within a few pixels. A third click starts again; Esc clears. The points
+// Measuring: while it is on, a click on the part or on the sliced print pins one end of a line,
+// which then follows the pointer over what is drawn until a second click pins the other, and
+// the line is labelled with its length and how far apart its ends are along each axis, in
+// millimetres or inches. On the part, an end snaps to a corner of the triangle under the
+// pointer when one is within a few pixels. A third click starts again; Esc clears; a right-click
+// clears and turns measuring off. The points
 // are dropped when the print changes, since what they were on may have moved.
 let measuring = false;
 const picks = [];
+let loose = null;  // where the free end of the line is, between the first click and the second
+let pointer = null;  // where the pointer has moved to since the free end last followed it
+const UNITS = { mm: { per: 1, places: 2 }, in: { per: 25.4, places: 3 } };
+let units = 'mm';
+try { units = UNITS[localStorage.getItem('units')] ? localStorage.getItem('units') : 'mm'; } catch {}
+const length = n => { const { per, places } = UNITS[units]; return (n / per).toFixed(places).replace(/\.?0+$/, ''); };
 const SNAP_PIXELS = 10;
 const raycaster = new THREE.Raycaster();
 const measured = new THREE.Group();
@@ -273,23 +288,25 @@ function pickAt(x, y) {
 function drawMeasurement() {
   for (const drawn of measured.children) drawn.geometry.dispose();
   measured.clear();
-  measurement.hidden = !picks.length;
-  if (!picks.length) return;
-  const geometry = new THREE.BufferGeometry().setFromPoints(picks);
+  const ends = loose ? [picks[0], loose] : picks;
+  measurement.hidden = !ends.length;
+  if (!ends.length) return;
+  const geometry = new THREE.BufferGeometry().setFromPoints(ends);
   const shown = [new THREE.Points(geometry, dot)];
-  if (picks.length === 2) shown.push(new THREE.Line(geometry.clone(), ruler));
+  if (ends.length === 2) shown.push(new THREE.Line(geometry.clone(), ruler));
   for (const drawn of shown) { drawn.renderOrder = 1; measured.add(drawn); }  // over the part, so never hidden by it
-  const [a, b] = picks;
+  const [a, b] = ends;
   measurement.innerHTML = b
-    ? `<b>${mm(a.distanceTo(b))} mm</b><br>` + ['x', 'y', 'z'].map(axis =>
-        `<span class="dim">Δ${axis}</span> ${mm(Math.abs(b[axis] - a[axis]))}`).join(' ')
-    : ['x', 'y', 'z'].map(axis => `<span class="dim">${axis}</span> ${mm(a[axis])}`).join(' ');
+    ? `<b>${length(a.distanceTo(b))} ${units}</b><br>` + ['x', 'y', 'z'].map(axis =>
+        `<span class="dim">Δ${axis}</span> ${length(Math.abs(b[axis] - a[axis]))}`).join(' ')
+    : ['x', 'y', 'z'].map(axis => `<span class="dim">${axis}</span> ${length(a[axis])}`).join(' ') + ` ${units}`;
   placeMeasurement();
 }
 
 function placeMeasurement() {  // beside the middle of the line, or the one point, wherever the camera has gone
-  if (!picks.length) return;
-  const s = onScreen(picks.length === 2 ? picks[0].clone().lerp(picks[1], 0.5) : picks[0]);
+  const ends = loose ? [picks[0], loose] : picks;
+  if (!ends.length) return;
+  const s = onScreen(ends.length === 2 ? ends[0].clone().lerp(ends[1], 0.5) : ends[0]);
   measurement.hidden = s.behind;
   measurement.style.left = `${s.x}px`;
   measurement.style.top = `${s.y}px`;
@@ -297,28 +314,55 @@ function placeMeasurement() {  // beside the middle of the line, or the one poin
 
 function clearMeasurement() {
   picks.length = 0;
+  loose = null;
   drawMeasurement();
 }
 
 function setMeasuring(on) {
   measuring = on;
   renderer.domElement.style.cursor = on ? 'crosshair' : '';
-  const box = document.getElementById('measuring');
-  if (box) box.checked = on;
+  document.getElementById('measuring')?.setAttribute('aria-pressed', on);
   if (!on) clearMeasurement();
 }
 
-// A click marks a point; a drag still turns the view.
+function setUnits(name) {
+  units = name;
+  try { localStorage.setItem('units', name); } catch {}
+  for (const button of info.querySelectorAll('[data-units]')) button.setAttribute('aria-pressed', button.dataset.units === name);
+  drawMeasurement();
+}
+
+// Once a frame at most, since picking among a large print's extrusions takes a while.
+function followPointer() {
+  if (!pointer) return;
+  loose = pickAt(...pointer);
+  pointer = null;
+  drawMeasurement();
+}
+
+// A click marks a point and a right-click stops measuring; a drag, with either button, still
+// turns or moves the view.
 let pressedAt = null;
 renderer.domElement.addEventListener('pointerdown', event => {
-  pressedAt = event.button === 0 ? [event.clientX, event.clientY] : null;
+  pressedAt = [event.clientX, event.clientY];
 });
 renderer.domElement.addEventListener('pointerup', event => {
   if (!measuring || !pressedAt || Math.hypot(event.clientX - pressedAt[0], event.clientY - pressedAt[1]) > 4) return;
+  if (event.button === 2) return setMeasuring(false);
+  if (event.button !== 0) return;
   const point = pickAt(event.clientX, event.clientY);
   if (!point) return;
   if (picks.length === 2) picks.length = 0;
   picks.push(point.clone());
+  loose = pointer = null;
+  drawMeasurement();
+});
+renderer.domElement.addEventListener('pointermove', event => {
+  if (measuring && picks.length === 1 && !event.buttons) pointer = [event.clientX, event.clientY];
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+  if (!loose) return;
+  loose = pointer = null;
   drawMeasurement();
 });
 addEventListener('keydown', event => {
@@ -416,6 +460,6 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-renderer.setAnimationLoop(() => { controls.update(); placeMeasurement(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); followPointer(); placeMeasurement(); renderer.render(scene, camera); });
 refresh();
 setInterval(refresh, 500);

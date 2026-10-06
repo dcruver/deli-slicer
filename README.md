@@ -402,9 +402,11 @@ layer the print does not have.
 follows the print as you change it. After `deli slice` it shows the G-code instead of
 the parts: every extrusion, supports included, coloured by what it is for, with a
 slider to go through the layers. The colours turn lighter where the print pauses, and
-a box in the legend shows the travel moves. To measure, tick Measure (or press M) and
-click two points on the part or the print: the page shows the distance between them and
-along each axis, snapping to a corner of the part when you click near one; Esc clears. It goes back to the parts as soon as the
+a box in the legend shows the travel moves. To measure, press Measure (or M) and click
+two points on the part or the print: the line follows the pointer from the first, and the
+page shows the distance between them and along each axis, in mm or inches as you choose,
+snapping to a corner of the part when you click near one. Esc clears; a right-click
+clears and stops measuring. It goes back to the parts as soon as the
 print changes. The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
 `deli slice` draws one into the G-code for the printer's screen.
