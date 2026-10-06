@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.6.1 (2026-10-06)
 
 - `deli view`'s speed and flow colours are the G-code's. Read move by move, small arcs and
   the moves where the printer speeds up or slows down showed flow well over what the
