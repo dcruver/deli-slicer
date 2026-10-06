@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.5.0 (2026-10-06)
 
 - `deli view`, on a sliced print: the legend says how long each kind of extrusion and
   travel take, and clicking one hides or shows it; "Colour by" colours the print by speed,

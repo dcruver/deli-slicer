@@ -69,17 +69,17 @@ You need Python 3.12 or newer and `uv` (or `pipx`).
 
 Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
 platform with the engine inside; nothing else needs building. Install the one for your
-machine (for 0.4.3):
+machine (for 0.5.0):
 
 ```
 # Linux, x86-64 (most PCs)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.3/deli-0.4.3-cp312-abi3-manylinux_2_28_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.5.0/deli-0.5.0-cp312-abi3-manylinux_2_28_x86_64.whl
 # Linux, ARM64 (Raspberry Pi 4/5 on a 64-bit OS, ARM servers)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.3/deli-0.4.3-cp312-abi3-manylinux_2_28_aarch64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.5.0/deli-0.5.0-cp312-abi3-manylinux_2_28_aarch64.whl
 # macOS, Apple Silicon (M1 and later)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.3/deli-0.4.3-cp312-abi3-macosx_11_0_arm64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.5.0/deli-0.5.0-cp312-abi3-macosx_11_0_arm64.whl
 # macOS, Intel
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.3/deli-0.4.3-cp312-abi3-macosx_10_15_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.5.0/deli-0.5.0-cp312-abi3-macosx_10_15_x86_64.whl
 ```
 
 (`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
