@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.4.2 (2026-10-05)
 
 - `deli setup` tells a Klipper printer's G-code to report the layer count and the
   current layer, so Mainsail and Fluidd show them, unless the profile already does.
