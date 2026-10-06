@@ -8,6 +8,11 @@ shell and a file you can read, with nothing else to open. Slicing
 is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs to be
 installed.
 
+A folder of models is the project, and there is nothing to save: every command
+updates `deli.toml` as it goes. Come back months later, `cd` into the folder, and
+`deli send --print` prints the same parts, placed the same way, with the same profiles
+and settings.
+
 ![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
 
 ```
