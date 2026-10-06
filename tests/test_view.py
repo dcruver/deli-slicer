@@ -28,10 +28,13 @@ def job(tmp_path, monkeypatch):
     return job
 
 
+TOKEN = "test-token"
+
+
 @pytest.fixture
 def url():
     """A running viewer server; the address it listens on."""
-    server = view.server()
+    server = view.server(token=TOKEN)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -148,6 +151,22 @@ def test_state_names_the_gcode_once_the_print_is_sliced(url):
     assert state["version"] != before["version"]
 
 
+def test_state_says_which_slicing_made_the_gcode(url):
+    sliced_cube()
+    first = json.loads(get(url + "/state")[2])["sliced"]
+
+    main(["rotate", "x", "90"])
+    state = json.loads(get(url + "/state")[2])
+    assert "sliced" not in state and state["stale"]  # out of date
+    main(["rotate", "x", "0"])
+    state = json.loads(get(url + "/state")[2])
+    assert state["sliced"] == first and "stale" not in state  # current again, but no new slicing
+
+    time.sleep(0.01)
+    main(["slice"])
+    assert json.loads(get(url + "/state")[2])["sliced"] != first
+
+
 def test_state_has_the_overhang_angle_supports_go_by(url):
     sliced_cube()
 
@@ -234,6 +253,107 @@ def test_broken_project_file_is_reported_not_fatal(url, job):
     assert get(url + "/mesh")[0] == 500
 
 
+def post(url: str, args, token: str | None = TOKEN, origin: str | None = None, path: str = "/run") -> tuple[int, bytes]:
+    """A command sent to the viewer's /run (or /slice), as the page sends it."""
+    request = urllib.request.Request(url + path, data=json.dumps({"args": args}).encode(), method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Origin", origin or url)
+    if token:
+        request.add_header("X-Deli-Token", token)
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+
+
+def test_the_page_runs_its_tools_commands(url):
+    main(["add", "cube.stl"])
+
+    status, body = post(url, ["move", "cube", "40.5", "60"])
+
+    assert status == 200
+    result = json.loads(body)
+    assert result["code"] == 0 and "40.5, 60" in result["output"]
+    assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [40.5, 60]
+    assert json.loads(post(url, ["rotate", "cube", "x", "90"])[1])["code"] == 0
+    assert json.loads(post(url, ["pause", "3"])[1])["code"] == 0
+    assert json.loads(get(url + "/state")[2])["pauses"] == [3]
+
+
+def test_a_command_that_fails_says_why(url):
+    result = json.loads(post(url, ["move", "nothing", "1", "2"])[1])
+
+    assert result["code"] != 0 and result["output"].startswith("deli: ")
+
+
+def test_only_the_tools_commands_can_be_run(url):
+    main(["add", "cube.stl"])
+
+    for args in (["slice"], ["send", "--print"], ["config", "printer", "x"], [], "move cube 1 2", ["move", 1, 2]):
+        assert post(url, args)[0] == 400
+
+    assert not Path("deli.toml").read_text().count("at =")
+
+
+def test_no_other_page_can_run_commands(url):
+    main(["add", "cube.stl"])
+    before = Path("deli.toml").read_text()
+
+    assert post(url, ["move", "cube", "1", "2"], token=None)[0] == 403
+    assert post(url, ["move", "cube", "1", "2"], token="guessed")[0] == 403
+    assert post(url, ["move", "cube", "1", "2"], origin="http://evil.example")[0] == 403
+
+    assert Path("deli.toml").read_text() == before
+
+
+def test_the_page_slices_in_a_process_of_its_own(url):
+    for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
+        library.load(kind, str(EXPORT))
+        main([kind, name])
+    main(["add", "cube.stl"])
+
+    status, body = post(url, None, path="/slice")
+    assert status == 202 and json.loads(body)["running"]
+    assert post(url, None, path="/slice")[0] == 409  # one at a time
+
+    deadline = time.monotonic() + 120
+    while (slicing := json.loads(get(url + "/state")[2])["slicing"])["running"]:
+        assert time.monotonic() < deadline
+        time.sleep(0.2)
+    assert slicing["code"] == 0, slicing["output"]
+    assert slicing["output"].startswith("Sliced cube.stl")
+    assert json.loads(get(url + "/state")[2])["gcode"] == "cube.gcode"
+
+
+def test_a_slice_that_fails_says_why(url):
+    main(["add", "cube.stl"])  # no profiles chosen
+
+    post(url, None, path="/slice")
+    while (slicing := json.loads(get(url + "/state")[2])["slicing"])["running"]:
+        time.sleep(0.1)
+
+    assert slicing["code"] != 0 and slicing["output"].startswith("deli: ")
+
+
+def test_no_other_page_can_slice(url):
+    main(["add", "cube.stl"])
+
+    assert post(url, None, path="/slice", token="guessed")[0] == 403
+    assert post(url, None, path="/slice", origin="http://evil.example")[0] == 403
+    assert "slicing" not in json.loads(get(url + "/state")[2])
+
+
+def test_without_a_token_the_page_can_only_look():
+    server = view.server()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert post(f"http://127.0.0.1:{server.server_address[1]}", ["pause", "3"], token="")[0] == 403
+    finally:
+        server.shutdown()
+
+
 @pytest.fixture
 def background(tmp_path, monkeypatch):
     """The records of running viewers kept in a directory of the test's own, and no viewer left running."""
@@ -246,10 +366,13 @@ def test_view_serves_in_the_background_and_returns(background, job, capsys):
     assert main(["view", "--no-browser"]) == 0
 
     first, hint = capsys.readouterr().out.splitlines()
-    address = first.removeprefix("Viewing the print in this directory at ")
+    address, token = first.removeprefix("Viewing the print in this directory at ").split("?t=")
     assert address.startswith("http://127.0.0.1:") and "deli view --stop" in hint
     assert get(address + "directory")[2].decode() == str(job)
     assert json.loads(get(address + "state")[2])["parts"] == []
+    main(["add", "cube.stl"])
+    assert post(address.rstrip("/"), ["move", "cube", "50", "60"], token=token)[0] == 200  # the page's address lets it run commands
+    assert json.loads(get(address + "state")[2])["parts"][0]["at"] == [50, 60]
 
 
 def test_view_again_finds_the_viewer_already_running(background, capsys):

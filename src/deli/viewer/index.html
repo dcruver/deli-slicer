@@ -21,6 +21,7 @@
   #info button { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px;
                  padding: 2px 10px; cursor: pointer; }
   #info button:hover { border-color: #8a9099; }
+  #info #sliceNow { background: #3e8fd9; border-color: #3e8fd9; color: #fff; padding: 0 10px; }
   #info button[aria-pressed="true"] { background: #3e8fd9; border-color: #3e8fd9; color: #fff; }
   #info .units { display: inline-flex; }
   #info .units button { border-radius: 0; }
@@ -45,10 +46,7 @@
   #layers { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
             align-items: center; padding: 8px 14px; background: rgba(27, 30, 35, 0.85);
             border: 1px solid #3a3f48; border-radius: 6px; white-space: nowrap; }
-  #section { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
-             align-items: center; padding: 8px 14px; background: rgba(27, 30, 35, 0.85);
-             border: 1px solid #3a3f48; border-radius: 6px; white-space: nowrap; }
-  #layers[hidden], #section[hidden], #command[hidden], #command [hidden] { display: none; }
+  #layers[hidden], #layers [hidden], #command[hidden], #command [hidden] { display: none; }
   #command { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); max-width: min(90vw, 44em);
              padding: 8px 12px; background: rgba(27, 30, 35, 0.92); border: 1px solid #3a3f48; border-radius: 6px; }
   #commandNote { color: #9aa0a8; }
@@ -57,7 +55,11 @@
   #layers button, #command button { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48;
              border-radius: 4px; padding: 2px 10px; cursor: pointer; }
   #layers button:hover, #command button:hover { border-color: #8a9099; }
-  #layer, #cut { width: min(40vw, 28em); }
+  #command button.primary { background: #3e8fd9; border-color: #3e8fd9; color: #fff; }
+  #command button:disabled { opacity: 0.6; cursor: wait; }
+  #commandOutput { margin: 6px 0 0; font: 13px/1.4 ui-monospace, monospace; color: #d8dbe0; white-space: pre-wrap; }
+  #commandOutput.error { color: #ff8a80; }
+  #layer { width: min(40vw, 28em); }
   #info #overhangNote { margin-bottom: 8px; }
   #info [hidden] { display: none; }
   #measurement { position: fixed; transform: translate(14px, -50%); padding: 4px 8px; pointer-events: none;
@@ -71,11 +73,11 @@
 <body>
 <div id="info">Connecting to deli…</div>
 <div id="layers" hidden><input type="range" id="layer" min="1" max="1" list="pauseTicks"><span id="layerLabel"></span>
-  <label><input type="checkbox" id="onlyLayer"> only this layer</label>
+  <label id="onlyLayerBox"><input type="checkbox" id="onlyLayer"> only this layer</label>
   <button type="button" id="pauseHere" title="The command to pause after this layer">Pause here</button></div>
 <div id="command" hidden><div id="commandNote"></div><div class="line"><code id="commandText"></code>
-  <button type="button" id="copyCommand">Copy</button><button type="button" id="closeCommand" title="Close (Esc)">×</button></div></div>
-<div id="section" class="bar" hidden><input type="range" id="cut" min="0" max="1" step="0.1"><span id="cutLabel"></span></div>
+  <button type="button" id="applyCommand" class="primary">Apply</button><button type="button" id="copyCommand">Copy</button>
+  <button type="button" id="closeCommand" title="Close (Esc)">×</button></div><pre id="commandOutput"></pre></div>
 <datalist id="pauseTicks"></datalist>
 <div id="measurement" hidden></div>
 <script type="module" src="./viewer.js"></script>

@@ -3,6 +3,19 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- **Changed:** `deli view` can change a print, through deli's own commands only: Move, Lay
+  flat and Pause here show the `deli move`, `deli rotate` or `deli pause` they make, and
+  Apply runs it, as the shell would, and shows what it printed. Copy is still there. Only
+  the page at the address `deli view` prints, which now carries a token, can apply.
+- **Changed:** `deli view` has one view. Once sliced, the extrusions and the model are shown
+  together, the model faint or hidden (Model in the legend), and coming up by itself for
+  Move, Lay flat and Overhangs; the layer slider cuts the model at the same height. When
+  the print has changed since it was sliced, the page says so.
+- `deli view` slices: Slice, where the G-code is missing or out of date, runs `deli slice`
+  (in a process of its own) and shows what it printed. Sending stays in the shell.
+
 ## 0.5.0 (2026-10-06)
 
 - `deli view`, on a sliced print: the legend says how long each kind of extrusion and

@@ -7,15 +7,23 @@ wrote, supports included, for as long as nothing has changed since. The page ask
 `/state` regularly and redraws when its `version` changes, so an edit or a slice in
 the shell shows up in the browser.
 
+The page changes a print only by running deli's own commands, the ones its tools show
+(`deli move`, `deli rotate`, `deli pause`), through `/run`, and slices it with `/slice`,
+which runs `deli slice` in a process of its own: POSTs that must carry the token the
+page's address was given, from the page itself, so that no other web page can.
+
 The server runs in the background, so `deli view` gives the shell back at once: `start`
 opens the listening socket and hands it to a detached process, which `serve`s it until
 the page has been closed for a while or `stop` ends it. A small record in the runtime
-directory says which process and port serve which directory.
+directory says which process, port and token serve which directory.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import hmac
+import io
 import http.client
 import http.server
 import json
@@ -26,7 +34,9 @@ import socket
 import struct
 import subprocess
 import sys
+import secrets
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -37,6 +47,47 @@ PAGES = Path(__file__).parent / "viewer"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
+RUNNABLE = {"move", "rotate", "pause"}  # the commands the page's tools may run
+_TOKEN = "DELI_VIEW_TOKEN"  # how `start` hands the background process its token: not on its command line, which others can read
+_running = threading.Lock()  # one command at a time: each takes over stdout and stderr while it runs
+
+
+class Slicing:
+    """`deli slice` run for the page, in a process of its own: a slice can take a while, and
+    the engine slicing should not be able to take the viewer down with it."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        self.output = ""
+        self.code: int | None = None
+        self.process = subprocess.Popen(
+            [sys.executable, "-c", "import sys; from deli.cli import main; sys.exit(main())", "slice"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self) -> None:
+        for line in self.process.stdout:
+            self.output += line
+        self.code = self.process.wait()  # set last, so that a slice that has ended has all its output
+
+    def describe(self) -> dict:
+        return {"running": self.code is None, "code": self.code, "output": self.output,
+                "seconds": round(time.monotonic() - self.started)}
+
+
+def run(args: list[str]) -> tuple[int, str]:
+    """Run a deli command for the page, here in the print's directory, as the shell would;
+    its exit status and what it printed."""
+    from deli.cli import main  # here, as cli imports this module
+
+    output = io.StringIO()
+    with _running, contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        try:
+            code = main(args)
+        except SystemExit as usage:  # argparse rejected the arguments
+            code = usage.code if isinstance(usage.code, int) else 1
+    return code, output.getvalue()
 
 
 def _version() -> str:
@@ -130,7 +181,10 @@ def state() -> dict:
             pass
         if gcode := _gcode(doc):
             result["gcode"] = gcode.name
+            result["sliced"] = str(gcode.stat().st_mtime_ns)  # which slicing made it
             result["roles"] = _engine.extrusion_roles()
+        elif _gcode_path(doc).exists():
+            result["stale"] = True  # sliced, but the print has changed since
     except project.ProjectError as err:
         result["error"] = str(err)
     return result
@@ -178,7 +232,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/directory":  # which print this viewer shows, for `running`
                 self._send(200, "text/plain; charset=utf-8", str(Path.cwd()).encode())
             elif path == "/state":
-                self._send(200, "application/json", json.dumps(state()).encode())
+                described = state()
+                if slicing := getattr(self.server, "slicing", None):
+                    described["slicing"] = slicing.describe()
+                self._send(200, "application/json", json.dumps(described).encode())
             elif path == "/mesh":
                 self._send(200, "application/octet-stream", mesh())
             elif path == "/toolpaths":
@@ -187,6 +244,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_page("index.html" if path == "/" else path.lstrip("/"))
         except (project.ProjectError, settings.SettingError, RuntimeError) as err:
             self._send(500, "text/plain; charset=utf-8", str(err).encode())
+
+    def _from_the_page(self) -> bool:
+        """Any web page can send to localhost, so only this page's own host and origin (no
+        other site, nor another name made to point here), with the token only its address has."""
+        port = self.server.server_address[1]
+        own = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        token = getattr(self.server, "token", None)
+        return bool(
+            token
+            and self.headers.get("Host") in own
+            and self.headers.get("Origin") in {f"http://{host}" for host in own}
+            and hmac.compare_digest(self.headers.get("X-Deli-Token", ""), token)
+        )
+
+    def do_POST(self):
+        self.server.asked = time.monotonic()
+        if self.path not in ("/run", "/slice") or not self._from_the_page():
+            self._send(403, "text/plain; charset=utf-8", b"forbidden")
+            return
+        if self.path == "/slice":
+            slicing = getattr(self.server, "slicing", None)
+            if slicing and slicing.code is None:
+                self._send(409, "text/plain; charset=utf-8", b"already slicing")
+                return
+            self.server.slicing = Slicing()
+            self._send(202, "application/json", json.dumps(self.server.slicing.describe()).encode())
+            return
+        try:
+            args = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 10_000)))["args"]
+            if not (isinstance(args, list) and args and all(isinstance(a, str) for a in args) and args[0] in RUNNABLE):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self._send(400, "text/plain; charset=utf-8", f"only {', '.join(sorted(RUNNABLE))} can be run from the page".encode())
+            return
+        code, output = run(args)
+        self._send(200, "application/json", json.dumps({"code": code, "output": output}).encode())
 
     def _send_page(self, name: str) -> None:
         page = (PAGES / name).resolve()
@@ -204,40 +297,50 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def server(port: int = 0) -> http.server.ThreadingHTTPServer:
-    """A server for the viewer on localhost, not yet serving. Port 0 picks a free one."""
-    return http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+def server(port: int = 0, token: str | None = None) -> http.server.ThreadingHTTPServer:
+    """A server for the viewer on localhost, not yet serving. Port 0 picks a free one. Without
+    a token, the page can only look."""
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    httpd.token = token
+    return httpd
+
+
+def address(port: int, token: str | None) -> str:
+    """The page's address, with the token that lets it run commands."""
+    return f"http://127.0.0.1:{port}/" + (f"?t={token}" if token else "")
 
 
 def _record() -> Path:
-    """Where the viewer running for this directory is noted: its process and its port."""
+    """Where the viewer running for this directory is noted: its process, port and token."""
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / "deli"
     return runtime / f"view-{hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:16]}.json"
 
 
-def running() -> tuple[int, int] | None:
-    """The process and port of the viewer running in the background for this directory, if
-    there is one. The viewer itself is asked, so a record left behind by one that died, whose
-    port something else may have taken since, does not count."""
+def running() -> tuple[int, int, str | None] | None:
+    """The process, port and token of the viewer running in the background for this
+    directory, if there is one. The viewer itself is asked, so a record left behind by one
+    that died, whose port something else may have taken since, does not count."""
     try:
         record = json.loads(_record().read_text())
         with urllib.request.urlopen(f"http://127.0.0.1:{record['port']}/directory", timeout=2) as response:
             if response.read().decode() == str(Path.cwd()):
-                return record["pid"], record["port"]
+                return record["pid"], record["port"], record.get("token")
     except (OSError, ValueError, KeyError, http.client.HTTPException):
         pass
     return None
 
 
-def start(port: int = 0) -> int:
-    """Start a viewer for this directory in the background and return its port. The socket is
-    opened and listening before this returns, so a port that is taken is an error here and
-    the page can be opened straight away; a detached process is handed the socket to serve."""
+def start(port: int = 0) -> tuple[int, str]:
+    """Start a viewer for this directory in the background and return its port and token. The
+    socket is opened and listening before this returns, so a port that is taken is an error
+    here and the page can be opened straight away; a detached process is handed the socket."""
+    token = secrets.token_urlsafe(24)
     with server(port) as httpd:
         port = httpd.server_address[1]
         child = subprocess.Popen(
             [sys.executable, "-c", "import sys; from deli.cli import main; sys.exit(main())", "view", "--serve", str(httpd.fileno())],
             pass_fds=[httpd.fileno()],
+            env={**os.environ, _TOKEN: token},
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -245,8 +348,9 @@ def start(port: int = 0) -> int:
         )
     record = _record()
     record.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    record.write_text(json.dumps({"pid": child.pid, "port": port}))
-    return port
+    record.write_text(json.dumps({"pid": child.pid, "port": port, "token": token}))
+    record.chmod(0o600)  # the token is in it
+    return port, token
 
 
 def stop() -> bool:
@@ -264,8 +368,10 @@ def serve(fd: int, idle: float = IDLE) -> int:
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler, bind_and_activate=False)
     httpd.socket.close()
     httpd.socket = socket.socket(fileno=fd)
+    httpd.server_address = httpd.socket.getsockname()  # the port the page is on, which /run checks requests against
     httpd.timeout = 1  # how long to wait for a request before looking at the clock again
     httpd.asked = time.monotonic()
+    httpd.token = os.environ.pop(_TOKEN, None)
     with httpd:
         while time.monotonic() - httpd.asked < idle:
             httpd.handle_request()

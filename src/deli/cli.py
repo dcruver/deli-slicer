@@ -1092,10 +1092,10 @@ def _view(args: argparse.Namespace) -> int:
 
     found = view.running()
     try:
-        port = found[1] if found else view.start(args.port)
+        port, token = found[1:] if found else view.start(args.port)
     except OSError as err:
         raise CommandError(f"cannot start the viewer: {err}") from None
-    url = f"http://127.0.0.1:{port}/"
+    url = view.address(port, token)
     if found:
         print(f"Already viewing the print in this directory at {url}")
     else:
@@ -1106,7 +1106,7 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
-ENGINE_API = 7  # must match API_VERSION in _engine.cpp
+ENGINE_API = 8  # must match API_VERSION in _engine.cpp
 
 
 def _styled(code: str):

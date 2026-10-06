@@ -568,7 +568,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 7;
+    m.attr("API_VERSION") = 8;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")

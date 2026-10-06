@@ -620,14 +620,25 @@ share the engine change and would have shown the 15 mm/s small perimeters at a g
    dragged on the bed `deli move <part> X Y`, a clicked face the `deli rotate` that lays
    it flat (the rotation from the face's normal; the most work of the three).
 
+**Cutting a model, to do (the user, 2026-10-06).** Cut a part into pieces, as PrusaSlicer's
+Cut tool does: a model too tall for the bed, or printed in halves to avoid supports. Likely
+a command (`deli cut <part> z <mm>`, the cut a plane at that height, perhaps tilted later)
+whose pieces become parts of the print, the page's section slider showing where it would
+cut and Apply running it. libslic3r has the cutting outside the GUI (`ModelObject::cut`,
+`Cut.cpp`: connectors and dowels too). Open: what the pieces are called and stored as (new
+model files beside the original, or the cut recorded in `deli.toml` and made at slicing,
+which keeps the original untouched and the cut editable), and how each piece is turned to
+lie on its cut face.
+
 **Other small things, to do:** two parts placed with `deli move` are not checked for
 overlapping; `deli --help` lists the hidden `__complete` command with `==SUPPRESS==`.
 
 **Painting (idea, not started; the user's direction of 2026-10-03).** Not "paint-on
 supports" but painting in general: the browser only lets the user paint areas of a part
 and reports them, knowing nothing of what they are for; deli commands then take a
-painted area for whatever they do (supports first). This would end "the viewer only
-displays". Found while sizing it up:
+painted area for whatever they do (supports first). Since 2026-10-06 the page may change
+a print through deli's commands (`/run`, DESIGN.md), so painting fits as long as a
+painted area is saved by a command too. Found while sizing it up:
 
 - libslic3r has the painting engine outside the GUI: `TriangleSelector` (`select_patch`
   with a sphere cursor, serialize/deserialize) and, per `ModelVolume`, four kinds of

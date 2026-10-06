@@ -399,27 +399,37 @@ number. `deli slice` reports each pause with its height, and refuses a pause aft
 layer the print does not have.
 
 `deli view` opens a page in your browser and gives the shell straight back; the page
-follows the print as you change it. After `deli slice` it shows the G-code instead of
-the parts: every extrusion, supports included, coloured by what it is for, with a
-slider to go through the layers, each with the time it takes, and a box to show only
-that layer. The colours turn lighter where the print pauses. The legend says how long
-each kind of extrusion takes, and travel; click one to hide or show it. "Colour by"
-colours the print by speed, flow (mm³/s) or layer time instead, from blue for the least
-to red for the most, which shows at a glance what is slow. The times are PrusaSlicer's
-estimate from reading the G-code back, as its own G-code viewer makes it, and can be a
-minute or two from the one `deli slice` reports. Before slicing, Overhangs shows in red
-the faces supports would hold up (at the print's `support_material_threshold`, or the
-angle PrusaSlicer works out when it is 0), and a slider cuts the part at a height to
-show its inside. Move and Lay flat write the command that would do it: drag a part over
-the bed for its `deli move`, or click a face of one for the `deli rotate` that lays that
-face on the bed; Pause here, beside the layer slider, writes the `deli pause` for that
-layer. The page changes nothing itself: copy the command and run it, and the page
-follows. To measure, press Measure (or M) and click
-two points on the part or the print: the line follows the pointer from the first, and the
-page shows the distance between them and along each axis, in mm or inches as you choose,
-snapping to a corner of the part when you click near one. Esc clears; a right-click
-clears and stops measuring. It goes back to the parts as soon as the
-print changes. The page is served in the background until it has been closed for ten
+follows the print as you change it. It shows the parts on the bed and, once `deli slice`
+has run and for as long as the G-code is still the print's, every extrusion in it,
+supports included, coloured by what it is for. The parts are then drawn faint over the
+extrusions, or hidden: Model in the legend shows or hides them, and they come up by
+themselves for the tools that need them. When the print has changed since it was
+sliced, or has never been, the page shows the parts and says so, with a Slice button
+that runs `deli slice` and shows what it printed. Sending stays in the shell.
+
+The slider at the bottom goes through the layers, each with the time it takes, cutting
+the parts at the same height; a box shows only that layer. With no G-code it cuts the
+parts at a height instead, to show their inside. The colours turn lighter where the
+print pauses. The legend says how long each kind of extrusion takes, and travel; click
+one to hide or show it. "Colour by" colours the print by speed, flow (mm³/s) or layer
+time instead, from blue for the least to red for the most, which shows at a glance what
+is slow. The times are PrusaSlicer's estimate from reading the G-code back, as its own
+G-code viewer makes it, and can be a minute or two from the one `deli slice` reports.
+Overhangs shows in red the faces supports would hold up (at the print's
+`support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
+
+Move and Lay flat change the print with deli's own commands: drag a part over the bed
+for its `deli move`, or click a face of one for the `deli rotate` that lays that face on
+the bed; Pause here, beside the layer slider, does the same for `deli pause` at that
+layer. The page shows the command, and Apply runs it (Copy, to run it yourself); either
+way `deli.toml` changes as the command says and the page follows. Only the page at the
+address `deli view` printed can apply commands. To measure, press Measure (or M) and
+click two points on the parts or the print: the line follows the pointer from the first,
+and the page shows the distance between them and along each axis, in mm or inches as
+you choose, snapping to a corner of a part when you click near one. Esc clears; a
+right-click clears and puts the tool down.
+
+The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
 `deli slice` draws one into the G-code for the printer's screen.
 

@@ -1,8 +1,10 @@
 // The viewer pane: the bed of the chosen printer and the parts on it, placed as `deli slice`
-// places them, or, once `deli slice` has run and until the print changes again, what it wrote:
-// every extrusion in the G-code, supports included, coloured by what it is for. It is a viewer
-// only, though it can measure what it shows. It asks the server for /state twice a second and redraws when the version changes, so
-// `deli scale`, `deli rotate`, `deli slice` and edits to deli.toml show up here.
+// places them, and, while the G-code `deli slice` wrote is still the print's, every extrusion
+// in it, supports included, coloured by what it is for; the model is then drawn faint over it,
+// or hidden. One view, so every tool works on whatever is there. It changes a print only by
+// running deli's own commands through the server (Apply). It asks the server for /state twice
+// a second and redraws when the version changes, so `deli scale`, `deli rotate`, `deli slice`
+// and edits to deli.toml show up here.
 
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
@@ -12,9 +14,8 @@ const layerBar = document.getElementById('layers');
 const layerSlider = document.getElementById('layer');
 const layerLabel = document.getElementById('layerLabel');
 const pauseTicks = document.getElementById('pauseTicks');
-const sectionBar = document.getElementById('section');
-const cutSlider = document.getElementById('cut');
-const cutLabel = document.getElementById('cutLabel');
+const onlyLayerBox = document.getElementById('onlyLayerBox');
+const pauseHere = document.getElementById('pauseHere');
 const measurement = document.getElementById('measurement');
 
 const scene = new THREE.Scene();
@@ -42,16 +43,38 @@ let partRanges = [];
 let placed = null;
 let overhang = null;  // from /state: the slope below which supports hold a face up
 let showOverhangs = false;
+let modelTop = 0;
 let paths = null;  // the sliced print: what is drawn, and where each layer ends in it
 let framed = false;
 let version = null;
-// A section: what is above the cut is not drawn, and the part's inside shows dark.
+// Cutting: what is above the slider's height (the ceiling) is not drawn, and with "only this
+// layer" what is below the layer (the floor); where the part is cut open its inside shows dark.
 const NO_CUT = 1e6;
 const ceiling = new THREE.Plane(new THREE.Vector3(0, 0, -1), NO_CUT);
-const material = new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.6, metalness: 0.05, clippingPlanes: [ceiling] });
-const insideMaterial = new THREE.MeshBasicMaterial({ color: 0x5c3510, side: THREE.BackSide, clippingPlanes: [ceiling] });
-const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clippingPlanes: [ceiling],  // unlit: they face away from the light
+const floor = new THREE.Plane(new THREE.Vector3(0, 0, 1), NO_CUT);
+renderer.localClippingEnabled = true;
+const MODEL_COLOUR = 0xf28c28;
+const material = new THREE.MeshStandardMaterial({ color: MODEL_COLOUR, roughness: 0.6, metalness: 0.05, clippingPlanes: [ceiling, floor] });
+const insideMaterial = new THREE.MeshBasicMaterial({ color: 0x5c3510, side: THREE.BackSide, clippingPlanes: [ceiling, floor] });
+const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clippingPlanes: [ceiling, floor],  // unlit: they face away from the light
   polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+
+// The model is shown whenever there is no G-code to show, or a tool that works on it is in
+// use; over the G-code it is faint. Clicking Model in the legend overrules that until the
+// print is sliced again or its G-code goes out of date.
+let modelChoice = null;
+const modelVisible = () => modelChoice ?? (!paths || mode === 'move' || mode === 'flat' || showOverhangs);
+function showModel() {
+  if (!partMesh) return;
+  const visible = modelVisible(), faint = Boolean(paths);
+  partMesh.visible = visible;
+  partExtras[0].visible = visible && !faint;  // the inside
+  overhangMesh.visible = visible && showOverhangs;
+  if (material.transparent !== faint) {
+    Object.assign(material, { transparent: faint, opacity: faint ? 0.3 : 1, depthWrite: !faint });
+    material.needsUpdate = true;
+  }
+}
 
 function bounds(points) {
   const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
@@ -116,7 +139,7 @@ async function drawPart(parts) {
   }
   placed = vertices.slice();  // where the parts are, before a drag moves one
 
-  clearPrint();
+  clearModel();
   if (nTriangles === 0) return;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
@@ -127,13 +150,8 @@ async function drawPart(parts) {
   overhangMesh.visible = showOverhangs;
   partExtras = [new THREE.Mesh(geometry, insideMaterial), overhangMesh];
   scene.add(partMesh, ...partExtras);
-
-  let top = 0;
-  for (let i = 2; i < vertices.length; i += 3) top = Math.max(top, vertices[i]);
-  cutSlider.max = Math.ceil(top * 10) / 10;
-  cutSlider.value = cutSlider.max;
-  sectionBar.hidden = false;
-  showSection();
+  modelTop = 0;
+  for (let i = 2; i < vertices.length; i += 3) modelTop = Math.max(modelTop, vertices[i]);
 }
 
 // The triangles that look down at less than the overhang angle from level, so that supports
@@ -157,30 +175,38 @@ function overhangs(geometry) {
   return shown;
 }
 
-function showSection() {
-  const at = Number(cutSlider.value), top = Number(cutSlider.max);
-  ceiling.constant = at >= top ? NO_CUT : at;
-  cutLabel.textContent = at >= top ? 'no section' : `cut at ${mm(at)} mm`;
+function clearModel() {
+  if (!partMesh) return;
+  scene.remove(partMesh, ...partExtras);
+  partMesh.geometry.dispose();
+  overhangMesh.geometry.dispose();
+  partMesh = overhangMesh = null;
+  partExtras = [];
 }
-cutSlider.addEventListener('input', showSection);
 
-function clearPrint() {
-  if (partMesh) {
-    scene.remove(partMesh, ...partExtras);
-    partMesh.geometry.dispose();
-    overhangMesh.geometry.dispose();
-    partMesh = overhangMesh = null;
-    partExtras = [];
-  }
-  sectionBar.hidden = true;
-  ceiling.constant = NO_CUT;
+function clearPaths() {
+  if (!paths) return;
+  scene.remove(paths.mesh, paths.travel);
+  for (const drawn of [paths.mesh, paths.travel]) { drawn.geometry.dispose(); drawn.material.dispose(); }
+  paths.mesh.dispose();
+  paths = null;
+}
+
+// The slider at the bottom: the layers of the G-code, cutting the model at the same height,
+// or, with no G-code, a height to cut the model at.
+function setUpSlider() {
+  layerBar.hidden = !paths && !partMesh;
+  onlyLayerBox.hidden = pauseHere.hidden = !paths;
   if (paths) {
-    scene.remove(paths.mesh, paths.travel);
-    for (const drawn of [paths.mesh, paths.travel]) { drawn.geometry.dispose(); drawn.material.dispose(); }
-    paths.mesh.dispose();
-    paths = null;
+    Object.assign(layerSlider, { min: 1, step: 1, max: paths.ends.length });
+    layerSlider.setAttribute('list', 'pauseTicks');
+    pauseTicks.innerHTML = paths.pauses.map(after => `<option value="${after}"></option>`).join('');
+  } else {
+    Object.assign(layerSlider, { min: 0, step: 0.1, max: Math.ceil(modelTop * 10) / 10 });
+    layerSlider.removeAttribute('list');
   }
-  layerBar.hidden = true;
+  layerSlider.value = layerSlider.max;
+  showLayers();
 }
 
 // PrusaSlicer's preview colours, by its names for what an extrusion is for.
@@ -223,9 +249,6 @@ function withHiddenRoles(material) {
   };
   return material;
 }
-// Only this layer: what is below it is cut away.
-const floor = new THREE.Plane(new THREE.Vector3(0, 0, 1), NO_CUT);
-renderer.localClippingEnabled = true;
 
 function duration(seconds) {
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h ${String(Math.round(seconds % 3600 / 60)).padStart(2, '0')} min`;
@@ -248,7 +271,7 @@ async function drawToolpaths(roles, pauses) {
   const times = n ? JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4 + n * 45))) : null;
   const travelRole = roles.indexOf('Travel');
 
-  clearPrint();
+  clearPaths();
   if (n === 0) return;
   let travels = 0;
   for (let i = 0; i < n; i++) if (roleOf[i] === travelRole) travels++;
@@ -308,13 +331,8 @@ async function drawToolpaths(roles, pauses) {
   paths = { mesh, travel, ends, travelEnds, tops, pauses, roles, used, boxRole, boxLayer, boxSpeed, boxFlow, lighter,
             roleTimes: times.roles, layerTimes: times.layers };
 
-  layerSlider.max = ends.length;
-  layerSlider.value = ends.length;
-  pauseTicks.innerHTML = pauses.map(after => `<option value="${after}"></option>`).join('');
-  layerBar.hidden = false;
   showRoles();
   colourPaths();
-  showLayers();
   info.innerHTML += `<div id="legend">${legend()}</div>`;
 }
 
@@ -357,6 +375,8 @@ function legend() {
       `<option value="${key}"${key === colourBy ? ' selected' : ''}>${m.name}</option>`).join('')}</select></div>`
     + (measure.of ? `<div class="scale" style="background: linear-gradient(to right, ${SCALE.map(c => '#' + c.getHexString()).join(', ')})"></div>`
         + `<div class="range"><span>${round(paths.range[0])}</span><span>${measure.unit}</span><span>${round(paths.range[1])}</span></div>` : '')
+    + (partMesh ? `<div class="role${modelVisible() ? '' : ' off'}" data-role="Model" title="Click to ${modelVisible() ? 'hide' : 'show'} the model">`
+        + `<span class="swatch" style="background: #${new THREE.Color(MODEL_COLOUR).getHexString()}"></span><span class="name">Model</span></div>` : '')
     + rows.map(({ name, time }) => `<div class="role${hiddenRoles.has(name) ? ' off' : ''}" data-role="${name}" title="Click to ${hiddenRoles.has(name) ? 'show' : 'hide'}">`
         + `<span class="swatch" style="background: ${roleColour(name)}"></span><span class="name">${name}</span>`
         + `<span class="time">${duration(time)}</span><span class="share">${Math.round(time / total * 100)}%</span></div>`).join('')
@@ -377,16 +397,24 @@ function options() {
         + `${Math.round(overhang.angle)}° from level, which supports hold up${overhang.auto ? ' (the automatic angle: half a wall\'s width per layer)' : ''}</div>` : '')
     + (partMesh ? `<div class="tools"><button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button></div>` : '')
     + '<div class="tools">'
-    + Object.entries(TOOLS).filter(([, tool]) => partMesh || !tool.modelOnly).map(([name, tool]) =>
+    + Object.entries(TOOLS).filter(([, tool]) => partMesh || !tool.needsPart).map(([name, tool]) =>
         `<button type="button" data-tool="${name}" title="${tool.title}" aria-pressed="${mode === name}">${tool.label}</button>`).join('')
     + `<span class="units">${Object.keys(UNITS).map(name =>
         `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div></div>`;
 }
 
 function showLayers() {
-  const layer = Number(layerSlider.value);
+  const at = Number(layerSlider.value), top = at >= Number(layerSlider.max);
+  if (!paths) {
+    ceiling.constant = top ? NO_CUT : at;
+    floor.constant = NO_CUT;
+    layerLabel.textContent = top ? 'no section' : `cut at ${mm(at)} mm`;
+    return;
+  }
+  const layer = at;
   paths.mesh.count = paths.ends[layer - 1];
   paths.travel.geometry.setDrawRange(0, paths.travelEnds[layer - 1] * 2);
+  ceiling.constant = top ? NO_CUT : paths.tops[layer - 1] + 0.001;  // the model cut where the print has got to
   floor.constant = onlyLayer && layer > 1 ? -(paths.tops[layer - 2] + 0.001) : NO_CUT;
   layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${mm(paths.tops[layer - 1])} mm, `
     + duration(paths.layerTimes[layer - 1] ?? 0) + (paths.pauses.includes(layer) ? ', then a pause' : '');
@@ -394,23 +422,30 @@ function showLayers() {
 layerSlider.addEventListener('input', showLayers);
 document.getElementById('onlyLayer').addEventListener('change', event => {
   onlyLayer = event.target.checked;
-  if (paths) showLayers();
+  showLayers();
 });
 // The info box is rewritten on every redraw, so the box listens for its buttons and rows.
 info.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
+  if (button?.id === 'sliceNow') return startSlice(button);
   if (button?.id === 'overhangs') {
     showOverhangs = !showOverhangs;
     button.setAttribute('aria-pressed', showOverhangs);
     document.getElementById('overhangNote').hidden = !showOverhangs;
-    if (overhangMesh) overhangMesh.visible = showOverhangs;
+    showModel();
+    if (paths) redrawLegend();
     return;
   }
   if (button?.dataset.units) return setUnits(button.dataset.units);
   const row = event.target.closest('[data-role]');
   if (!row || !paths) return;
   const name = row.dataset.role;
+  if (name === 'Model') {
+    modelChoice = !modelVisible();
+    showModel();
+    return redrawLegend();
+  }
   if (!hiddenRoles.delete(name)) hiddenRoles.add(name);
   showRoles();
   if (MEASURES[colourBy].of) colourPaths();  // the scale spans the roles shown
@@ -424,21 +459,23 @@ info.addEventListener('change', event => {
   redrawLegend();
 });
 
-// Measuring: while it is on, a click on the part or on the sliced print pins one end of a line,
-// which then follows the pointer over what is drawn until a second click pins the other, and
-// the line is labelled with its length and how far apart its ends are along each axis, in
-// millimetres or inches. On the part, an end snaps to a corner of the triangle under the
-// pointer when one is within a few pixels. A third click starts again; Esc clears; a right-click
-// clears and turns measuring off. The points
-// are dropped when the print changes, since what they were on may have moved.
 // The tools a click on the view is for, one at a time: measuring, moving a part, or laying a
-// face of one flat on the bed. The last two only write the command that would do it.
+// face of one flat on the bed. The last two write the command that does it, to apply or copy,
+// and need a part.
 const TOOLS = {
   measure: { label: 'Measure', title: 'Measure between two points (M)' },
-  move: { label: 'Move', title: 'Drag a part to where it should go', modelOnly: true },
-  flat: { label: 'Lay flat', title: 'Click the face of a part to lay on the bed', modelOnly: true },
+  move: { label: 'Move', title: 'Drag a part to where it should go', needsPart: true },
+  flat: { label: 'Lay flat', title: 'Click the face of a part to lay on the bed', needsPart: true },
 };
 let mode = null;
+
+// Measuring: a click on the part or on the sliced print pins one end of a line, which then
+// follows the pointer over what is drawn until a second click pins the other, and the line is
+// labelled with its length and how far apart its ends are along each axis, in millimetres or
+// inches. On the part, an end snaps to a corner of the triangle under the pointer when one is
+// within a few pixels. A third click starts again; Esc clears; a right-click clears and puts
+// the tool down. The points are dropped when the print changes, since what they were on may
+// have moved.
 const picks = [];
 let loose = null;  // where the free end of the line is, between the first click and the second
 let pointer = null;  // where the pointer has moved to since the free end last followed it
@@ -470,16 +507,17 @@ function onScreen(point) {
   return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight, behind: p.z > 1 };
 }
 
-// The point on what is drawn under the pointer, or null.
+// The point on what is drawn under the pointer, the nearest of the model and the extrusions
+// shown, or null.
+const uncut = point => ceiling.distanceToPoint(point) >= 0 && floor.distanceToPoint(point) >= 0;
 function pickAt(x, y) {
-  const target = partMesh ?? paths?.mesh;
-  if (!target) return null;
+  const targets = [partMesh?.visible && partMesh, paths?.mesh].filter(Boolean);
+  if (!targets.length) return null;
   raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
-  const hit = raycaster.intersectObject(target, false).find(hit => target === partMesh
-    ? ceiling.distanceToPoint(hit.point) >= 0
-    : (!hiddenRoles.has(paths.roles[paths.boxRole[hit.instanceId]]) && floor.distanceToPoint(hit.point) >= 0));
+  const hit = raycaster.intersectObjects(targets, false).find(hit => uncut(hit.point)
+    && (hit.object === partMesh || !hiddenRoles.has(paths.roles[paths.boxRole[hit.instanceId]])));
   if (!hit) return null;
-  if (target !== partMesh) return hit.point;
+  if (hit.object !== partMesh) return hit.point;
   const position = partMesh.geometry.attributes.position;
   let best = hit.point, nearest = SNAP_PIXELS;
   for (const index of [hit.face.a, hit.face.b, hit.face.c]) {
@@ -528,6 +566,8 @@ function setMode(name) {
   mode = name;
   renderer.domElement.style.cursor = { measure: 'crosshair', move: 'grab', flat: 'pointer' }[name] ?? '';
   for (const button of info.querySelectorAll('[data-tool]')) button.setAttribute('aria-pressed', button.dataset.tool === name);
+  showModel();  // Move and Lay flat bring the model up
+  if (paths) redrawLegend();
 }
 
 function setUnits(name) {
@@ -581,21 +621,97 @@ addEventListener('keydown', event => {
   else if (event.key === 'Escape') {
     clearMeasurement();
     putBack();
+    commandRan = false;
     hideCommand();
   }
 });
 
-// The command a tool has written, to copy and run in the print's directory.
+// The command a tool has written: Apply runs it here, through the viewer, as the shell would
+// (the page changes a print only so, and shows what it ran); Copy is for running it yourself.
+// Only the page at the address `deli view` printed has the token that lets it run commands.
 const commandBox = document.getElementById('command');
-function showCommand(text, note = '') {
+const token = new URLSearchParams(location.search).get('t');
+let commandRuns = null;  // the commands Apply runs, each as its arguments
+let commandRan = false;  // the panel shows what was run, which a redraw leaves up
+function showCommand(text, note = '', runs = null) {
   commandBox.hidden = false;
+  commandRan = false;
+  commandRuns = runs;
   document.getElementById('commandText').textContent = text ?? '';
   document.getElementById('commandText').hidden = !text;
   document.getElementById('copyCommand').hidden = !text;
   document.getElementById('copyCommand').textContent = 'Copy';
-  document.getElementById('commandNote').textContent = note;
+  document.getElementById('applyCommand').hidden = !(runs && token);
+  // With commands to run, the note says what for ("to move it there"); else it is the whole note.
+  document.getElementById('commandNote').textContent = !runs ? note
+    : token ? `Apply, or run in the print's directory, ${note}:`
+    : `Run in the print's directory ${note} (the address deli view printed can apply it from here):`;
+  document.getElementById('commandOutput').hidden = true;
 }
-function hideCommand() { commandBox.hidden = true; }
+function hideCommand() {
+  if (!commandRan) commandBox.hidden = true;
+}
+document.getElementById('applyCommand').addEventListener('click', async event => {
+  const runs = commandRuns, output = document.getElementById('commandOutput');
+  event.target.disabled = true;
+  let printed = '', failed = false;
+  try {
+    for (const args of runs) {
+      const response = await fetch('/run', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Deli-Token': token },
+                                             body: JSON.stringify({ args }) });
+      if (!response.ok) throw new Error(await response.text());
+      const result = await response.json();
+      printed += result.output;
+      if (result.code !== 0) { failed = true; break; }
+    }
+  } catch (err) {
+    printed += err instanceof TypeError ? 'The viewer has stopped. Run deli view again.' : err.message;
+    failed = true;
+  }
+  event.target.disabled = false;
+  putBack();  // the print, redrawn from deli.toml, shows where the part is now
+  showRan(printed, failed);
+});
+// The panel, once a command has run: what it printed. It stays up through redraws.
+function showRan(printed, failed) {
+  const output = document.getElementById('commandOutput');
+  commandBox.hidden = false;
+  commandRan = true;
+  commandRuns = null;
+  document.getElementById('applyCommand').hidden = true;
+  document.getElementById('copyCommand').hidden = true;
+  document.getElementById('commandNote').textContent = failed ? 'Ran, and it did not work:' : 'Ran:';
+  output.textContent = printed.trim();
+  output.classList.toggle('error', failed);
+  output.hidden = !printed.trim();
+}
+
+// Slice: `deli slice`, which the server runs in a process of its own; /state says how it is
+// getting on, and the G-code shows up by itself once it is written.
+let followingSlice = false;
+async function startSlice(button) {
+  button.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'slicing…' }));
+  showCommand('deli slice', 'Slicing…');
+  document.getElementById('copyCommand').hidden = true;
+  commandRan = true;  // stays up while the page redraws
+  try {
+    const response = await fetch('/slice', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Deli-Token': token }, body: '{}' });
+    if (response.ok || response.status === 409) followingSlice = true;  // 409: one already running, which is followed instead
+    else showRan(await response.text(), true);
+  } catch (err) {
+    showRan(err instanceof TypeError ? 'The viewer has stopped. Run deli view again.' : err.message, true);
+  }
+}
+function followSlice(slicing) {
+  if (!followingSlice || !slicing) return;
+  if (slicing.running) {
+    document.getElementById('commandNote').textContent = `Slicing… ${slicing.seconds} s`;
+    return;
+  }
+  followingSlice = false;
+  document.getElementById('commandText').textContent = 'deli slice';
+  showRan(slicing.output, slicing.code !== 0);
+}
 document.getElementById('copyCommand').addEventListener('click', async event => {
   try {
     await navigator.clipboard.writeText(document.getElementById('commandText').textContent);
@@ -604,7 +720,7 @@ document.getElementById('copyCommand').addEventListener('click', async event => 
     getSelection().selectAllChildren(document.getElementById('commandText'));  // to copy by hand
   }
 });
-document.getElementById('closeCommand').addEventListener('click', () => { putBack(); hideCommand(); });
+document.getElementById('closeCommand').addEventListener('click', () => { putBack(); commandRan = false; hideCommand(); });
 
 // How a part is named on the command line: its file, without the extension, quoted if needed.
 function partName(part) {
@@ -619,7 +735,7 @@ function rangeOf(faceIndex) {
 function partHit(x, y) {
   if (!partMesh) return null;
   raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
-  return raycaster.intersectObject(partMesh, false).find(hit => ceiling.distanceToPoint(hit.point) >= 0) ?? null;
+  return raycaster.intersectObject(partMesh, false).find(hit => uncut(hit.point)) ?? null;
 }
 
 // Move: a part dragged over the bed, level, shows where it would go and gives the
@@ -653,7 +769,8 @@ function drag(event) {
   }
   position.needsUpdate = true;
   const [x, y] = [dragging.middle[0] + by.x, dragging.middle[1] + by.y];
-  showCommand(`deli move ${partName(range.part)} ${number(x)} ${number(y)}`, 'Run in the print\'s directory to move it there:');
+  showCommand(`deli move ${partName(range.part)} ${number(x)} ${number(y)}`, 'to move it there',
+    [['move', range.part.file, number(x), number(y)]]);
 }
 function endDrag() {
   controls.enabled = true;
@@ -693,19 +810,21 @@ function layFlat(x, y) {
   };
   const ax = angle(Math.atan2(-m.y, -m.z)), ay = angle(Math.atan2(m.x, r));
   const name = partName(range.part);
-  const steps = [['x', ax, rx], ['y', ay, ry]].filter(([, to, from]) => Math.abs(to - from) > 0.01)
-    .map(([axis, to]) => `deli rotate ${name} ${axis} ${number(to)}`);
+  const steps = [['x', ax, rx], ['y', ay, ry]].filter(([, to, from]) => Math.abs(to - from) > 0.01);
   if (!steps.length) return showCommand(null, 'That face already lies on the bed.');
-  showCommand(steps.join(' && '), 'Run in the print\'s directory to lay that face on the bed:');
+  showCommand(steps.map(([axis, to]) => `deli rotate ${name} ${axis} ${number(to)}`).join(' && '),
+    'to lay that face on the bed',
+    steps.map(([axis, to]) => ['rotate', range.part.file, axis, number(to)]));
 }
 
 // Pause: the `deli pause` for the layer on the slider, or the one that takes it away.
 document.getElementById('pauseHere').addEventListener('click', () => {
   if (!paths) return;
   const layer = Number(layerSlider.value);
-  showCommand(paths.pauses.includes(layer) ? `deli pause off ${layer}` : `deli pause ${layer}`,
-    paths.pauses.includes(layer) ? 'Run in the print\'s directory to stop pausing after this layer:'
-                                 : 'Run in the print\'s directory to pause after this layer:');
+  const off = paths.pauses.includes(layer);
+  showCommand(off ? `deli pause off ${layer}` : `deli pause ${layer}`,
+    off ? 'to stop pausing after this layer' : 'to pause after this layer',
+    [off ? ['pause', 'off', String(layer)] : ['pause', String(layer)]]);
 });
 
 const mm = n => Math.round(n * 100) / 100;
@@ -729,29 +848,54 @@ function describe(state) {
   if (state.filament) lines.push(`<span class="dim">filament</span> ${state.filament}`);
   if (state.pauses.length) lines.push(`<span class="dim">pauses after layer</span> ${state.pauses.join(', ')}`);
   if (state.gcode) lines.push(`<span class="dim">sliced</span> ${state.gcode}`);
+  else if (state.parts.length) {
+    const slice = state.slicing?.running ? '<span class="dim">slicing…</span>'
+      : token ? '<button type="button" id="sliceNow" title="deli slice">Slice</button>' : 'deli slice';
+    lines.push(`<span class="dim">${state.stale ? 'The print has changed since it was sliced:' : 'Not sliced yet:'}</span> ${slice}`);
+  }
   if (state.error) lines.push(`<span class="error">${state.error}</span>`);
   info.innerHTML = lines.join('<br>');
 }
 
+let sliced = null;  // which slicing made the G-code shown, if any
+
 async function refresh() {
   try {
     const state = await (await fetch('/state')).json();
+    followSlice(state.slicing);
     if (state.version !== version) {
       version = state.version;
-      overhang = state.overhang ?? null;
-      clearMeasurement();
-      hideCommand();
-      if (dragging) endDrag();
-      drawBed(state.bed, state.height);
-      describe(state);
-      await (state.gcode ? drawToolpaths(state.roles, state.pauses) : drawPart(state.parts));
-      if (TOOLS[mode]?.modelOnly && !partMesh) setMode(null);
-      info.innerHTML += options();
+      await redraw(state);
     }
   } catch (err) {
     // A fetch that cannot reach the server at all fails with a TypeError: the viewer has gone.
     info.innerHTML = `<span class="error">${err instanceof TypeError ? 'The viewer has stopped. Run <b>deli view</b> again.' : err.message}</span>`;
   }
+}
+
+async function redraw(state) {
+  if ((state.sliced ?? null) !== sliced) modelChoice = null;  // sliced again, or out of date: the model as it should be shown
+  sliced = state.sliced ?? null;
+  overhang = state.overhang ?? null;
+  clearMeasurement();
+  hideCommand();
+  if (dragging) endDrag();
+  drawBed(state.bed, state.height);
+  describe(state);
+  let problem = null;
+  try {
+    await drawPart(state.parts);
+  } catch (err) {  // the parts cannot be placed; the G-code, if there is one, can still be shown
+    clearModel();
+    problem = err;
+  }
+  if (state.gcode) await drawToolpaths(state.roles, state.pauses);
+  else clearPaths();
+  if (TOOLS[mode]?.needsPart && !partMesh) setMode(null);
+  showModel();
+  setUpSlider();
+  if (problem) info.innerHTML += `<div class="error">${problem.message}</div>`;
+  info.innerHTML += options();
 }
 
 // The axes at the bed's origin, lying on the plate: x red, y green, z blue, the convention

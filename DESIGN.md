@@ -84,13 +84,24 @@ when you want the file itself, for an SD card or another program.
 
 ## No surprises
 
-A command does what its name says and nothing more. `deli view` only displays: it never
-slices or changes the print, even when the G-code is out of date. Its tools that would
-change it (a part dragged, a face laid flat, a pause) write the command instead, to run
-in the shell. `deli send` uploads
+A command does what its name says and nothing more. `deli send` uploads
 without starting the print unless you add `--print`. Where a command does something
 extra to be helpful, it says so on its first line ("Slicing first: the print has changed
 since it was sliced").
+
+## The page changes a print only through deli's commands
+
+`deli view` is for looking at a print, and most of it does nothing else. Where looking is
+naturally followed by a change (a part dragged over the bed, a face to lay flat, a layer
+to pause after), the page writes the deli command that makes it, and Apply runs that
+command, the same one the shell would, through the same code; Copy is there to run it
+yourself. So `deli.toml` stays the one record of the print, changed only by deli's
+commands, each change has one implementation, and the page always shows the command it
+ran and what it printed, which is also how the shell form is learned. It slices too, as
+`deli slice` (Slice, where the G-code is missing or out of date), in a process of its
+own, since a slice can take a while. It never sends to a printer: that reaches a
+machine, and stays in the shell. Only the page at the address `deli view` printed can
+run anything (it carries a token), so no other web page can.
 
 ## The network only where it has to be
 
