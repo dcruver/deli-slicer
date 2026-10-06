@@ -201,6 +201,26 @@ def test_toolpaths_have_speeds_flows_and_times(tmp_path):
     assert role_times[names.index("External perimeter")] > 0
 
 
+def test_toolpaths_flow_is_the_gcodes(tmp_path):
+    """Read move by move, PrusaSlicer's reader shows small arcs, and the vertices it adds
+    where a move stops accelerating, well over the flow the G-code has."""
+    out = tmp_path / "cube.gcode"
+    config = (
+        CONFIG
+        + "arc_fitting = emit_center\nfill_density = 100%\nfill_pattern = rectilinear\n"
+        + "solid_infill_speed = 200\nfilament_max_volumetric_speed = 10\n"
+    )
+    _engine.slice(part(), config, str(out))
+
+    import struct
+
+    _, rates, _, roles, *_ = _engine.toolpaths(str(out))
+    flows = struct.unpack(f"{len(roles) * 2}f", rates)[1::2]
+    custom = _engine.extrusion_roles().index("Custom")
+    assert re.search(r"^G[23] .*E", out.read_text(), re.M)  # it has arcs that extrude
+    assert max(flow for flow, role in zip(flows, roles) if role != custom) == pytest.approx(10, abs=0.2)  # 14.6 read move by move
+
+
 def test_toolpaths_include_supports(tmp_path):
     overhang = ROOT / "vendor/PrusaSlicer/tests/data/U_overhang.obj"
     out = tmp_path / "overhang.gcode"

@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -452,6 +453,49 @@ std::tuple<nb::bytes, nb::bytes, std::vector<std::pair<size_t, size_t>>> mesh(co
             per_part};
 }
 
+// The arcs (G2, G3) in a G-code file by line number, counted from 1 as the reader's
+// `gcode_id` is: the end's x and y where the line gives them, the centre's offset from the
+// start, and whether the arc goes clockwise.
+struct Arc { std::optional<float> x, y; float i = 0.f, j = 0.f; bool clockwise = false; };
+static std::map<unsigned int, Arc> arcs(const std::string &gcode_path)
+{
+    std::map<unsigned int, Arc> found;
+    std::ifstream file(gcode_path);
+    std::string text;
+    for (unsigned int line = 1; std::getline(file, text); ++line) {
+        if (text.size() < 3 || text[0] != 'G' || (text[1] != '2' && text[1] != '3') || text[2] != ' ')
+            continue;
+        Arc arc;
+        arc.clockwise = text[1] == '2';
+        std::istringstream words(text.substr(3, text.find(';') == std::string::npos ? std::string::npos : text.find(';') - 3));
+        for (std::string word; words >> word;) {
+            if (word.size() < 2)
+                continue;
+            const float value = std::strtof(word.c_str() + 1, nullptr);
+            switch (word[0]) {
+            case 'X': arc.x = value; break;
+            case 'Y': arc.y = value; break;
+            case 'I': arc.i = value; break;
+            case 'J': arc.j = value; break;
+            }
+        }
+        found.emplace(line, arc);
+    }
+    return found;
+}
+
+// How long an arc from `from` is, along the circle.
+static float arc_length(const Arc &arc, const Vec3f &from)
+{
+    const float cx = from.x() + arc.i, cy = from.y() + arc.j;
+    const float ex = arc.x.value_or(from.x()), ey = arc.y.value_or(from.y());
+    const float start = std::atan2(from.y() - cy, from.x() - cx), end = std::atan2(ey - cy, ex - cx);
+    float sweep = arc.clockwise ? start - end : end - start;
+    if (sweep <= 1e-6f)
+        sweep += float(2. * M_PI);
+    return std::hypot(arc.i, arc.j) * sweep;
+}
+
 // The extrusions and the travel moves in a G-code file, in the order they are made, as
 // PrusaSlicer's own G-code reader finds them: for each, float32 x, y, z of its start and of
 // its end, its width and its height (0 for a travel move); float32 speed (mm/s, as the
@@ -474,7 +518,15 @@ Toolpaths toolpaths(const std::string &gcode_path)
 
         GCodeProcessor processor;
         processor.process_file(gcode_path);
-        const std::vector<GCodeProcessorResult::MoveVertex> &moves = processor.get_result().moves;
+        const GCodeProcessorResult &result = processor.get_result();
+        // The extrusions of the G-code line being read: where they start, their filament
+        // (mm3) and length, and the speed the line asks for.
+        unsigned int line = std::numeric_limits<unsigned int>::max();
+        size_t line_start = 0;
+        float line_volume = 0.f, line_length = 0.f, line_speed = 0.f;
+        std::optional<float> line_arc;  // an arc's length along the circle
+        const std::map<unsigned int, Arc> arc_lines = arcs(gcode_path);
+        const std::vector<GCodeProcessorResult::MoveVertex> &moves = result.moves;
         for (size_t i = 0; i < moves.size(); ++i) {
             const GCodeProcessorResult::MoveVertex &move = moves[i];
             const float time = move.time[size_t(PrintEstimatedStatistics::ETimeMode::Normal)];
@@ -494,6 +546,34 @@ Toolpaths toolpaths(const std::string &gcode_path)
             rates.insert(rates.end(), {move.feedrate, extrudes ? move.volumetric_rate() : 0.f});
             layers.push_back(move.layer_id);
             roles.push_back(extrudes ? uint8_t(move.extrusion_role) : uint8_t(travel_role));
+            // A line's speed and flow are the G-code's, not the reader's per piece. The
+            // reader cuts an arc (G2/G3) into chords with equal shares of its filament,
+            // and for its own preview adds a vertex where a move stops accelerating or
+            // starts slowing down, with speed and flow blended from the move before
+            // (zero time, before the move it splits): read piece by piece, a small arc of
+            // solid infill shows 29.7 mm3/s where the G-code has 21. The chords of a small
+            // arc are shorter than the arc, so its length is the G-code's.
+            if (!extrudes) {
+                line = std::numeric_limits<unsigned int>::max();
+                continue;
+            }
+            const size_t piece = roles.size() - 1;
+            if (move.gcode_id != line) {
+                line = move.gcode_id;
+                line_start = piece;
+                line_volume = line_length = line_speed = 0.f;
+                const auto arc = arc_lines.find(line);
+                line_arc = arc == arc_lines.end() ? std::nullopt : std::optional<float>(arc_length(arc->second, from));
+            }
+            line_length += (to - from).norm();
+            if (time > 0.f) {  // not one of the preview's vertices
+                const float diameter = result.filament_diameters[std::min<size_t>(move.extruder_id, result.filament_diameters.size() - 1)];
+                line_volume += move.delta_extruder * float(M_PI) * diameter * diameter / 4.f;
+                line_speed = move.feedrate;
+            }
+            if (line_volume > 0.f)
+                for (size_t j = line_start; j <= piece; ++j)
+                    rates[2 * j] = line_speed, rates[2 * j + 1] = line_speed * line_volume / line_arc.value_or(line_length);
         }
     }
     return {nb::bytes(reinterpret_cast<const char *>(segments.data()), segments.size() * sizeof(float)),

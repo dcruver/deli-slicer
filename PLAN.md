@@ -606,7 +606,14 @@ share the engine change and would have shown the 15 mm/s small perimeters at a g
    minutes above the estimate written while slicing (2 h 08 min against 2 h 06 min on a
    laptop stand), spread over every layer; the first layer agrees to the second.
    Seen with it: solid infill on the stand's layer 2 at 29.7 mm³/s, over the filament's
-   21; not looked into yet.
+   21. The G-code was right (20.2 at most, arcs measured along the circle); the reading
+   was not. PrusaSlicer's reader cuts an arc into chords, shorter than the arc, and adds
+   vertices where a move stops accelerating or starts slowing, with speed and flow
+   blended from the move before, for its own preview. `_engine.toolpaths` now gives every
+   piece of a G-code line that line's speed and flow: its filament (the reader's own
+   moves, not the added ones, which have no time) over its length, an arc's taken from
+   its I and J in the file. Only the Centauri's purge line, in Orca's start G-code, is
+   over (33.7).
 3. Done: **Show or hide a role** by clicking it in the legend (infill hidden to see the
    perimeters, supports alone), like the travel-moves box.
 4. Done, a toggle (no range): **One layer, or a range**: an "only this layer" toggle or a second handle on the

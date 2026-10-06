@@ -3,6 +3,12 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- `deli view`'s speed and flow colours are the G-code's. Read move by move, small arcs and
+  the moves where the printer speeds up or slows down showed flow well over what the
+  G-code asks (29.7 mm³/s for 21 on a laptop stand) and speeds blended between moves.
+
 ## 0.6.0 (2026-10-06)
 
 - **Changed:** `deli view` can change a print, through deli's own commands only: Move, Lay
