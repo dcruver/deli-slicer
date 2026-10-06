@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.6.0 (2026-10-06)
 
 - **Changed:** `deli view` can change a print, through deli's own commands only: Move, Lay
   flat and Pause here show the `deli move`, `deli rotate` or `deli pause` they make, and
