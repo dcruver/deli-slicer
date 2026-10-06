@@ -12,6 +12,9 @@ const layerBar = document.getElementById('layers');
 const layerSlider = document.getElementById('layer');
 const layerLabel = document.getElementById('layerLabel');
 const pauseTicks = document.getElementById('pauseTicks');
+const sectionBar = document.getElementById('section');
+const cutSlider = document.getElementById('cut');
+const cutLabel = document.getElementById('cutLabel');
 const measurement = document.getElementById('measurement');
 
 const scene = new THREE.Scene();
@@ -33,10 +36,20 @@ scene.add(sun);
 
 let bedGroup = null;
 let partMesh = null;
+let partExtras = [];  // drawn with the part: its inside, where a section cuts it open, and its overhangs
+let overhangMesh = null;
+let overhang = null;  // from /state: the slope below which supports hold a face up
+let showOverhangs = false;
 let paths = null;  // the sliced print: what is drawn, and where each layer ends in it
 let framed = false;
 let version = null;
-const material = new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.6, metalness: 0.05 });
+// A section: what is above the cut is not drawn, and the part's inside shows dark.
+const NO_CUT = 1e6;
+const ceiling = new THREE.Plane(new THREE.Vector3(0, 0, -1), NO_CUT);
+const material = new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.6, metalness: 0.05, clippingPlanes: [ceiling] });
+const insideMaterial = new THREE.MeshBasicMaterial({ color: 0x5c3510, side: THREE.BackSide, clippingPlanes: [ceiling] });
+const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clippingPlanes: [ceiling],  // unlit: they face away from the light
+  polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 
 function bounds(points) {
   const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
@@ -99,11 +112,57 @@ async function drawPart() {
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
   partMesh = new THREE.Mesh(geometry, material);
-  scene.add(partMesh);
+  overhangMesh = new THREE.Mesh(overhangs(geometry), overhangMaterial);
+  overhangMesh.visible = showOverhangs;
+  partExtras = [new THREE.Mesh(geometry, insideMaterial), overhangMesh];
+  scene.add(partMesh, ...partExtras);
+
+  let top = 0;
+  for (let i = 2; i < vertices.length; i += 3) top = Math.max(top, vertices[i]);
+  cutSlider.max = Math.ceil(top * 10) / 10;
+  cutSlider.value = cutSlider.max;
+  sectionBar.hidden = false;
+  showSection();
 }
 
+// The triangles that look down at less than the overhang angle from level, so that supports
+// would hold them up; not those on the bed, nor below it.
+function overhangs(geometry) {
+  const position = geometry.attributes.position.array, index = geometry.index.array;
+  const limit = Math.cos((overhang?.angle ?? 45) * Math.PI / 180);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), normal = new THREE.Vector3();
+  const picked = [];
+  for (let t = 0; t < index.length; t += 3) {
+    a.fromArray(position, index[t] * 3);
+    b.fromArray(position, index[t + 1] * 3);
+    c.fromArray(position, index[t + 2] * 3);
+    if (Math.max(a.z, b.z, c.z) <= 0.01) continue;
+    normal.subVectors(c, b).cross(a.sub(b)).normalize();  // as three.js finds a face's normal
+    if (-normal.z > limit) picked.push(index[t], index[t + 1], index[t + 2]);
+  }
+  const shown = new THREE.BufferGeometry();
+  shown.setAttribute('position', geometry.attributes.position);
+  shown.setIndex(picked);
+  return shown;
+}
+
+function showSection() {
+  const at = Number(cutSlider.value), top = Number(cutSlider.max);
+  ceiling.constant = at >= top ? NO_CUT : at;
+  cutLabel.textContent = at >= top ? 'no section' : `cut at ${mm(at)} mm`;
+}
+cutSlider.addEventListener('input', showSection);
+
 function clearPrint() {
-  if (partMesh) { scene.remove(partMesh); partMesh.geometry.dispose(); partMesh = null; }
+  if (partMesh) {
+    scene.remove(partMesh, ...partExtras);
+    partMesh.geometry.dispose();
+    overhangMesh.geometry.dispose();
+    partMesh = overhangMesh = null;
+    partExtras = [];
+  }
+  sectionBar.hidden = true;
+  ceiling.constant = NO_CUT;
   if (paths) {
     scene.remove(paths.mesh, paths.travel);
     for (const drawn of [paths.mesh, paths.travel]) { drawn.geometry.dispose(); drawn.material.dispose(); }
@@ -154,7 +213,6 @@ function withHiddenRoles(material) {
   return material;
 }
 // Only this layer: what is below it is cut away.
-const NO_CUT = 1e6;
 const floor = new THREE.Plane(new THREE.Vector3(0, 0, 1), NO_CUT);
 renderer.localClippingEnabled = true;
 
@@ -304,7 +362,11 @@ function redrawLegend() {
 
 function options() {
   return '<div class="options">'
-    + `<div class="tools"><button type="button" id="measuring" title="Measure (M)" aria-pressed="${measuring}">Measure</button>`
+    + (partMesh && overhang ? `<div id="overhangNote" class="dim"${showOverhangs ? '' : ' hidden'}>Red: faces that look down at less than `
+        + `${Math.round(overhang.angle)}° from level, which supports hold up${overhang.auto ? ' (the automatic angle: half a wall\'s width per layer)' : ''}</div>` : '')
+    + '<div class="tools">'
+    + (partMesh ? `<button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button>` : '')
+    + `<button type="button" id="measuring" title="Measure (M)" aria-pressed="${measuring}">Measure</button>`
     + `<span class="units">${Object.keys(UNITS).map(name =>
         `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div></div>`;
 }
@@ -326,6 +388,13 @@ document.getElementById('onlyLayer').addEventListener('change', event => {
 info.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (button?.id === 'measuring') return setMeasuring(!measuring);
+  if (button?.id === 'overhangs') {
+    showOverhangs = !showOverhangs;
+    button.setAttribute('aria-pressed', showOverhangs);
+    document.getElementById('overhangNote').hidden = !showOverhangs;
+    if (overhangMesh) overhangMesh.visible = showOverhangs;
+    return;
+  }
   if (button?.dataset.units) return setUnits(button.dataset.units);
   const row = event.target.closest('[data-role]');
   if (!row || !paths) return;
@@ -388,7 +457,8 @@ function pickAt(x, y) {
   if (!target) return null;
   raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
   const hit = raycaster.intersectObject(target, false).find(hit => target === partMesh
-    || (!hiddenRoles.has(paths.roles[paths.boxRole[hit.instanceId]]) && floor.distanceToPoint(hit.point) >= 0));
+    ? ceiling.distanceToPoint(hit.point) >= 0
+    : (!hiddenRoles.has(paths.roles[paths.boxRole[hit.instanceId]]) && floor.distanceToPoint(hit.point) >= 0));
   if (!hit) return null;
   if (target !== partMesh) return hit.point;
   const position = partMesh.geometry.attributes.position;
@@ -517,6 +587,7 @@ async function refresh() {
     const state = await (await fetch('/state')).json();
     if (state.version !== version) {
       version = state.version;
+      overhang = state.overhang ?? null;
       clearMeasurement();
       drawBed(state.bed, state.height);
       describe(state);

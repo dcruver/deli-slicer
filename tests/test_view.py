@@ -144,6 +144,17 @@ def test_state_names_the_gcode_once_the_print_is_sliced(url):
     assert state["version"] != before["version"]
 
 
+def test_state_has_the_overhang_angle_supports_go_by(url):
+    sliced_cube()
+
+    main(["supports", "--angle", "30"])
+    assert json.loads(get(url + "/state")[2])["overhang"] == {"angle": 30, "auto": False}
+
+    main(["set", "support_material_threshold", "0"])  # automatic: half a wall's width per layer
+    overhang = json.loads(get(url + "/state")[2])["overhang"]
+    assert overhang["auto"] and 20 < overhang["angle"] < 70
+
+
 def test_toolpaths_are_the_extrusions_of_the_sliced_print(url):
     sliced_cube()
 

@@ -10,6 +10,8 @@ a command that works differently, are marked **Changed**.
   flow or layer time; the layer slider shows each layer's time and can show that layer
   alone. **Changed:** travel moves are shown by clicking Travel in the legend; the
   checkbox for them is gone.
+- `deli view`, before slicing: Overhangs shows in red the faces supports would hold up,
+  and a slider cuts the part at a height to show its inside.
 - **Changed:** Orca processes no longer print small perimeters at 15 mm/s. Orca slows
   none unless a process sets `small_perimeter_threshold`, and Elegoo's and Bambu's do not,
   but PrusaSlicer slows every loop under about 41 mm, so prints with many small loops took

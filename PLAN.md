@@ -593,7 +593,7 @@ plates at all; one G-code file per plate in the cache, and what `deli send` and
   to about 977,000 extrusions, one box each. The ruler picks among the visible ones one
   by one (`InstancedMesh.raycast`), on every pointer move while its line is loose.
 
-Tools, proposed 2026-10-06 (the user asked for all of them on the list; 1 to 4 done the same day). Each keeps the
+Tools, proposed 2026-10-06 (the user asked for all of them on the list; 1 to 6 done the same day). Each keeps the
 page a viewer: none changes the print. In the order suggested, 1 and 2 first, as they
 share the engine change and would have shown the 15 mm/s small perimeters at a glance:
 
@@ -611,10 +611,10 @@ share the engine change and would have shown the 15 mm/s small perimeters at a g
    perimeters, supports alone), like the travel-moves box.
 4. Done, a toggle (no range): **One layer, or a range**: an "only this layer" toggle or a second handle on the
    slider, and the layer's own time in its label.
-5. **Overhangs on the model before slicing**: faces steeper than the print's
+5. Done: **Overhangs on the model before slicing**: faces steeper than the print's
    `support_material_threshold` drawn red, from each face's normal, to choose an
    orientation and decide on `deli supports`.
-6. **A section plane**: a height slider that cuts the model to show its inside (wall
+6. Done: **A section plane**: a height slider that cuts the model to show its inside (wall
    thickness, cavities).
 7. **Tools that write the command to copy**: a clicked layer gives `deli pause N`, a part
    dragged on the bed `deli move <part> X Y`, a clicked face the `deli rotate` that lays

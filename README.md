@@ -407,7 +407,10 @@ each kind of extrusion takes, and travel; click one to hide or show it. "Colour 
 colours the print by speed, flow (mm³/s) or layer time instead, from blue for the least
 to red for the most, which shows at a glance what is slow. The times are PrusaSlicer's
 estimate from reading the G-code back, as its own G-code viewer makes it, and can be a
-minute or two from the one `deli slice` reports. To measure, press Measure (or M) and click
+minute or two from the one `deli slice` reports. Before slicing, Overhangs shows in red
+the faces supports would hold up (at the print's `support_material_threshold`, or the
+angle PrusaSlicer works out when it is 0), and a slider cuts the part at a height to
+show its inside. To measure, press Measure (or M) and click
 two points on the part or the print: the line follows the pointer from the first, and the
 page shows the distance between them and along each axis, in mm or inches as you choose,
 snapping to a corner of the part when you click near one. Esc clears; a right-click

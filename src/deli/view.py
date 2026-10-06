@@ -19,6 +19,7 @@ import hashlib
 import http.client
 import http.server
 import json
+import math
 import os
 import signal
 import socket
@@ -87,6 +88,23 @@ def _config(doc) -> str:
     return settings.for_engine(merged)
 
 
+def _overhang(doc) -> dict:
+    """The slope, in degrees from level, below which a face that looks down needs support, as
+    PrusaSlicer's supports decide it: the print's `support_material_threshold`, or, at 0
+    ("automatic"), the slope at which each layer sticks out half an external perimeter's
+    width past the one below."""
+    angle = float(settings.effective(doc, "support_material_threshold")[0] or 0)
+    if angle > 0:
+        return {"angle": angle, "auto": False}
+    height = float(settings.effective(doc, "layer_height")[0])
+    nozzle = float(settings.effective(doc, "nozzle_diameter")[0].split(",")[0])
+    width = settings.effective(doc, "external_perimeter_extrusion_width")[0]
+    if width.endswith("%"):
+        width = float(width[:-1]) / 100 * height
+    width = float(width) or 1.125 * nozzle  # 0 is PrusaSlicer's automatic width
+    return {"angle": math.degrees(math.atan2(height, width / 2)), "auto": True}
+
+
 def state() -> dict:
     """What the page needs to describe the print: the bed, the parts and their transforms."""
     result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "filament": None, "parts": [], "gcode": None, "pauses": []}
@@ -106,6 +124,10 @@ def state() -> dict:
                 result["error"] = f"cannot read {part['file']}: {err}"
             result["parts"].append(described)
         result["pauses"] = project.pauses(doc)
+        try:
+            result["overhang"] = _overhang(doc)
+        except (KeyError, ValueError):  # a setting PrusaSlicer would not take; slice says so
+            pass
         if gcode := _gcode(doc):
             result["gcode"] = gcode.name
             result["roles"] = _engine.extrusion_roles()
