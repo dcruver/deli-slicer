@@ -96,29 +96,33 @@ def test_mesh_is_the_part_centred_on_the_bed(url):
     status, content_type, body = get(url + "/mesh")
 
     assert status == 200 and content_type == "application/octet-stream"
-    n_vertices, n_triangles = struct.unpack_from("<II", body)
-    assert (n_vertices, n_triangles) == (8, 12)
-    vertices = struct.unpack_from(f"<{n_vertices * 3}f", body, 8)
+    n_vertices, n_triangles, n_parts = struct.unpack_from("<III", body)
+    assert (n_vertices, n_triangles, n_parts) == (8, 12, 1)
+    vertices = struct.unpack_from(f"<{n_vertices * 3}f", body, 12)
     assert (min(vertices[0::3]), max(vertices[0::3])) == (115, 135)  # about x = 125
     assert (min(vertices[1::3]), max(vertices[1::3])) == (95, 115)  # about y = 105
     assert (min(vertices[2::3]), max(vertices[2::3])) == (0, 20)  # resting on the bed
-    indices = struct.unpack_from(f"<{n_triangles * 3}I", body, 8 + n_vertices * 12)
+    indices = struct.unpack_from(f"<{n_triangles * 3}I", body, 12 + n_vertices * 12)
     assert max(indices) == 7
+    assert struct.unpack_from("<2I", body, 12 + n_vertices * 12 + n_triangles * 12) == (8, 12)  # all the cube's
 
 
 def test_mesh_has_every_copy_of_every_part(url):
     main(["add", "cube.stl", "--count", "3"])
+    shutil.copy(CUBE, "box.stl")
+    main(["add", "box.stl"])
 
     status, _, body = get(url + "/mesh")
 
     assert status == 200
-    assert struct.unpack_from("<II", body) == (24, 36)
+    assert struct.unpack_from("<III", body) == (32, 48, 2)
+    assert struct.unpack_from("<4I", body, 12 + 32 * 12 + 48 * 12) == (24, 36, 8, 12)  # each part's, in order
 
 
 def test_mesh_without_a_part_is_empty(url):
     _, _, body = get(url + "/mesh")
 
-    assert body == struct.pack("<II", 0, 0)
+    assert body == struct.pack("<III", 0, 0, 0)
 
 
 def sliced_cube():

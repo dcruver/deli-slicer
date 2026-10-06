@@ -193,7 +193,7 @@ struct Unplaced : arr2::SelectionMask
 // object centred. A part that was given a place stays there, and the others are arranged
 // around it. The bed may be any polygon, so a printer's unusable corner can be cut out of
 // its bed_shape and the parts keep clear of it.
-Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &config)
+Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &config, std::vector<size_t> *objects_per_part = nullptr)
 {
     const Points bed = get_bed_shape(config);
     Model        model;
@@ -218,6 +218,8 @@ Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &co
             model.add_object(*object);
             unplaced.copies.emplace_back(object->instances.size(), !place);
         }
+        if (objects_per_part)
+            objects_per_part->push_back(one.objects.size());
         any_unplaced |= !place;
     }
     if (!any_unplaced)
@@ -420,26 +422,34 @@ std::array<double, 3> model_size(const std::string &model_path, std::array<doubl
 
 // The triangles of every part, every copy, placed on the bed exactly as `slice` places
 // them. Vertices are float32 x, y, z; triangles are three uint32 vertex indices each.
-std::pair<nb::bytes, nb::bytes> mesh(const std::vector<Part> &parts, const std::string &config_ini)
+std::tuple<nb::bytes, nb::bytes, std::vector<std::pair<size_t, size_t>>> mesh(const std::vector<Part> &parts, const std::string &config_ini)
 {
     std::vector<float>    vertices;
     std::vector<uint32_t> triangles;
+    std::vector<std::pair<size_t, size_t>> per_part;  // vertices and triangles, each part's after the one before
     {
         nb::gil_scoped_release release;
 
         const DynamicPrintConfig config = complete_config(parse_config(config_ini));
-        const Model              model  = load_arranged(parts, config);
-        for (const ModelObject *object : model.objects) {
-            const TriangleMesh m    = object->mesh();
-            const uint32_t     base = uint32_t(vertices.size() / 3);
-            for (const Vec3f &v : m.its.vertices)
-                vertices.insert(vertices.end(), {v.x(), v.y(), v.z()});
-            for (const Vec3i &t : m.its.indices)
-                triangles.insert(triangles.end(), {base + uint32_t(t(0)), base + uint32_t(t(1)), base + uint32_t(t(2))});
+        std::vector<size_t>      objects_per_part;
+        const Model              model  = load_arranged(parts, config, &objects_per_part);
+        size_t object_id = 0;
+        for (const size_t objects : objects_per_part) {
+            const size_t first_vertex = vertices.size() / 3, first_triangle = triangles.size() / 3;
+            for (const size_t end = object_id + objects; object_id < end; ++object_id) {
+                const TriangleMesh m    = model.objects[object_id]->mesh();
+                const uint32_t     base = uint32_t(vertices.size() / 3);
+                for (const Vec3f &v : m.its.vertices)
+                    vertices.insert(vertices.end(), {v.x(), v.y(), v.z()});
+                for (const Vec3i &t : m.its.indices)
+                    triangles.insert(triangles.end(), {base + uint32_t(t(0)), base + uint32_t(t(1)), base + uint32_t(t(2))});
+            }
+            per_part.emplace_back(vertices.size() / 3 - first_vertex, triangles.size() / 3 - first_triangle);
         }
     }
     return {nb::bytes(reinterpret_cast<const char *>(vertices.data()), vertices.size() * sizeof(float)),
-            nb::bytes(reinterpret_cast<const char *>(triangles.data()), triangles.size() * sizeof(uint32_t))};
+            nb::bytes(reinterpret_cast<const char *>(triangles.data()), triangles.size() * sizeof(uint32_t)),
+            per_part};
 }
 
 // The extrusions and the travel moves in a G-code file, in the order they are made, as
@@ -589,8 +599,10 @@ NB_MODULE(_engine, m)
           "Raises RuntimeError when the file cannot be read as a model.");
 
     m.def("mesh", &mesh, "parts"_a, "config"_a,
-          "The triangles of every part and copy, placed on the bed as `slice` places them: a pair\n"
-          "of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
+          "The triangles of every part and copy, placed on the bed as `slice` places them: bytes\n"
+          "of float32 vertex coordinates, bytes of uint32 triangle vertex indices, and per part, in\n"
+          "the order given, how many of the vertices and triangles are its, each part's after\n"
+          "the one before.");
 
     m.def("toolpaths", &toolpaths, "gcode"_a,
           "The extrusions and travel moves in a G-code file, in order, and the time they take.\n"

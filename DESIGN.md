@@ -85,7 +85,9 @@ when you want the file itself, for an SD card or another program.
 ## No surprises
 
 A command does what its name says and nothing more. `deli view` only displays: it never
-slices or changes the print, even when the G-code is out of date. `deli send` uploads
+slices or changes the print, even when the G-code is out of date. Its tools that would
+change it (a part dragged, a face laid flat, a pause) write the command instead, to run
+in the shell. `deli send` uploads
 without starting the print unless you add `--print`. Where a command does something
 extra to be helpful, it says so on its first line ("Slicing first: the print has changed
 since it was sliced").

@@ -137,16 +137,19 @@ def state() -> dict:
 
 
 def mesh() -> bytes:
-    """Every part's triangles, placed as `slice` places them: a header of two uint32 counts,
-    then float32 vertices and uint32 indices."""
+    """Every part's triangles, placed as `slice` places them: a header of three uint32 counts
+    (vertices, triangles, parts), then float32 vertices, uint32 indices, and per part in
+    `/state`'s order two uint32, how many of the vertices and triangles are its, each part's
+    after the one before."""
     doc = project.read()
     if not project.parts(doc):
-        return struct.pack("<II", 0, 0)
+        return struct.pack("<III", 0, 0, 0)
     try:
-        vertices, triangles = _engine.mesh(project.engine_parts(doc), _config(doc))
+        vertices, triangles, per_part = _engine.mesh(project.engine_parts(doc), _config(doc))
     except ValueError as err:  # the settings do not make a valid configuration
         raise RuntimeError(str(err)) from None
-    return struct.pack("<II", len(vertices) // 12, len(triangles) // 12) + vertices + triangles
+    counts = struct.pack(f"<{len(per_part) * 2}I", *(n for pair in per_part for n in pair))
+    return struct.pack("<III", len(vertices) // 12, len(triangles) // 12, len(per_part)) + vertices + triangles + counts
 
 
 def toolpaths() -> bytes:

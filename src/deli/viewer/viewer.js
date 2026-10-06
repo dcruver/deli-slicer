@@ -38,6 +38,8 @@ let bedGroup = null;
 let partMesh = null;
 let partExtras = [];  // drawn with the part: its inside, where a section cuts it open, and its overhangs
 let overhangMesh = null;
+let partRanges = [];
+let placed = null;
 let overhang = null;  // from /state: the slope below which supports hold a face up
 let showOverhangs = false;
 let paths = null;  // the sliced print: what is drawn, and where each layer ends in it
@@ -97,13 +99,22 @@ function drawBed(points, height) {
   }
 }
 
-async function drawPart() {
+async function drawPart(parts) {
   const response = await fetch('/mesh');
   if (!response.ok) throw new Error(await response.text());
   const data = await response.arrayBuffer();
-  const [nVertices, nTriangles] = new Uint32Array(data, 0, 2);
-  const vertices = new Float32Array(data, 8, nVertices * 3);
-  const indices = new Uint32Array(data, 8 + nVertices * 12, nTriangles * 3);
+  const [nVertices, nTriangles, nParts] = new Uint32Array(data, 0, 3);
+  const vertices = new Float32Array(data, 12, nVertices * 3);
+  const indices = new Uint32Array(data, 12 + nVertices * 12, nTriangles * 3);
+  const counts = new Uint32Array(data, 12 + nVertices * 12 + nTriangles * 12, nParts * 2);
+  // Which vertices and triangles are each part's, for the tools that act on one part.
+  partRanges = [];
+  for (let i = 0, vertex = 0, triangle = 0; i < nParts; i++) {
+    partRanges.push({ part: parts[i], vertex, vertices: counts[i * 2], triangle, triangles: counts[i * 2 + 1] });
+    vertex += counts[i * 2];
+    triangle += counts[i * 2 + 1];
+  }
+  placed = vertices.slice();  // where the parts are, before a drag moves one
 
   clearPrint();
   if (nTriangles === 0) return;
@@ -364,9 +375,10 @@ function options() {
   return '<div class="options">'
     + (partMesh && overhang ? `<div id="overhangNote" class="dim"${showOverhangs ? '' : ' hidden'}>Red: faces that look down at less than `
         + `${Math.round(overhang.angle)}° from level, which supports hold up${overhang.auto ? ' (the automatic angle: half a wall\'s width per layer)' : ''}</div>` : '')
+    + (partMesh ? `<div class="tools"><button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button></div>` : '')
     + '<div class="tools">'
-    + (partMesh ? `<button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button>` : '')
-    + `<button type="button" id="measuring" title="Measure (M)" aria-pressed="${measuring}">Measure</button>`
+    + Object.entries(TOOLS).filter(([, tool]) => partMesh || !tool.modelOnly).map(([name, tool]) =>
+        `<button type="button" data-tool="${name}" title="${tool.title}" aria-pressed="${mode === name}">${tool.label}</button>`).join('')
     + `<span class="units">${Object.keys(UNITS).map(name =>
         `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div></div>`;
 }
@@ -387,7 +399,7 @@ document.getElementById('onlyLayer').addEventListener('change', event => {
 // The info box is rewritten on every redraw, so the box listens for its buttons and rows.
 info.addEventListener('click', event => {
   const button = event.target.closest('button');
-  if (button?.id === 'measuring') return setMeasuring(!measuring);
+  if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
   if (button?.id === 'overhangs') {
     showOverhangs = !showOverhangs;
     button.setAttribute('aria-pressed', showOverhangs);
@@ -419,7 +431,14 @@ info.addEventListener('change', event => {
 // pointer when one is within a few pixels. A third click starts again; Esc clears; a right-click
 // clears and turns measuring off. The points
 // are dropped when the print changes, since what they were on may have moved.
-let measuring = false;
+// The tools a click on the view is for, one at a time: measuring, moving a part, or laying a
+// face of one flat on the bed. The last two only write the command that would do it.
+const TOOLS = {
+  measure: { label: 'Measure', title: 'Measure between two points (M)' },
+  move: { label: 'Move', title: 'Drag a part to where it should go', modelOnly: true },
+  flat: { label: 'Lay flat', title: 'Click the face of a part to lay on the bed', modelOnly: true },
+};
+let mode = null;
 const picks = [];
 let loose = null;  // where the free end of the line is, between the first click and the second
 let pointer = null;  // where the pointer has moved to since the free end last followed it
@@ -504,11 +523,11 @@ function clearMeasurement() {
   drawMeasurement();
 }
 
-function setMeasuring(on) {
-  measuring = on;
-  renderer.domElement.style.cursor = on ? 'crosshair' : '';
-  document.getElementById('measuring')?.setAttribute('aria-pressed', on);
-  if (!on) clearMeasurement();
+function setMode(name) {
+  if (mode === 'measure' && name !== 'measure') clearMeasurement();
+  mode = name;
+  renderer.domElement.style.cursor = { measure: 'crosshair', move: 'grab', flat: 'pointer' }[name] ?? '';
+  for (const button of info.querySelectorAll('[data-tool]')) button.setAttribute('aria-pressed', button.dataset.tool === name);
 }
 
 function setUnits(name) {
@@ -526,16 +545,20 @@ function followPointer() {
   drawMeasurement();
 }
 
-// A click marks a point and a right-click stops measuring; a drag, with either button, still
-// turns or moves the view.
+// A click marks a point, or picks a face to lay flat, and a right-click puts the tool down; a
+// drag, with either button, still turns or moves the view, except a part dragged to move it.
 let pressedAt = null;
 renderer.domElement.addEventListener('pointerdown', event => {
   pressedAt = [event.clientX, event.clientY];
-});
+  if (mode === 'move' && event.button === 0) startDrag(event);
+}, { capture: true });  // before the view's controls, so that a drag on a part does not turn the view too
 renderer.domElement.addEventListener('pointerup', event => {
-  if (!measuring || !pressedAt || Math.hypot(event.clientX - pressedAt[0], event.clientY - pressedAt[1]) > 4) return;
-  if (event.button === 2) return setMeasuring(false);
+  if (dragging) return endDrag();
+  if (!mode || !pressedAt || Math.hypot(event.clientX - pressedAt[0], event.clientY - pressedAt[1]) > 4) return;
+  if (event.button === 2) return setMode(null);
   if (event.button !== 0) return;
+  if (mode === 'flat') return layFlat(event.clientX, event.clientY);
+  if (mode !== 'measure') return;
   const point = pickAt(event.clientX, event.clientY);
   if (!point) return;
   if (picks.length === 2) picks.length = 0;
@@ -544,7 +567,8 @@ renderer.domElement.addEventListener('pointerup', event => {
   drawMeasurement();
 });
 renderer.domElement.addEventListener('pointermove', event => {
-  if (measuring && picks.length === 1 && !event.buttons) pointer = [event.clientX, event.clientY];
+  if (dragging) return drag(event);
+  if (mode === 'measure' && picks.length === 1 && !event.buttons) pointer = [event.clientX, event.clientY];
 });
 renderer.domElement.addEventListener('pointerleave', () => {
   if (!loose) return;
@@ -553,8 +577,135 @@ renderer.domElement.addEventListener('pointerleave', () => {
 });
 addEventListener('keydown', event => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key === 'm' || event.key === 'M') setMeasuring(!measuring);
-  else if (event.key === 'Escape') clearMeasurement();
+  if (event.key === 'm' || event.key === 'M') setMode(mode === 'measure' ? null : 'measure');
+  else if (event.key === 'Escape') {
+    clearMeasurement();
+    putBack();
+    hideCommand();
+  }
+});
+
+// The command a tool has written, to copy and run in the print's directory.
+const commandBox = document.getElementById('command');
+function showCommand(text, note = '') {
+  commandBox.hidden = false;
+  document.getElementById('commandText').textContent = text ?? '';
+  document.getElementById('commandText').hidden = !text;
+  document.getElementById('copyCommand').hidden = !text;
+  document.getElementById('copyCommand').textContent = 'Copy';
+  document.getElementById('commandNote').textContent = note;
+}
+function hideCommand() { commandBox.hidden = true; }
+document.getElementById('copyCommand').addEventListener('click', async event => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById('commandText').textContent);
+    event.target.textContent = 'Copied';
+  } catch {
+    getSelection().selectAllChildren(document.getElementById('commandText'));  // to copy by hand
+  }
+});
+document.getElementById('closeCommand').addEventListener('click', () => { putBack(); hideCommand(); });
+
+// How a part is named on the command line: its file, without the extension, quoted if needed.
+function partName(part) {
+  const name = part.file.replace(/\.[^./]+$/, '');
+  return /^[\w.\/@%+=:,-]+$/.test(name) ? name : `'${name.replaceAll("'", "'\\''")}'`;
+}
+const number = n => String(Math.round(n * 100) / 100);
+
+function rangeOf(faceIndex) {
+  return partRanges.find(range => faceIndex >= range.triangle && faceIndex < range.triangle + range.triangles);
+}
+function partHit(x, y) {
+  if (!partMesh) return null;
+  raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
+  return raycaster.intersectObject(partMesh, false).find(hit => ceiling.distanceToPoint(hit.point) >= 0) ?? null;
+}
+
+// Move: a part dragged over the bed, level, shows where it would go and gives the
+// `deli move` that puts its middle there. The print itself changes only when that is run.
+let dragging = null;
+function startDrag(event) {
+  const hit = partHit(event.clientX, event.clientY);
+  if (!hit) return;
+  const range = rangeOf(hit.faceIndex);
+  if (range.part.count > 1) return showCommand(null, `${range.part.file} has copies, and a part with copies cannot be given a place.`);
+  controls.enabled = false;
+  renderer.domElement.style.cursor = 'grabbing';
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
+    minX = Math.min(minX, placed[v * 3]); maxX = Math.max(maxX, placed[v * 3]);
+    minY = Math.min(minY, placed[v * 3 + 1]); maxY = Math.max(maxY, placed[v * 3 + 1]);
+  }
+  dragging = { range, plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -hit.point.z), from: hit.point.clone(),
+               middle: [(minX + maxX) / 2, (minY + maxY) / 2], by: new THREE.Vector3() };
+  putBack(range);  // another part moved before goes back where it is
+}
+function drag(event) {
+  raycaster.setFromCamera(new THREE.Vector2(event.clientX / innerWidth * 2 - 1, 1 - event.clientY / innerHeight * 2), camera);
+  const to = raycaster.ray.intersectPlane(dragging.plane, new THREE.Vector3());
+  if (!to) return;
+  dragging.by.subVectors(to, dragging.from).setZ(0);
+  const { range, by } = dragging, position = partMesh.geometry.attributes.position;
+  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
+    position.array[v * 3] = placed[v * 3] + by.x;
+    position.array[v * 3 + 1] = placed[v * 3 + 1] + by.y;
+  }
+  position.needsUpdate = true;
+  const [x, y] = [dragging.middle[0] + by.x, dragging.middle[1] + by.y];
+  showCommand(`deli move ${partName(range.part)} ${number(x)} ${number(y)}`, 'Run in the print\'s directory to move it there:');
+}
+function endDrag() {
+  controls.enabled = true;
+  renderer.domElement.style.cursor = 'grab';
+  partMesh.geometry.computeBoundingSphere();
+  partMesh.geometry.computeBoundingBox();
+  dragging = null;
+}
+// Every part back where the print has it, but the one given.
+function putBack(except) {
+  if (!partMesh || !placed) return;
+  const position = partMesh.geometry.attributes.position;
+  for (const range of partRanges) {
+    if (range === except) continue;
+    position.array.set(placed.subarray(range.vertex * 3, (range.vertex + range.vertices) * 3), range.vertex * 3);
+  }
+  position.needsUpdate = true;
+  partMesh.geometry.computeBoundingSphere();
+}
+
+// Lay flat: the `deli rotate` that turns the part so the clicked face lies on the bed. The
+// engine scales a part, then turns it about x, y and z in that order, all as recorded, not
+// added to what it has; so the face's direction is taken back to the file's own, and new x
+// and y angles found that point it straight down, keeping the turn about z.
+function layFlat(x, y) {
+  const hit = partHit(x, y);
+  if (!hit) return;
+  const range = rangeOf(hit.faceIndex), [rx, ry, rz] = range.part.rotate;
+  const toRadians = Math.PI / 180;
+  const turned = new THREE.Matrix4().makeRotationZ(rz * toRadians)
+    .multiply(new THREE.Matrix4().makeRotationY(ry * toRadians)).multiply(new THREE.Matrix4().makeRotationX(rx * toRadians));
+  const m = hit.face.normal.clone().applyMatrix4(turned.transpose()).normalize();  // the face's direction as in the file
+  const r = Math.hypot(m.y, m.z);
+  const angle = radians => {
+    const degrees = Math.round(radians / toRadians * 100) / 100;
+    return degrees <= -180 ? degrees + 360 : degrees === -0 ? 0 : degrees;
+  };
+  const ax = angle(Math.atan2(-m.y, -m.z)), ay = angle(Math.atan2(m.x, r));
+  const name = partName(range.part);
+  const steps = [['x', ax, rx], ['y', ay, ry]].filter(([, to, from]) => Math.abs(to - from) > 0.01)
+    .map(([axis, to]) => `deli rotate ${name} ${axis} ${number(to)}`);
+  if (!steps.length) return showCommand(null, 'That face already lies on the bed.');
+  showCommand(steps.join(' && '), 'Run in the print\'s directory to lay that face on the bed:');
+}
+
+// Pause: the `deli pause` for the layer on the slider, or the one that takes it away.
+document.getElementById('pauseHere').addEventListener('click', () => {
+  if (!paths) return;
+  const layer = Number(layerSlider.value);
+  showCommand(paths.pauses.includes(layer) ? `deli pause off ${layer}` : `deli pause ${layer}`,
+    paths.pauses.includes(layer) ? 'Run in the print\'s directory to stop pausing after this layer:'
+                                 : 'Run in the print\'s directory to pause after this layer:');
 });
 
 const mm = n => Math.round(n * 100) / 100;
@@ -589,9 +740,12 @@ async function refresh() {
       version = state.version;
       overhang = state.overhang ?? null;
       clearMeasurement();
+      hideCommand();
+      if (dragging) endDrag();
       drawBed(state.bed, state.height);
       describe(state);
-      await (state.gcode ? drawToolpaths(state.roles, state.pauses) : drawPart());
+      await (state.gcode ? drawToolpaths(state.roles, state.pauses) : drawPart(state.parts));
+      if (TOOLS[mode]?.modelOnly && !partMesh) setMode(null);
       info.innerHTML += options();
     }
   } catch (err) {

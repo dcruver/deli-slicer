@@ -410,7 +410,11 @@ estimate from reading the G-code back, as its own G-code viewer makes it, and ca
 minute or two from the one `deli slice` reports. Before slicing, Overhangs shows in red
 the faces supports would hold up (at the print's `support_material_threshold`, or the
 angle PrusaSlicer works out when it is 0), and a slider cuts the part at a height to
-show its inside. To measure, press Measure (or M) and click
+show its inside. Move and Lay flat write the command that would do it: drag a part over
+the bed for its `deli move`, or click a face of one for the `deli rotate` that lays that
+face on the bed; Pause here, beside the layer slider, writes the `deli pause` for that
+layer. The page changes nothing itself: copy the command and run it, and the page
+follows. To measure, press Measure (or M) and click
 two points on the part or the print: the line follows the pointer from the first, and the
 page shows the distance between them and along each axis, in mm or inches as you choose,
 snapping to a corner of the part when you click near one. Esc clears; a right-click

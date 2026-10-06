@@ -77,9 +77,10 @@ def extent(vertices: bytes):
 
 
 def test_copies_and_several_parts_are_spread_over_the_bed(tmp_path):
-    vertices, triangles = _engine.mesh(part(count=4) + part(scale=(1, 1, 2), rotate=(0, 0, 45)), CONFIG)
+    vertices, triangles, per_part = _engine.mesh(part(count=4) + part(scale=(1, 1, 2), rotate=(0, 0, 45)), CONFIG)
 
     assert len(triangles) // 12 == 5 * 12
+    assert per_part == [(4 * 8, 4 * 12), (8, 12)]  # each part's vertices and triangles, in order
     x0, x1, y0, y1 = extent(vertices)
     assert x1 - x0 > 40 and y1 - y0 > 40  # not on top of each other
 
@@ -89,13 +90,13 @@ def test_copies_and_several_parts_are_spread_over_the_bed(tmp_path):
 
 
 def test_single_part_is_centred_even_on_a_bed_with_a_cut_out_corner():
-    vertices, _ = _engine.mesh(part(), NOTCHED)
+    vertices, _, _ = _engine.mesh(part(), NOTCHED)
 
     assert extent(vertices) == (118, 138, 118, 138)
 
 
 def test_parts_keep_clear_of_the_cut_out_corner():
-    vertices, _ = _engine.mesh(part(scale=(12, 12, 1)), NOTCHED)  # 240 mm wide: centred, it would reach into the corner
+    vertices, _, _ = _engine.mesh(part(scale=(12, 12, 1)), NOTCHED)  # 240 mm wide: centred, it would reach into the corner
 
     x0, x1, y0, y1 = extent(vertices)
     assert x1 <= 246 or y0 >= 20
@@ -214,13 +215,13 @@ def test_toolpaths_of_a_missing_file_is_an_error(tmp_path):
 
 
 def test_a_part_with_a_place_is_put_there(tmp_path):
-    vertices, _ = _engine.mesh(part(place=(50, 60)), CONFIG)
+    vertices, _, _ = _engine.mesh(part(place=(50, 60)), CONFIG)
 
     assert extent(vertices) == (40, 60, 50, 70)
 
 
 def test_other_parts_are_arranged_around_a_part_with_a_place():
-    vertices, _ = _engine.mesh(part(place=(100, 100)) + part(count=2), CONFIG)
+    vertices, _, _ = _engine.mesh(part(place=(100, 100)) + part(count=2), CONFIG)
 
     placed, *others = (extent(vertices[at : at + 96]) for at in range(0, len(vertices), 96))  # eight vertices each
     assert placed == (90, 110, 90, 110)
