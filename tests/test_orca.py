@@ -111,6 +111,24 @@ def test_overhang_speeds_are_reversed_and_zero_means_wall_speed():
     assert out["enable_dynamic_overhang_speeds"] == "1"
 
 
+def test_small_perimeters_are_not_slowed_when_orcas_threshold_is_zero():
+    # Orca's default threshold, 0, slows no loop; PrusaSlicer would slow every one under
+    # 2π × 6.5 mm to its own default, 15 mm/s, outer wall included.
+    out = orca.convert_process({"outer_wall_speed": "120", "inner_wall_speed": "150"}, nozzle=0.6).settings
+    assert out["small_perimeter_speed"] == "120"
+    assert orca.convert_process({}, nozzle=0.4).settings["small_perimeter_speed"] == "60"
+
+
+def test_small_perimeter_speed_is_of_the_outer_wall_when_orca_slows_them():
+    process = {"outer_wall_speed": "120", "inner_wall_speed": "150", "small_perimeter_threshold": "6.5"}
+    assert orca.convert_process(process, nozzle=0.6).settings["small_perimeter_speed"] == "60"  # Orca's 50%
+    out = orca.convert_process({**process, "small_perimeter_speed": "25"}, nozzle=0.6)
+    assert out.settings["small_perimeter_speed"] == "25"
+    assert not [note for note in out.notes if "small_perimeter" in note]
+    other = orca.convert_process({**process, "small_perimeter_threshold": "3"}, nozzle=0.6)
+    assert any("small_perimeter_threshold 3 mm" in note for note in other.notes)
+
+
 def test_unknown_process_setting_is_reported_not_copied():
     result = orca.convert_process({"seam_slope_type": "none", "layer_height": "0.3"}, nozzle=0.6)
     assert "seam_slope_type" in result.dropped

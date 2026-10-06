@@ -518,7 +518,6 @@ PROCESS_RENAMES = {
     "travel_speed": "travel_speed",
     "initial_layer_speed": "first_layer_speed",
     "initial_layer_infill_speed": "first_layer_infill_speed",
-    "small_perimeter_speed": "small_perimeter_speed",
     # supports
     "enable_support": "support_material",
     "support_threshold_angle": "support_material_threshold",
@@ -695,6 +694,25 @@ def convert_process(process: Orca, nozzle: float) -> Converted:
             speed = _first(process[step])
             # A speed may be a percentage of the outer wall's; 0 means "as the outer wall".
             out[f"overhang_speed_{index}"] = fallback if float(speed.rstrip("%") or 0) == 0 else speed
+
+    # Orca slows a perimeter loop no longer than 2π × small_perimeter_threshold to
+    # small_perimeter_speed, a percentage of the outer wall's; its default threshold, 0, slows
+    # none. PrusaSlicer always slows loops up to 2π × 6.5 mm, to 15 mm/s unless told otherwise,
+    # and gives the whole loop that one speed, its outer wall too. So with Orca's threshold at
+    # 0 they get the slower wall speed, and with any other it is taken as PrusaSlicer's 6.5 mm.
+    handled.update({"small_perimeter_speed", "small_perimeter_threshold"})
+    outer = _first(process.get("outer_wall_speed", "60"))  # Orca's defaults
+    inner = _first(process.get("inner_wall_speed", "60"))
+    threshold = float(_first(process.get("small_perimeter_threshold", "0")))
+    if threshold == 0:
+        out["small_perimeter_speed"] = f"{min(float(outer), float(inner)):g}"
+    else:
+        speed = _first(process.get("small_perimeter_speed", "50%"))
+        out["small_perimeter_speed"] = _percent_of(speed if float(speed.rstrip("%")) else "50%", outer)
+        if threshold != 6.5:
+            result.notes.append(
+                f"small_perimeter_threshold {threshold:g} mm converted to PrusaSlicer's fixed 6.5 mm."
+            )
 
     ratio = _first(process.get("print_flow_ratio", "1"))
     handled.add("print_flow_ratio")

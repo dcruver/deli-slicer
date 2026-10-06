@@ -5,6 +5,13 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- **Changed:** Orca processes no longer print small perimeters at 15 mm/s. Orca slows
+  none unless a process sets `small_perimeter_threshold`, and Elegoo's and Bambu's do not,
+  but PrusaSlicer slows every loop under about 41 mm, so prints with many small loops took
+  far longer than in Orca (a laptop stand on the Centauri Carbon: 3 h 57 min, now 2 h 06
+  min). Converted processes now give them the slower wall speed. A process already in your
+  library is kept as it was: convert it again with `deli import orca process "<name>"` and
+  accept it in each print with `deli process <name>`, or `deli set small_perimeter_speed 120`.
 - `deli view` measures: press the Measure button, or M, and click two points on the part or
   the sliced print to see the distance between them and how far apart they are along x, y
   and z, in millimetres or inches. After the first click the line follows the pointer until
