@@ -45,7 +45,7 @@ make uninstall
 make wheel           # build dist/deli-*.whl to give to someone
 ```
 
-Releasing: set `version` in `pyproject.toml`, commit, and push a tag `vX.Y.Z` with the same version. `.github/workflows/wheels.yml` refuses a tag that does not match, builds and tests every platform's wheel, and publishes them as a GitHub release (a tag with a `-`, such as `v0.2.0-rc1`, as a pre-release). Each platform's build job uploads its wheel as an artifact named `wheel-<platform>`; a new platform's test job goes in the release job's `needs`.
+Releasing: set `version` in `pyproject.toml`, commit, and push a tag `vX.Y.Z` with the same version. `.github/workflows/wheels.yml` refuses a tag that does not match, builds and tests every platform's wheel, and publishes them as a GitHub release (a tag with a `-`, such as `v0.2.0-rc1`, as a pre-release). `install.sh` (the README's `curl ... | sh`) installs the latest non-pre-release's wheel for the machine with uv, so a release needs nothing changed there; a new platform needs a case in its `platform`. Each platform's build job uploads its wheel as an artifact named `wheel-<platform>`; a new platform's test job goes in the release job's `needs`.
 
 ## Local environment
 

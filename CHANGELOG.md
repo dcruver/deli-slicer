@@ -5,6 +5,9 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- Install in one line: `curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh`
+  installs the latest release's wheel for your machine with uv, and uv and Python
+  first if they are missing.
 - `deli view` shows the sliced print, and `deli send` sends it without slicing again, when
   a model file's modification time is in the future, as one unpacked from an archive made
   in another time zone can be. Whether the G-code is still the print is now decided by

@@ -51,10 +51,21 @@ The longer story, with clips of each part, is in the blog post
 
 ## Install
 
-deli is a Python package with PrusaSlicer's slicing engine compiled in. You need
-Python 3.12 or newer and [`uv`](https://docs.astral.sh/uv/) (or `pipx`).
+deli is a Python package with PrusaSlicer's slicing engine compiled in. On Linux
+(and Windows, in WSL: see below) or macOS, in one line:
 
-### From a release
+```
+curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh
+```
+
+[The script](install.sh) installs the latest release's wheel for your machine with
+[`uv`](https://docs.astral.sh/uv/), installing uv first if you don't have it; uv
+fetches Python 3.12 if you don't have that either. Run it again to upgrade, or with
+`DELI_VERSION=0.4.2` in front of `sh` for a particular release. Then run `deli setup`.
+
+### From a release, by hand
+
+You need Python 3.12 or newer and `uv` (or `pipx`).
 
 Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
 platform with the engine inside; nothing else needs building. Install the one for your
@@ -89,8 +100,7 @@ wsl --install
 Then, in the Ubuntu terminal it opens:
 
 ```
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.2/deli-0.4.2-cp312-abi3-manylinux_2_28_x86_64.whl
+curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh
 ```
 
 It should work as on Linux (see below for how far that has been checked), with a few
@@ -107,8 +117,8 @@ things to know:
 
 **How far this has been checked:** nobody has used deli on a Windows PC yet. What is
 checked is automatic: for each release, a GitHub Actions job on one of GitHub's Windows
-Server machines sets up WSL 2 with Ubuntu 24.04, installs the wheel with `uv` as above,
-and runs deli's test suite, which slices but talks only to fake printers. `deli setup`
+Server machines sets up WSL 2 with Ubuntu 24.04, installs the wheel with `uv` (not
+with the one-line script), and runs deli's test suite, which slices but talks only to fake printers. `deli setup`
 and `deli send` with a real printer, `deli view` in a Windows browser, the networking
 notes above and models under `/mnt/c/` are untested; they come from how WSL works, not
 from trying them. If you run deli on Windows, an issue saying how it went would help.
