@@ -26,6 +26,21 @@
   #info .units button { border-radius: 0; }
   #info .units button:first-child { border-radius: 4px 0 0 4px; }
   #info .units button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+  #info .colour-by { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; display: flex; gap: 0.5em; align-items: center; }
+  #info select { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px; padding: 1px 4px; }
+  #info .scale { height: 8px; border-radius: 2px; margin-top: 8px; }
+  #info .range { display: flex; justify-content: space-between; color: #9aa0a8; margin-bottom: 6px; }
+  #info .role { display: flex; align-items: center; padding: 0 4px; margin: 0 -4px; border-radius: 3px; cursor: pointer; }
+  #info .role:first-of-type { margin-top: 6px; }
+  #info .role:hover:not(.fixed) { background: #262a31; }
+  #info .role.fixed { cursor: default; }
+  #info .role.off .name { text-decoration: line-through; color: #6b717a; }
+  #info .role.off .swatch { opacity: 0.3; }
+  #info .role.total { border-top: 1px solid #3a3f48; margin-top: 4px; padding-top: 4px; border-radius: 0; }
+  #info .time, #info .share { color: #9aa0a8; font-variant-numeric: tabular-nums; text-align: right; }
+  #info .time { margin-left: auto; padding-left: 1.5em; }
+  #info .share { width: 3em; }
+  #layers label { display: flex; align-items: center; gap: 0.4em; cursor: pointer; color: #9aa0a8; }
   #info .swatch { display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.5em; border-radius: 2px; }
   #layers { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
             align-items: center; padding: 8px 14px; background: rgba(27, 30, 35, 0.85);
@@ -42,7 +57,8 @@
 </head>
 <body>
 <div id="info">Connecting to deli…</div>
-<div id="layers" hidden><input type="range" id="layer" min="1" max="1" list="pauseTicks"><span id="layerLabel"></span></div>
+<div id="layers" hidden><input type="range" id="layer" min="1" max="1" list="pauseTicks"><span id="layerLabel"></span>
+  <label><input type="checkbox" id="onlyLayer"> only this layer</label></div>
 <datalist id="pauseTicks"></datalist>
 <div id="measurement" hidden></div>
 <script type="module" src="./viewer.js"></script>

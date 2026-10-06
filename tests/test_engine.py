@@ -152,7 +152,7 @@ def toolpaths(gcode: Path):
     """Each extrusion as (start, end, width, height, layer, role name)."""
     import struct
 
-    segments, layers, roles = _engine.toolpaths(str(gcode))
+    segments, _, layers, roles, _, _ = _engine.toolpaths(str(gcode))
     names = _engine.extrusion_roles()
     assert len(segments) == 32 * len(roles) and len(layers) == 4 * len(roles)
     numbers = struct.unpack(f"{len(roles) * 8}f", segments)
@@ -177,6 +177,27 @@ def test_toolpaths_are_the_extrusions_of_a_gcode_file(tmp_path):
     walls = [(start, end, width, height) for start, end, width, height, _, role in paths if role == "External perimeter"]
     assert all(90 - 0.01 <= c <= 110 + 0.01 for start, end, *_ in walls for c in (*start[:2], *end[:2]))  # the cube, centred at 100, 100
     assert all(0.3 < width < 0.6 and height == pytest.approx(0.2, abs=0.001) for *_, width, height in walls)
+
+
+def test_toolpaths_have_speeds_flows_and_times(tmp_path):
+    out = tmp_path / "cube.gcode"
+    _engine.slice(part(), CONFIG, str(out))
+
+    _, rates, _, roles, role_times, layer_times = _engine.toolpaths(str(out))
+
+    import struct
+
+    speeds, flows = struct.unpack(f"{len(roles) * 2}f", rates)[0::2], struct.unpack(f"{len(roles) * 2}f", rates)[1::2]
+    names = _engine.extrusion_roles()
+    travel = names.index("Travel")
+    assert all(speed > 0 for speed in speeds)
+    assert all((flow == 0) == (role == travel) for flow, role in zip(flows, roles))
+    assert len(role_times) == len(names) + 1 and len(layer_times) == 100
+    estimate = re.search(r"estimated printing time \(normal mode\) = (?:(\d+)h )?(\d+)m (\d+)s", out.read_text())
+    hours, minutes, seconds = (int(n or 0) for n in estimate.groups())
+    assert sum(role_times) == pytest.approx(sum(layer_times), rel=1e-4)
+    assert sum(role_times) == pytest.approx(hours * 3600 + minutes * 60 + seconds, rel=0.02)
+    assert role_times[names.index("External perimeter")] > 0
 
 
 def test_toolpaths_include_supports(tmp_path):

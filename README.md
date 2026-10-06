@@ -401,8 +401,13 @@ layer the print does not have.
 `deli view` opens a page in your browser and gives the shell straight back; the page
 follows the print as you change it. After `deli slice` it shows the G-code instead of
 the parts: every extrusion, supports included, coloured by what it is for, with a
-slider to go through the layers. The colours turn lighter where the print pauses, and
-a box in the legend shows the travel moves. To measure, press Measure (or M) and click
+slider to go through the layers, each with the time it takes, and a box to show only
+that layer. The colours turn lighter where the print pauses. The legend says how long
+each kind of extrusion takes, and travel; click one to hide or show it. "Colour by"
+colours the print by speed, flow (mm³/s) or layer time instead, from blue for the least
+to red for the most, which shows at a glance what is slow. The times are PrusaSlicer's
+estimate from reading the G-code back, as its own G-code viewer makes it, and can be a
+minute or two from the one `deli slice` reports. To measure, press Measure (or M) and click
 two points on the part or the print: the line follows the pointer from the first, and the
 page shows the distance between them and along each axis, in mm or inches as you choose,
 snapping to a corner of the part when you click near one. Esc clears; a right-click

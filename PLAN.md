@@ -593,19 +593,23 @@ plates at all; one G-code file per plate in the cache, and what `deli send` and
   to about 977,000 extrusions, one box each. The ruler picks among the visible ones one
   by one (`InstancedMesh.raycast`), on every pointer move while its line is loose.
 
-Tools, proposed 2026-10-06 (the user asked for all of them on the list). Each keeps the
+Tools, proposed 2026-10-06 (the user asked for all of them on the list; 1 to 4 done the same day). Each keeps the
 page a viewer: none changes the print. In the order suggested, 1 and 2 first, as they
 share the engine change and would have shown the 15 mm/s small perimeters at a glance:
 
-1. **Colour by speed, volumetric flow or layer time**, instead of by role, with a
+1. Done: **Colour by speed, volumetric flow or layer time**, instead of by role, with a
    gradient legend and a selector. Needs a feedrate per extrusion from `_engine.toolpaths`
    (PrusaSlicer's G-code reader has it): one more float32 each in `/toolpaths`.
-2. **Where the time goes**: time per role in the legend ("External perimeter 78 min,
+2. Done: **Where the time goes**: time per role in the legend ("External perimeter 78 min,
    38 %"), from PrusaSlicer's `GCodeProcessor`, which estimates it with acceleration;
-   the engine returns it beside the toolpaths.
-3. **Show or hide a role** by clicking it in the legend (infill hidden to see the
+   the engine returns it beside the toolpaths. Reading the file back gives a total 1 to 2
+   minutes above the estimate written while slicing (2 h 08 min against 2 h 06 min on a
+   laptop stand), spread over every layer; the first layer agrees to the second.
+   Seen with it: solid infill on the stand's layer 2 at 29.7 mm³/s, over the filament's
+   21; not looked into yet.
+3. Done: **Show or hide a role** by clicking it in the legend (infill hidden to see the
    perimeters, supports alone), like the travel-moves box.
-4. **One layer, or a range**: an "only this layer" toggle or a second handle on the
+4. Done, a toggle (no range): **One layer, or a range**: an "only this layer" toggle or a second handle on the
    slider, and the layer's own time in its label.
 5. **Overhangs on the model before slicing**: faces steeper than the print's
    `support_material_threshold` drawn red, from each face's normal, to choose an

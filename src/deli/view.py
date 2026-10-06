@@ -129,14 +129,17 @@ def mesh() -> bytes:
 
 def toolpaths() -> bytes:
     """The extrusions in the print's G-code, in printing order: a uint32 count, then for
-    each eight float32 (start x, y, z, end x, y, z, width, height), then a uint32 layer
-    for each, then a uint8 for each, an index into `/state`'s `roles`. Empty when the
-    print has not been sliced since it last changed."""
+    each eight float32 (start x, y, z, end x, y, z, width, height), then two float32 for
+    each (speed in mm/s, flow in mm³/s), then a uint32 layer for each, then a uint8 for
+    each, an index into `/state`'s `roles`; and to end, JSON: the estimated seconds per
+    role (`roles`, one more than `/state` names, for every other move) and per layer
+    (`layers`). Empty when the print has not been sliced since it last changed."""
     gcode = _gcode(project.read())
     if gcode is None:
         return struct.pack("<I", 0)
-    segments, layers, roles = _engine.toolpaths(str(gcode))
-    return struct.pack("<I", len(roles)) + segments + layers + roles
+    segments, rates, layers, roles, role_times, layer_times = _engine.toolpaths(str(gcode))
+    times = json.dumps({"roles": role_times, "layers": layer_times}).encode()
+    return struct.pack("<I", len(roles)) + segments + rates + layers + roles + times
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

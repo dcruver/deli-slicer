@@ -34,7 +34,6 @@ scene.add(sun);
 let bedGroup = null;
 let partMesh = null;
 let paths = null;  // the sliced print: what is drawn, and where each layer ends in it
-let showTravel = false;
 let framed = false;
 let version = null;
 const material = new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.6, metalness: 0.05 });
@@ -120,9 +119,49 @@ const ROLE_COLOURS = {
   'Internal infill': '#b03029', 'Solid infill': '#9654cc', 'Top solid infill': '#f04040',
   'Ironing': '#ff8c69', 'Bridge infill': '#4d80ba', 'Gap fill': '#ffffff', 'Skirt/Brim': '#00876e',
   'Support material': '#00ff00', 'Support material interface': '#008000', 'Wipe tower': '#b3e3ab',
-  'Custom': '#5ed194',
+  'Custom': '#5ed194', 'Travel': '#8a9099',
 };
 const roleColour = name => ROLE_COLOURS[name] || '#e6b3b3';
+
+// What the sliced print can be coloured by: what each extrusion is for, or one of these, on
+// PrusaSlicer's scale from blue for the least to red for the most.
+const MEASURES = {
+  role: { name: 'Feature' },
+  speed: { name: 'Speed', unit: 'mm/s', of: (p, i) => p.boxSpeed[i] },
+  flow: { name: 'Flow', unit: 'mm³/s', of: (p, i) => p.boxFlow[i] },
+  layerTime: { name: 'Layer time', unit: 's', of: (p, i) => p.layerTimes[p.boxLayer[i]] },
+};
+const SCALE = ['#0b2c7a', '#135985', '#1c8891', '#04d60f', '#aaf200', '#fcf903', '#f5ce0a', '#d16830', '#c2523c', '#942616']
+  .map(c => new THREE.Color(c));
+function onScale(f, out) {
+  const x = Math.min(Math.max(f, 0), 1) * (SCALE.length - 1), i = Math.min(Math.floor(x), SCALE.length - 2);
+  return out.copy(SCALE[i]).lerp(SCALE[i + 1], x - i);
+}
+let colourBy = 'role';
+try { if (MEASURES[localStorage.getItem('colourBy')]) colourBy = localStorage.getItem('colourBy'); } catch {}
+const hiddenRoles = new Set(['Travel']);  // by name, so they stay hidden when the print is sliced again
+let onlyLayer = false;
+
+// Hiding a role: each extrusion carries its role, and the vertex shader puts those of a
+// hidden role outside the view, so nothing has to be rebuilt.
+const hiddenMask = { value: 0 };
+function withHiddenRoles(material) {
+  material.onBeforeCompile = shader => {
+    shader.uniforms.hiddenRoles = hiddenMask;
+    shader.vertexShader = 'attribute float role;\nuniform uint hiddenRoles;\n' + shader.vertexShader.replace('#include <project_vertex>',
+      '#include <project_vertex>\n  if (((hiddenRoles >> uint(role)) & 1u) == 1u) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);');
+  };
+  return material;
+}
+// Only this layer: what is below it is cut away.
+const NO_CUT = 1e6;
+const floor = new THREE.Plane(new THREE.Vector3(0, 0, 1), NO_CUT);
+renderer.localClippingEnabled = true;
+
+function duration(seconds) {
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)} h ${String(Math.round(seconds % 3600 / 60)).padStart(2, '0')} min`;
+  return seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds)} s`;
+}
 
 // The sliced print: one box per extrusion, as wide and as high as the line it lays down, in
 // printing order, so that drawing the first so many of them shows the print up to a layer.
@@ -134,19 +173,23 @@ async function drawToolpaths(roles, pauses) {
   const data = await response.arrayBuffer();
   const n = new Uint32Array(data, 0, 1)[0];
   const segments = new Float32Array(data, 4, n * 8);
-  const layers = new Uint32Array(data, 4 + n * 32, n);
-  const roleOf = new Uint8Array(data, 4 + n * 36, n);
+  const rates = new Float32Array(data, 4 + n * 32, n * 2);
+  const layers = new Uint32Array(data, 4 + n * 40, n);
+  const roleOf = new Uint8Array(data, 4 + n * 44, n);
+  const times = n ? JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4 + n * 45))) : null;
   const travelRole = roles.indexOf('Travel');
 
   clearPrint();
   if (n === 0) return;
   let travels = 0;
   for (let i = 0; i < n; i++) if (roleOf[i] === travelRole) travels++;
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), n - travels);
+  const count = n - travels;
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1),
+    withHiddenRoles(new THREE.MeshLambertMaterial({ clippingPlanes: [floor] })), count);
   mesh.frustumCulled = false;
   const travelPoints = new Float32Array(travels * 6);
-  const colours = roles.map(name => new THREE.Color(roleColour(name)));
-  const lighter = colours.map(colour => colour.clone().lerp(new THREE.Color(0xffffff), 0.55));
+  const boxRole = new Uint8Array(count), boxLayer = new Uint32Array(count), lighter = new Uint8Array(count);
+  const boxSpeed = new Float32Array(count), boxFlow = new Float32Array(count);
   const from = new THREE.Vector3(), along = new THREE.Vector3(), middle = new THREE.Vector3();
   const turn = new THREE.Quaternion(), size = new THREE.Vector3(), matrix = new THREE.Matrix4();
   const xAxis = new THREE.Vector3(1, 0, 0);
@@ -170,8 +213,11 @@ async function drawToolpaths(roles, pauses) {
     matrix.compose(middle, turn, size.set(length + width / 2, width, height));  // a little long, to close the corners
     mesh.setMatrixAt(boxes, matrix);
     // A pause after layer 30 comes before the layer numbered 30 here, where they count from 0.
-    const pausesBelow = pauses.filter(after => after <= layer).length;
-    mesh.setColorAt(boxes, (pausesBelow % 2 ? lighter : colours)[roleOf[i]]);
+    lighter[boxes] = pauses.filter(after => after <= layer).length % 2;
+    boxRole[boxes] = roleOf[i];
+    boxLayer[boxes] = layer;
+    boxSpeed[boxes] = rates[i * 2];
+    boxFlow[boxes] = rates[i * 2 + 1];
     used.add(roleOf[i]);
     ends[layer] = ++boxes;
     tops[layer] = z1;
@@ -181,28 +227,83 @@ async function drawToolpaths(roles, pauses) {
     travelEnds[layer] ??= travelEnds[layer - 1] ?? 0;
     tops[layer] ??= tops[layer - 1] ?? 0;
   }
+  mesh.geometry.setAttribute('role', new THREE.InstancedBufferAttribute(Float32Array.from(boxRole), 1));
+  mesh.setColorAt(0, new THREE.Color());  // makes the colour buffer, filled by colourPaths
   mesh.computeBoundingSphere();  // around every extrusion, before the slider hides some, for picking points on them
   const travelGeometry = new THREE.BufferGeometry();
   travelGeometry.setAttribute('position', new THREE.BufferAttribute(travelPoints, 3));
-  const travel = new THREE.LineSegments(travelGeometry, new THREE.LineBasicMaterial({ color: 0x8a9099 }));
+  const travel = new THREE.LineSegments(travelGeometry, new THREE.LineBasicMaterial({ color: ROLE_COLOURS.Travel, clippingPlanes: [floor] }));
   travel.frustumCulled = false;
-  travel.visible = showTravel;
   scene.add(mesh, travel);
-  paths = { mesh, travel, ends, travelEnds, tops, pauses };
+  if (travels) used.add(travelRole);
+  paths = { mesh, travel, ends, travelEnds, tops, pauses, roles, used, boxRole, boxLayer, boxSpeed, boxFlow, lighter,
+            roleTimes: times.roles, layerTimes: times.layers };
 
   layerSlider.max = ends.length;
   layerSlider.value = ends.length;
   pauseTicks.innerHTML = pauses.map(after => `<option value="${after}"></option>`).join('');
   layerBar.hidden = false;
+  showRoles();
+  colourPaths();
   showLayers();
-  info.innerHTML += '<br>' + roles.map((name, role) => used.has(role)
-    ? `<br><span class="swatch" style="background: ${roleColour(name)}"></span>${name}` : '').join('')
-    + (pauses.length ? '<br><span class="dim">lighter between one pause and the next</span>' : '');
+  info.innerHTML += `<div id="legend">${legend()}</div>`;
+}
+
+// Colours every extrusion by what it is for, or by where its measure falls between the least
+// and the most among the roles shown.
+function colourPaths() {
+  const { mesh } = paths, measure = MEASURES[colourBy], colour = new THREE.Color();
+  if (!measure.of) {
+    const colours = paths.roles.map(name => new THREE.Color(roleColour(name)));
+    const lighter = colours.map(c => c.clone().lerp(new THREE.Color(0xffffff), 0.55));
+    for (let i = 0; i < paths.boxRole.length; i++) mesh.setColorAt(i, (paths.lighter[i] ? lighter : colours)[paths.boxRole[i]]);
+  } else {
+    let least = Infinity, most = -Infinity;
+    for (let i = 0; i < paths.boxRole.length; i++) {
+      if (hiddenRoles.has(paths.roles[paths.boxRole[i]])) continue;
+      const value = measure.of(paths, i);
+      least = Math.min(least, value);
+      most = Math.max(most, value);
+    }
+    paths.range = [least, most];
+    for (let i = 0; i < paths.boxRole.length; i++)
+      mesh.setColorAt(i, onScale(most > least ? (measure.of(paths, i) - least) / (most - least) : 0.5, colour));
+  }
+  mesh.instanceColor.needsUpdate = true;
+}
+
+function showRoles() {
+  hiddenMask.value = paths.roles.reduce((mask, name, role) => hiddenRoles.has(name) ? mask | (1 << role) : mask, 0);
+  paths.travel.visible = !hiddenRoles.has('Travel');
+}
+
+// The roles in the print, each with the time it takes, to click to hide or show; and the
+// scale, when the print is coloured by a measure.
+function legend() {
+  const measure = MEASURES[colourBy], total = paths.roleTimes.reduce((a, b) => a + b, 0);
+  const rows = paths.roles.map((name, role) => paths.used.has(role) ? { name, role, time: paths.roleTimes[role] } : null)
+    .filter(Boolean).sort((a, b) => b.time - a.time);
+  const other = paths.roleTimes[paths.roles.length];
+  return `<div class="colour-by">Colour by <select id="colourBy">${Object.entries(MEASURES).map(([key, m]) =>
+      `<option value="${key}"${key === colourBy ? ' selected' : ''}>${m.name}</option>`).join('')}</select></div>`
+    + (measure.of ? `<div class="scale" style="background: linear-gradient(to right, ${SCALE.map(c => '#' + c.getHexString()).join(', ')})"></div>`
+        + `<div class="range"><span>${round(paths.range[0])}</span><span>${measure.unit}</span><span>${round(paths.range[1])}</span></div>` : '')
+    + rows.map(({ name, time }) => `<div class="role${hiddenRoles.has(name) ? ' off' : ''}" data-role="${name}" title="Click to ${hiddenRoles.has(name) ? 'show' : 'hide'}">`
+        + `<span class="swatch" style="background: ${roleColour(name)}"></span><span class="name">${name}</span>`
+        + `<span class="time">${duration(time)}</span><span class="share">${Math.round(time / total * 100)}%</span></div>`).join('')
+    + (other >= 1 ? `<div class="role fixed" title="Retracting, waiting, moving only up"><span class="swatch"></span><span class="name dim">Other moves</span>`
+        + `<span class="time">${duration(other)}</span><span class="share">${Math.round(other / total * 100)}%</span></div>` : '')
+    + `<div class="role fixed total"><span class="swatch"></span><span class="name">Total</span><span class="time">${duration(total)}</span><span class="share"></span></div>`
+    + (paths.pauses.length && !measure.of ? '<div class="dim">lighter between one pause and the next</div>' : '');
+}
+const round = n => n >= 100 ? Math.round(n) : Math.round(n * 10) / 10;
+function redrawLegend() {
+  const box = document.getElementById('legend');
+  if (box) box.innerHTML = legend();
 }
 
 function options() {
   return '<div class="options">'
-    + (paths ? `<label><input type="checkbox" id="travel"${showTravel ? ' checked' : ''}> Show travel moves</label>` : '')
     + `<div class="tools"><button type="button" id="measuring" title="Measure (M)" aria-pressed="${measuring}">Measure</button>`
     + `<span class="units">${Object.keys(UNITS).map(name =>
         `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div></div>`;
@@ -212,20 +313,34 @@ function showLayers() {
   const layer = Number(layerSlider.value);
   paths.mesh.count = paths.ends[layer - 1];
   paths.travel.geometry.setDrawRange(0, paths.travelEnds[layer - 1] * 2);
-  layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${mm(paths.tops[layer - 1])} mm`
-    + (paths.pauses.includes(layer) ? ', then a pause' : '');
+  floor.constant = onlyLayer && layer > 1 ? -(paths.tops[layer - 2] + 0.001) : NO_CUT;
+  layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${mm(paths.tops[layer - 1])} mm, `
+    + duration(paths.layerTimes[layer - 1] ?? 0) + (paths.pauses.includes(layer) ? ', then a pause' : '');
 }
 layerSlider.addEventListener('input', showLayers);
-// The info box is rewritten on every redraw, so the box listens for its checkbox and buttons.
+document.getElementById('onlyLayer').addEventListener('change', event => {
+  onlyLayer = event.target.checked;
+  if (paths) showLayers();
+});
+// The info box is rewritten on every redraw, so the box listens for its buttons and rows.
 info.addEventListener('click', event => {
   const button = event.target.closest('button');
-  if (button?.id === 'measuring') setMeasuring(!measuring);
-  else if (button?.dataset.units) setUnits(button.dataset.units);
+  if (button?.id === 'measuring') return setMeasuring(!measuring);
+  if (button?.dataset.units) return setUnits(button.dataset.units);
+  const row = event.target.closest('[data-role]');
+  if (!row || !paths) return;
+  const name = row.dataset.role;
+  if (!hiddenRoles.delete(name)) hiddenRoles.add(name);
+  showRoles();
+  if (MEASURES[colourBy].of) colourPaths();  // the scale spans the roles shown
+  redrawLegend();
 });
 info.addEventListener('change', event => {
-  if (event.target.id !== 'travel') return;
-  showTravel = event.target.checked;
-  if (paths) paths.travel.visible = showTravel;
+  if (event.target.id !== 'colourBy' || !paths) return;
+  colourBy = event.target.value;
+  try { localStorage.setItem('colourBy', colourBy); } catch {}
+  colourPaths();
+  redrawLegend();
 });
 
 // Measuring: while it is on, a click on the part or on the sliced print pins one end of a line,
@@ -272,7 +387,8 @@ function pickAt(x, y) {
   const target = partMesh ?? paths?.mesh;
   if (!target) return null;
   raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
-  const hit = raycaster.intersectObject(target, false)[0];
+  const hit = raycaster.intersectObject(target, false).find(hit => target === partMesh
+    || (!hiddenRoles.has(paths.roles[paths.boxRole[hit.instanceId]]) && floor.distanceToPoint(hit.point) >= 0));
   if (!hit) return null;
   if (target !== partMesh) return hit.point;
   const position = partMesh.geometry.attributes.position;

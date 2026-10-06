@@ -151,11 +151,13 @@ def test_toolpaths_are_the_extrusions_of_the_sliced_print(url):
 
     assert status == 200 and content_type == "application/octet-stream"
     (n,) = struct.unpack_from("<I", body)
-    assert n > 1000 and len(body) == 4 + n * (32 + 4 + 1)
-    layers = struct.unpack_from(f"<{n}I", body, 4 + n * 32)
+    assert n > 1000
+    layers = struct.unpack_from(f"<{n}I", body, 4 + n * 40)
     assert layers[-1] == 99  # 20 mm at 0.2 mm
     roles = json.loads(get(url + "/state")[2])["roles"]
-    assert {"External perimeter", "Travel"} <= {roles[role] for role in body[4 + n * 36 :]}
+    assert {"External perimeter", "Travel"} <= {roles[role] for role in body[4 + n * 44 : 4 + n * 45]}
+    times = json.loads(body[4 + n * 45 :])
+    assert len(times["roles"]) == len(roles) + 1 and len(times["layers"]) == 100
 
 
 def test_a_copy_written_with_output_changes_nothing_shown(url, job):

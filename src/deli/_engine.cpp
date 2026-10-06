@@ -444,34 +444,53 @@ std::pair<nb::bytes, nb::bytes> mesh(const std::vector<Part> &parts, const std::
 
 // The extrusions and the travel moves in a G-code file, in the order they are made, as
 // PrusaSlicer's own G-code reader finds them: for each, float32 x, y, z of its start and of
-// its end, its width and its height (0 for a travel move); a uint32 layer, counted from 0;
-// and a uint8 index into `extrusion_roles`, whose last name is the one for travel. The z
-// is the nozzle's, so the top of the extruded line.
-std::tuple<nb::bytes, nb::bytes, nb::bytes> toolpaths(const std::string &gcode_path)
+// its end, its width and its height (0 for a travel move); float32 speed (mm/s, as the
+// G-code asks, within the machine's limits) and flow (mm³/s; 0 for a travel move); a uint32
+// layer, counted from 0; and a uint8 index into `extrusion_roles`, whose last name is the
+// one for travel. The z is the nozzle's, so the top of the extruded line.
+// Then the time the reader estimates, acceleration included, in seconds: per name in
+// `extrusion_roles` and one more for every other move (retracting, waiting, a lone z move),
+// and per layer. Together they make the estimated printing time.
+using Toolpaths = std::tuple<nb::bytes, nb::bytes, nb::bytes, nb::bytes, std::vector<float>, std::vector<float>>;
+Toolpaths toolpaths(const std::string &gcode_path)
 {
-    std::vector<float>    segments;
+    std::vector<float>    segments, rates;
     std::vector<uint32_t> layers;
     std::vector<uint8_t>  roles;
+    const size_t travel_role = size_t(GCodeExtrusionRole::Count), other_role = travel_role + 1;
+    std::vector<float> role_times(other_role + 1, 0.f), layer_times;
     {
         nb::gil_scoped_release release;
 
         GCodeProcessor processor;
         processor.process_file(gcode_path);
         const std::vector<GCodeProcessorResult::MoveVertex> &moves = processor.get_result().moves;
-        for (size_t i = 1; i < moves.size(); ++i) {
+        for (size_t i = 0; i < moves.size(); ++i) {
             const GCodeProcessorResult::MoveVertex &move = moves[i];
-            const Vec3f &from = moves[i - 1].position, &to = move.position;
-            const bool travel = move.type == EMoveType::Travel;
-            if ((move.type != EMoveType::Extrude && !travel) || from == to)
+            const float time = move.time[size_t(PrintEstimatedStatistics::ETimeMode::Normal)];
+            const bool travel = move.type == EMoveType::Travel || move.type == EMoveType::Wipe;
+            role_times[move.type == EMoveType::Extrude ? size_t(move.extrusion_role) : travel ? travel_role : other_role] += time;
+            if (layer_times.size() <= move.layer_id)
+                layer_times.resize(move.layer_id + 1, 0.f);
+            layer_times[move.layer_id] += time;
+
+            if (i == 0 || (move.type != EMoveType::Extrude && move.type != EMoveType::Travel))
                 continue;
-            segments.insert(segments.end(), {from.x(), from.y(), from.z(), to.x(), to.y(), to.z(), travel ? 0.f : move.width, travel ? 0.f : move.height});
+            const Vec3f &from = moves[i - 1].position, &to = move.position;
+            if (from == to)
+                continue;
+            const bool extrudes = move.type == EMoveType::Extrude;
+            segments.insert(segments.end(), {from.x(), from.y(), from.z(), to.x(), to.y(), to.z(), extrudes ? move.width : 0.f, extrudes ? move.height : 0.f});
+            rates.insert(rates.end(), {move.feedrate, extrudes ? move.volumetric_rate() : 0.f});
             layers.push_back(move.layer_id);
-            roles.push_back(travel ? uint8_t(GCodeExtrusionRole::Count) : uint8_t(move.extrusion_role));
+            roles.push_back(extrudes ? uint8_t(move.extrusion_role) : uint8_t(travel_role));
         }
     }
     return {nb::bytes(reinterpret_cast<const char *>(segments.data()), segments.size() * sizeof(float)),
+            nb::bytes(reinterpret_cast<const char *>(rates.data()), rates.size() * sizeof(float)),
             nb::bytes(reinterpret_cast<const char *>(layers.data()), layers.size() * sizeof(uint32_t)),
-            nb::bytes(reinterpret_cast<const char *>(roles.data()), roles.size())};
+            nb::bytes(reinterpret_cast<const char *>(roles.data()), roles.size()),
+            role_times, layer_times};
 }
 
 // PrusaSlicer's names for what an extrusion is for, in the order `toolpaths` numbers them,
@@ -574,9 +593,12 @@ NB_MODULE(_engine, m)
           "of bytes, float32 vertex coordinates and uint32 triangle vertex indices.");
 
     m.def("toolpaths", &toolpaths, "gcode"_a,
-          "The extrusions and travel moves in a G-code file, in order: a triple of bytes. Per\n"
-          "move, eight float32 (start x, y, z, end x, y, z, width, height; the last two 0 for\n"
-          "travel), one uint32 layer counted from 0, and one uint8 index into `extrusion_roles()`.\n\n"
+          "The extrusions and travel moves in a G-code file, in order, and the time they take.\n"
+          "Four bytes objects, per move: eight float32 (start x, y, z, end x, y, z, width, height;\n"
+          "the last two 0 for travel); two float32 (speed in mm/s, flow in mm3/s, 0 for travel);\n"
+          "one uint32 layer counted from 0; one uint8 index into `extrusion_roles()`. Then two\n"
+          "lists of seconds, acceleration included: per name in `extrusion_roles()` and one more\n"
+          "for every other move (retracts, waits), and per layer.\n\n"
           "Raises RuntimeError when the file cannot be read.");
 
     m.def("extrusion_roles", &extrusion_roles,
