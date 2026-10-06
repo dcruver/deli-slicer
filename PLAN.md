@@ -560,11 +560,12 @@ What the user's Voron showed (Klipper, read 2026-10-05):
 - Its `PRINT_START` reads `BED`, `EXTRUDER` and `MATERIAL` (the last picks a saved bed
   mesh per material). deli passes all three (`MATERIAL` added by `_fit_to`); `PRINT_END`
   reads nothing.
-- But Orca's Voron start G-code (`fdm_klipper_common`) runs `M190` and `M109` *before*
-  `PRINT_START`, so the nozzle sits at printing temperature through homing, QGL and the
-  bed mesh, and the bed is waited for twice. The macro heats in its own order. Dropping
-  the two lines is not enough: PrusaSlicer then emits its own `M190`/`M109` unless
-  `autoemit_temperature_commands` is off (`GCode.cpp`, `custom_gcode_sets_temperature`).
+- Orca's Voron start G-code (`fdm_klipper_common`) runs `M190` and `M109` *before*
+  `PRINT_START`, so the bed mesh is probed with everything hot. The user wants that:
+  prints come out better with the mesh done hot. Not a problem to fix. (Should a user
+  want the macro to heat alone, dropping the two lines is not enough: PrusaSlicer then
+  emits its own `M190`/`M109` unless `autoemit_temperature_commands` is off; `GCode.cpp`,
+  `custom_gcode_sets_temperature`.)
 - Mainsail's own macros on it read `SET_PRINT_STATS_INFO CURRENT_LAYER` (layer display,
   Mainsail's pause-at-layer); Orca's Voron profile does not send it, so neither does deli.
 
@@ -572,9 +573,8 @@ Open: how a user edits a printer's settings (`deli printer <name> --edit` in `$E
 like `git config --edit`, or `deli set ... ` aimed at the printer); whether setup, which
 already reads `PRINT_START`'s parameters, should also map the common Klipper ones
 (`BED`/`BED_TEMP`, `EXTRUDER`/`HOTEND`, `CHAMBER`, `MATERIAL`, `PRINT_MIN`/`PRINT_MAX`
-for adaptive meshing) and, when the macro heats itself (`M190`/`M109`/
-`TEMPERATURE_WAIT` in it), drop the heating before it and turn autoemit off. That is
-Klipper convention, not per vendor.
+for adaptive meshing). That is Klipper convention, not per vendor. Heating before the
+macro stays as Orca has it.
 
 **Multiple plates, to do (the user, 2026-10-05).** A print is one plate today; a project
 that needs several (a kit of parts that won't fit on one bed) is a folder per plate.
