@@ -328,6 +328,23 @@ deli slice                            # how long it takes and how much filament;
 deli send                             # uploads it, slicing first if needed; add --print to start printing
 ```
 
+`deli set` with nothing after it lists the settings this print changes, each with what
+its profile had, so the few things you changed are never lost among the hundreds you
+didn't. Settings that come from the printer, filament or process are not in that list;
+to look one up, give its name, and deli says where its value comes from:
+
+```
+$ deli set
+fill_density = 20%  (the process '0.30mm-standard-elegoo-cc-0.6-nozzle' has 15%)
+layer_height = 0.25  (the process '0.30mm-standard-elegoo-cc-0.6-nozzle' has 0.3)
+$ deli set temperature
+temperature is not changed by this print; the filament 'elegoo-pla-ecc' has 210
+$ deli set fuzzy_skin
+fuzzy_skin is not changed by this print; PrusaSlicer's default has none
+```
+
+`deli unset layer_height` goes back to the profile's value.
+
 A print can hold several models, each added the same way, and copies of one:
 `deli add 3DBenchy.stl --count 4` prints four, arranged on the bed for you. With more
 than one model, `scale`, `rotate` and `move` take the model's name first
@@ -417,7 +434,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
 | `deli add <file> [--count N]` | add a model, or more copies of it |
 | `deli remove <part> [--count N]` | take a part, or some copies, out |
-| `deli set <setting> [value]` / `deli unset` | change a setting for this print |
+| `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
