@@ -85,7 +85,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.0/deli-0.4.0-cp312-abi3-manylinux_2_28_x86_64.whl
 ```
 
-Everything works as on Linux, with a few things to know:
+It should work as on Linux (see below for how far that has been checked), with a few
+things to know:
 
 - **Your printer:** give `deli setup` its IP address, or a name your router knows. Names
   ending in `.local` often don't resolve inside WSL. On Windows 11, WSL's
@@ -96,9 +97,13 @@ Everything works as on Linux, with a few things to know:
   `/mnt/c/Users/you/Downloads`. Reading from there is slower than from WSL's own folders,
   but fine for a few models.
 
-Each release's wheel is installed and tested this way, in WSL 2's Ubuntu 24.04 on
-GitHub's Windows machines. Sending to a printer and the viewer in a Windows browser have
-not been tried there, since they need a printer and a person.
+**How far this has been checked:** nobody has used deli on a Windows PC yet. What is
+checked is automatic: for each release, a GitHub Actions job on one of GitHub's Windows
+Server machines sets up WSL 2 with Ubuntu 24.04, installs the wheel with `uv` as above,
+and runs deli's test suite, which slices but talks only to fake printers. `deli setup`
+and `deli send` with a real printer, `deli view` in a Windows browser, the networking
+notes above and models under `/mnt/c/` are untested; they come from how WSL works, not
+from trying them. If you run deli on Windows, an issue saying how it went would help.
 
 Then let deli set itself up:
 

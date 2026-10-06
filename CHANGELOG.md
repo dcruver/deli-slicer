@@ -6,7 +6,7 @@ a command that works differently, are marked **Changed**.
 ## Unreleased
 
 - Windows: the README says how to run deli in WSL with the Linux wheel, which each
-  release now installs and tests in WSL 2 on Windows.
+  release is now tested with in WSL 2 by a GitHub Actions job (not yet on anyone's PC).
 
 ## 0.4.0 (2026-10-05)
 
