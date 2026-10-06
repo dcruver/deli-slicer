@@ -122,9 +122,11 @@ def gcode_path(doc: tomlkit.TOMLDocument) -> Path:
     return _gcode_cache() / f"{here.name}-{hashlib.sha256(str(here).encode()).hexdigest()[:12]}" / gcode_name(doc)
 
 
-def keep_gcode(path: Path) -> None:
-    """After a slice to `path`: the print keeps that one file only, its folder notes which
-    directory it is for, and the folders of print directories that are gone are removed."""
+def keep_gcode(path: Path, sources: str) -> None:
+    """After a slice to `path` from `sources` (`made_from` before slicing): the print keeps
+    that one file only, its folder notes which directory it is for and what the G-code was
+    made from, and the folders of print directories that are gone are removed."""
+    (path.parent / "made-from").write_text(sources)
     for other in path.parent.glob("*.gcode"):
         if other != path:
             other.unlink(missing_ok=True)
@@ -138,17 +140,26 @@ def keep_gcode(path: Path) -> None:
             shutil.rmtree(folder, ignore_errors=True)
 
 
+def made_from(doc: tomlkit.TOMLDocument) -> str:
+    """What the print's G-code is made from, as it is now: `deli.toml` by its contents, each
+    part's file by its size and modification time. `slice` notes it beside the G-code."""
+    lines = [hashlib.sha256(FILE.read_bytes()).hexdigest()]
+    for part in parts(doc):
+        stat = Path(part["file"]).stat()
+        lines.append(f"{stat.st_size} {stat.st_mtime_ns} {Path(part['file']).resolve()}")
+    return "\n".join(lines) + "\n"
+
+
 def fresh_gcode(doc: tomlkit.TOMLDocument) -> Path | None:
     """The print's G-code, unless `deli.toml` or a part's file has changed since it was
-    sliced: it is then no longer the print."""
-    found = parts(doc)
+    sliced: it is then no longer the print. What it was made from is compared, not when:
+    a model file can come with a modification time in the future (from an archive, or
+    another machine's clock), and the G-code would never be newer than it."""
     path = gcode_path(doc)
-    if not found:
+    if not parts(doc):
         return None
     try:
-        sliced = path.stat().st_mtime
-        sources = (FILE, *(Path(part["file"]) for part in found))
-        return path if all(source.stat().st_mtime <= sliced for source in sources) else None
+        return path if path.is_file() and (path.parent / "made-from").read_text() == made_from(doc) else None
     except OSError:
         return None
 

@@ -716,6 +716,8 @@ def _slice_print(doc, copy_to: Path | None = None) -> Path:
 
     output = project.gcode_path(doc)
     output.parent.mkdir(parents=True, exist_ok=True)
+    sources = project.made_from(doc)  # before slicing: a change made meanwhile is not in the G-code
+    (output.parent / "made-from").unlink(missing_ok=True)  # a slice that fails leaves nothing that looks current
     ini = settings.for_engine(config)
     what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
     try:
@@ -727,7 +729,7 @@ def _slice_print(doc, copy_to: Path | None = None) -> Path:
 
     if footer := config.get("gcode_footer"):
         _write_footer(output, footer, result.layers)
-    project.keep_gcode(output)
+    project.keep_gcode(output, sources)
     print(f"Sliced {what}")
     used = f"{result.filament_mm / 1000:.2f} m of filament"
     if result.filament_g:

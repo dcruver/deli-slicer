@@ -3,6 +3,14 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- `deli view` shows the sliced print, and `deli send` sends it without slicing again, when
+  a model file's modification time is in the future, as one unpacked from an archive made
+  in another time zone can be. Whether the G-code is still the print is now decided by
+  what it was made from, not by which file is newer; a print sliced with an older deli is
+  sliced once more.
+
 ## 0.4.2 (2026-10-05)
 
 - `deli setup` tells a Klipper printer's G-code to report the layer count and the

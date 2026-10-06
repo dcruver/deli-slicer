@@ -328,6 +328,7 @@ deli filament "generic petg"          # another filament than its default, conve
 deli set infill 20%                   # or any PrusaSlicer setting by name
 deli supports organic                 # automatic supports, for a model that needs them: on, off, grid, snug, organic
 deli scale 150%                       # a bigger boat
+deli scale z 60mm                     # or one side to a size, the others left as they are
 deli rotate 45                        # turned on the bed
 deli move 60 80                       # put it there instead of in the middle
 deli pause 40                         # pause once layer 40 is done: change the filament for a two-colour boat

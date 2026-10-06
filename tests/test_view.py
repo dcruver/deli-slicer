@@ -177,6 +177,18 @@ def test_gcode_is_not_shown_once_the_print_has_changed(url):
     assert get(url + "/toolpaths")[2] == struct.pack("<I", 0)
 
 
+def test_gcode_is_shown_for_a_model_file_dated_in_the_future(url, job):
+    future = time.time() + 4 * 3600  # as a file from an archive made in another time zone can be
+    os.utime(job / "cube.stl", (future, future))
+    sliced_cube()
+
+    assert json.loads(get(url + "/state")[2])["gcode"] == "cube.gcode"
+
+    os.utime(job / "cube.stl", (future + 1, future + 1))  # the model changes again
+
+    assert json.loads(get(url + "/state")[2])["gcode"] is None
+
+
 def test_page_and_its_scripts_are_served(url):
     status, content_type, body = get(url + "/")
     assert status == 200 and content_type.startswith("text/html")
