@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.4.1 (2026-10-05)
 
 - Windows: the README says how to run deli in WSL with the Linux wheel, which each
   release is now tested with in WSL 2 by a GitHub Actions job (not yet on anyone's PC).
