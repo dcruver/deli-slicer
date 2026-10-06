@@ -1,10 +1,10 @@
 # deli
 
-Git-style, shell-native slicer front end for 3D printing. Python, managed with `uv` (src layout, package `deli`). Licensed AGPL-3.0-only because it links PrusaSlicer's `libslic3r`.
+CLI-first slicer front end for 3D printing. Python, managed with `uv` (src layout, package `deli`). Licensed AGPL-3.0-only because it links PrusaSlicer's `libslic3r`.
 
 ## What it is
 
-- `deli` runs inside the user's shell like git: no REPL or TUI of its own. Each subcommand edits project state and exits.
+- `deli` runs inside the user's shell: no REPL or TUI of its own. Each subcommand edits project state and exits.
 - A print job is a `deli.toml` in the current directory: parts, their transforms, the chosen profiles, and only the settings overridden from those profiles.
 - Slicing is done in-process by PrusaSlicer's `libslic3r`, linked into a Python extension module. No slicer application has to be installed.
 - Profiles are PrusaSlicer INI. Orca JSON profiles are converted to INI by deli; the first target is the Elegoo Centauri Carbon.

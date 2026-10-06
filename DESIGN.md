@@ -4,7 +4,7 @@ These are the principles deli's commands are built on. A change that goes agains
 of them needs a good reason, written down here. `PLAN.md` records the narrower technical
 decisions and how they were reached; this file is the why behind what users see.
 
-## Lives in your shell, like git
+## Lives in your shell
 
 deli is a set of commands, each of which does one thing to the print in the current
 directory and exits. There is no REPL, no TUI and no window to keep open. Anything long-

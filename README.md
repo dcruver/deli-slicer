@@ -1,14 +1,14 @@
 # deli-slicer
 
-A git-style, shell-native slicer front end for 3D printing.
+A CLI-first slicer front end for 3D printing.
 
 `deli` keeps a print job as a plain-text `deli.toml` in the current directory. Each
-subcommand edits that file and exits, so a print is set up the way a git repository
-is: a few commands in a shell, a file you can read, and nothing else to open. Slicing
+subcommand edits that file and exits, so a print is set up with a few commands in a
+shell and a file you can read, with nothing else to open. Slicing
 is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs to be
 installed.
 
-![deli setup finding a Voron 2.4 by part of its name and taking its address, then adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
+![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
 
 ```
 deli setup                # once: tab completion, your printer, and how to reach it

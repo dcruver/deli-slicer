@@ -1432,7 +1432,7 @@ def _complete(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="deli", description="Git-style slicer front end for 3D printing.")
+    parser = argparse.ArgumentParser(prog="deli", description="CLI-first slicer front end for 3D printing.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     load = commands.add_parser(
