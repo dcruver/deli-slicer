@@ -46,6 +46,9 @@ print, so one tool can serve them all. A print is a short text file that holds o
 what you changed, and you change a setting by its name: `deli set infill 20%`. When
 the name is not quite right, deli suggests the ones that are close.
 
+The longer story, with clips of each part, is in the blog post
+[deli: A 3D Printer Slicer That Lives in My Shell](https://hullabalooing.cruver.ai/side-projects/posts/deli-a-3d-printer-slicer-that-lives-in-my-shell/).
+
 ## Install
 
 deli is a Python package with PrusaSlicer's slicing engine compiled in. You need
