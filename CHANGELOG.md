@@ -3,6 +3,12 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- `deli view` measures: tick Measure, or press M, and click two points on the part or the
+  sliced print to see the distance between them and how far apart they are along x, y and
+  z. On the part a point snaps to a nearby corner. Esc clears.
+
 ## 0.4.3 (2026-10-06)
 
 - Install in one line: `curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh`

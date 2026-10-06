@@ -22,6 +22,11 @@
             border: 1px solid #3a3f48; border-radius: 6px; white-space: nowrap; }
   #layers[hidden] { display: none; }
   #layer { width: min(40vw, 28em); }
+  #measurement { position: fixed; transform: translate(14px, -50%); padding: 4px 8px; pointer-events: none;
+                 background: rgba(27, 30, 35, 0.85); border: 1px solid #3a3f48; border-radius: 4px; white-space: nowrap; }
+  #measurement[hidden] { display: none; }
+  #measurement b { color: #fff; }
+  #measurement .dim { color: #9aa0a8; }
 </style>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
@@ -29,6 +34,7 @@
 <div id="info">Connecting to deli…</div>
 <div id="layers" hidden><input type="range" id="layer" min="1" max="1" list="pauseTicks"><span id="layerLabel"></span></div>
 <datalist id="pauseTicks"></datalist>
+<div id="measurement" hidden></div>
 <script type="module" src="./viewer.js"></script>
 </body>
 </html>

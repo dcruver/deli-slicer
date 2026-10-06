@@ -1,7 +1,7 @@
 // The viewer pane: the bed of the chosen printer and the parts on it, placed as `deli slice`
 // places them, or, once `deli slice` has run and until the print changes again, what it wrote:
 // every extrusion in the G-code, supports included, coloured by what it is for. It is a viewer
-// only. It asks the server for /state twice a second and redraws when the version changes, so
+// only, though it can measure what it shows. It asks the server for /state twice a second and redraws when the version changes, so
 // `deli scale`, `deli rotate`, `deli slice` and edits to deli.toml show up here.
 
 import * as THREE from 'three';
@@ -12,6 +12,7 @@ const layerBar = document.getElementById('layers');
 const layerSlider = document.getElementById('layer');
 const layerLabel = document.getElementById('layerLabel');
 const pauseTicks = document.getElementById('pauseTicks');
+const measurement = document.getElementById('measurement');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b1e23);
@@ -180,6 +181,7 @@ async function drawToolpaths(roles, pauses) {
     travelEnds[layer] ??= travelEnds[layer - 1] ?? 0;
     tops[layer] ??= tops[layer - 1] ?? 0;
   }
+  mesh.computeBoundingSphere();  // around every extrusion, before the slider hides some, for picking points on them
   const travelGeometry = new THREE.BufferGeometry();
   travelGeometry.setAttribute('position', new THREE.BufferAttribute(travelPoints, 3));
   const travel = new THREE.LineSegments(travelGeometry, new THREE.LineBasicMaterial({ color: 0x8a9099 }));
@@ -195,8 +197,13 @@ async function drawToolpaths(roles, pauses) {
   showLayers();
   info.innerHTML += '<br>' + roles.map((name, role) => used.has(role)
     ? `<br><span class="swatch" style="background: ${roleColour(name)}"></span>${name}` : '').join('')
-    + (pauses.length ? '<br><span class="dim">lighter between one pause and the next</span>' : '')
-    + `<div class="options"><label><input type="checkbox" id="travel"${showTravel ? ' checked' : ''}> Show travel moves</label></div>`;
+    + (pauses.length ? '<br><span class="dim">lighter between one pause and the next</span>' : '');
+}
+
+function options() {
+  return '<div class="options">'
+    + (paths ? `<label><input type="checkbox" id="travel"${showTravel ? ' checked' : ''}> Show travel moves</label>` : '')
+    + `<label><input type="checkbox" id="measuring"${measuring ? ' checked' : ''}> Measure <span class="dim">(M)</span></label></div>`;
 }
 
 function showLayers() {
@@ -207,10 +214,117 @@ function showLayers() {
     + (paths.pauses.includes(layer) ? ', then a pause' : '');
 }
 layerSlider.addEventListener('input', showLayers);
-info.addEventListener('change', event => {  // the info box is rewritten on every redraw, so the box listens for its checkbox
+info.addEventListener('change', event => {  // the info box is rewritten on every redraw, so the box listens for its checkboxes
+  if (event.target.id === 'measuring') setMeasuring(event.target.checked);
   if (event.target.id !== 'travel') return;
   showTravel = event.target.checked;
   if (paths) paths.travel.visible = showTravel;
+});
+
+// Measuring: while it is on, a click on the part or on the sliced print marks a point and a
+// second click another, and the line between them is labelled with its length and how far
+// apart the points are along each axis. On the part, a point snaps to a corner of the triangle
+// clicked when one is within a few pixels. A third click starts again; Esc clears. The points
+// are dropped when the print changes, since what they were on may have moved.
+let measuring = false;
+const picks = [];
+const SNAP_PIXELS = 10;
+const raycaster = new THREE.Raycaster();
+const measured = new THREE.Group();
+scene.add(measured);
+const dot = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 32;
+  const ctx = canvas.getContext('2d');
+  ctx.arc(16, 16, 12, 0, 2 * Math.PI);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#1b1e23';
+  ctx.stroke();
+  return new THREE.PointsMaterial({ map: new THREE.CanvasTexture(canvas), size: 12, sizeAttenuation: false,
+                                    transparent: true, depthTest: false });
+})();
+const ruler = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false });
+
+function onScreen(point) {
+  const p = point.clone().project(camera);
+  return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight, behind: p.z > 1 };
+}
+
+// The point on what is drawn under the pointer, or null.
+function pickAt(x, y) {
+  const target = partMesh ?? paths?.mesh;
+  if (!target) return null;
+  raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
+  const hit = raycaster.intersectObject(target, false)[0];
+  if (!hit) return null;
+  if (target !== partMesh) return hit.point;
+  const position = partMesh.geometry.attributes.position;
+  let best = hit.point, nearest = SNAP_PIXELS;
+  for (const index of [hit.face.a, hit.face.b, hit.face.c]) {
+    const corner = new THREE.Vector3().fromBufferAttribute(position, index);
+    const s = onScreen(corner), away = Math.hypot(s.x - x, s.y - y);
+    if (away < nearest) { best = corner; nearest = away; }
+  }
+  return best;
+}
+
+function drawMeasurement() {
+  for (const drawn of measured.children) drawn.geometry.dispose();
+  measured.clear();
+  measurement.hidden = !picks.length;
+  if (!picks.length) return;
+  const geometry = new THREE.BufferGeometry().setFromPoints(picks);
+  const shown = [new THREE.Points(geometry, dot)];
+  if (picks.length === 2) shown.push(new THREE.Line(geometry.clone(), ruler));
+  for (const drawn of shown) { drawn.renderOrder = 1; measured.add(drawn); }  // over the part, so never hidden by it
+  const [a, b] = picks;
+  measurement.innerHTML = b
+    ? `<b>${mm(a.distanceTo(b))} mm</b><br>` + ['x', 'y', 'z'].map(axis =>
+        `<span class="dim">Δ${axis}</span> ${mm(Math.abs(b[axis] - a[axis]))}`).join(' ')
+    : ['x', 'y', 'z'].map(axis => `<span class="dim">${axis}</span> ${mm(a[axis])}`).join(' ');
+  placeMeasurement();
+}
+
+function placeMeasurement() {  // beside the middle of the line, or the one point, wherever the camera has gone
+  if (!picks.length) return;
+  const s = onScreen(picks.length === 2 ? picks[0].clone().lerp(picks[1], 0.5) : picks[0]);
+  measurement.hidden = s.behind;
+  measurement.style.left = `${s.x}px`;
+  measurement.style.top = `${s.y}px`;
+}
+
+function clearMeasurement() {
+  picks.length = 0;
+  drawMeasurement();
+}
+
+function setMeasuring(on) {
+  measuring = on;
+  renderer.domElement.style.cursor = on ? 'crosshair' : '';
+  const box = document.getElementById('measuring');
+  if (box) box.checked = on;
+  if (!on) clearMeasurement();
+}
+
+// A click marks a point; a drag still turns the view.
+let pressedAt = null;
+renderer.domElement.addEventListener('pointerdown', event => {
+  pressedAt = event.button === 0 ? [event.clientX, event.clientY] : null;
+});
+renderer.domElement.addEventListener('pointerup', event => {
+  if (!measuring || !pressedAt || Math.hypot(event.clientX - pressedAt[0], event.clientY - pressedAt[1]) > 4) return;
+  const point = pickAt(event.clientX, event.clientY);
+  if (!point) return;
+  if (picks.length === 2) picks.length = 0;
+  picks.push(point.clone());
+  drawMeasurement();
+});
+addEventListener('keydown', event => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === 'm' || event.key === 'M') setMeasuring(!measuring);
+  else if (event.key === 'Escape') clearMeasurement();
 });
 
 const mm = n => Math.round(n * 100) / 100;
@@ -243,9 +357,11 @@ async function refresh() {
     const state = await (await fetch('/state')).json();
     if (state.version !== version) {
       version = state.version;
+      clearMeasurement();
       drawBed(state.bed, state.height);
       describe(state);
       await (state.gcode ? drawToolpaths(state.roles, state.pauses) : drawPart());
+      info.innerHTML += options();
     }
   } catch (err) {
     // A fetch that cannot reach the server at all fails with a TypeError: the viewer has gone.
@@ -300,6 +416,6 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); placeMeasurement(); renderer.render(scene, camera); });
 refresh();
 setInterval(refresh, 500);
