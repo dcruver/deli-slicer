@@ -556,7 +556,19 @@ def test_setup_from_a_klipper_address_matches_and_fits_the_printer(github, home,
 
     stored = library.read_settings(library.find("printer", "elegoo-centauri-carbon-0.6-nozzle"))
     assert stored["max_print_height"] == "200"  # no taller than the machine's Z travel
-    assert "print height lowered to 200 mm" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "print height lowered to 200 mm" in out
+    assert "layer count" not in out  # the Centauri's G-code already tells Klipper its layers
+
+
+def test_klipper_is_told_the_layers_once():
+    from deli.cli import LAYER_INFO, _layer_info
+
+    changes = _layer_info({"start_gcode": "PRINT_START", "layer_gcode": ";AFTER_LAYER_CHANGE"})
+    assert changes["start_gcode"] == "PRINT_START\\nSET_PRINT_STATS_INFO TOTAL_LAYER=[total_layer_count] CURRENT_LAYER=1"
+    assert changes["layer_gcode"] == ";AFTER_LAYER_CHANGE\\n" + LAYER_INFO
+    assert _layer_info({"start_gcode": "PRINT_START", "layer_gcode": LAYER_INFO}) == {}  # already told
+    assert _layer_info({})["layer_gcode"] == LAYER_INFO
 
 
 def test_setup_keeps_another_default_printer_unless_told(github, home, print_dir, monkeypatch, capsys):

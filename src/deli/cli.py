@@ -1303,9 +1303,25 @@ def _pick_for(presets: orca_install.Presets, found, asking: bool) -> str | None:
         print(f"   Choose a number from 1 to {len(fits)}.")
 
 
+LAYER_INFO = "SET_PRINT_STATS_INFO TOTAL_LAYER=[total_layer_count] CURRENT_LAYER={layer_num+1}"
+
+
+def _layer_info(current: dict[str, str]) -> dict[str, str]:
+    """Changes that tell Klipper the layer count and the current layer, which Mainsail and
+    Fluidd show, for a printer whose G-code does not already. PrusaSlicer runs `layer_gcode`
+    from the second layer on, so the start G-code says the first."""
+    start, layer = current.get("start_gcode", ""), current.get("layer_gcode", "")
+    if "SET_PRINT_STATS_INFO" in start + layer:
+        return {}
+    first = LAYER_INFO.replace("{layer_num+1}", "1")
+    return {"start_gcode": f"{start}\\n{first}" if start else first,
+            "layer_gcode": f"{layer}\\n{LAYER_INFO}" if layer else LAYER_INFO}
+
+
 def _fit_to(printer: str, found) -> list[str]:
     """Make a newly imported printer match what the machine reported: no taller prints than
-    its Z travel, and the material passed to a Klipper PRINT_START that reads it."""
+    its Z travel, the material passed to a Klipper PRINT_START that reads it, and the layers
+    told to Klipper for Mainsail and Fluidd."""
     path = library.find("printer", printer)
     current = library.read_settings(path)
     changes, said = {}, []
@@ -1319,6 +1335,9 @@ def _fit_to(printer: str, found) -> list[str]:
     if "MATERIAL" in found.start_params and "PRINT_START" in start and "MATERIAL=" not in start:
         changes["start_gcode"] = re.sub(r"(PRINT_START[^\\\n]*)", r"\1 MATERIAL=[filament_type]", start, count=1)
         said.append("PRINT_START is given MATERIAL=[filament_type], which your macro reads")
+    if found.kind == "moonraker" and (layers := _layer_info(current | changes)):
+        changes |= layers
+        said.append("Klipper is told the layer count and the current layer, for Mainsail and Fluidd")
     if changes:
         library.update(path, changes)
     return said

@@ -567,7 +567,9 @@ What the user's Voron showed (Klipper, read 2026-10-05):
   emits its own `M190`/`M109` unless `autoemit_temperature_commands` is off; `GCode.cpp`,
   `custom_gcode_sets_temperature`.)
 - Mainsail's own macros on it read `SET_PRINT_STATS_INFO CURRENT_LAYER` (layer display,
-  Mainsail's pause-at-layer); Orca's Voron profile does not send it, so neither does deli.
+  Mainsail's pause-at-layer); Orca's Voron profile does not send it. Done 2026-10-05:
+  setup's `_fit_to` adds it for a Klipper printer (`_layer_info`), and the user's Voron
+  profile was updated by hand the same way.
 
 Open: how a user edits a printer's settings (`deli printer <name> --edit` in `$EDITOR`,
 like `git config --edit`, or `deli set ... ` aimed at the printer); whether setup, which
