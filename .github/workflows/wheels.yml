@@ -137,6 +137,46 @@ jobs:
       - name: Run the tests
         run: python -m pytest -q
 
+  # Windows users are pointed to WSL: the x86-64 Linux wheel, installed the way the README
+  # says, in WSL 2's Ubuntu on Windows. The tests run from a clone inside WSL, not the
+  # Windows checkout, whose line endings Git may have changed.
+  test-wsl:
+    name: Tests on Windows, in WSL 2 (Ubuntu 24.04)
+    needs: linux
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: wsl-bash {0}
+    steps:
+      - uses: Vampire/setup-wsl@v7
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          additional-packages: curl ca-certificates git
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-linux-x86_64
+          path: wheelhouse
+      - name: Install the wheel with uv, as the README says
+        run: |
+          set -eux
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p ~/wheelhouse && cp "$(wslpath '${{ github.workspace }}')"/wheelhouse/*.whl ~/wheelhouse/
+          uv tool install ~/wheelhouse/*.whl
+          deli --help >/dev/null
+      - name: Run the tests
+        run: |
+          set -eux
+          export PATH="$HOME/.local/bin:$PATH"
+          git init -q ~/deli && cd ~/deli
+          git fetch -q --depth 1 https://github.com/${{ github.repository }} ${{ github.sha }}
+          git checkout -q FETCH_HEAD
+          git submodule update -q --init --depth 1   # the tests slice PrusaSlicer's own test models
+          uv venv -q --python 3.12
+          uv pip install -q ~/wheelhouse/*.whl pytest
+          .venv/bin/python -m pytest -q
+
   macos:
     name: macOS ${{ matrix.label }} wheel
     needs: version
@@ -289,7 +329,7 @@ jobs:
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test-linux, test-macos]
+    needs: [test-linux, test-wsl, test-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

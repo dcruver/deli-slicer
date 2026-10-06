@@ -66,8 +66,39 @@ uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.0/
 (`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
 need glibc 2.28 or newer, which most distributions from 2019 on have: Debian 10,
 Ubuntu 18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. The macOS wheels need macOS 11
-(Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer. There is no
-Windows wheel yet.
+(Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer.
+
+### On Windows, in WSL
+
+There is no Windows wheel; on Windows, deli runs in
+[WSL](https://learn.microsoft.com/windows/wsl/install), Windows' own Linux, with the
+Linux x86-64 wheel. In PowerShell, once:
+
+```
+wsl --install
+```
+
+Then, in the Ubuntu terminal it opens:
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.4.0/deli-0.4.0-cp312-abi3-manylinux_2_28_x86_64.whl
+```
+
+Everything works as on Linux, with a few things to know:
+
+- **Your printer:** give `deli setup` its IP address, or a name your router knows. Names
+  ending in `.local` often don't resolve inside WSL. On Windows 11, WSL's
+  [mirrored networking](https://learn.microsoft.com/windows/wsl/networking#mirrored-mode-networking)
+  (`networkingMode=mirrored` in `.wslconfig`) puts WSL on your network like any other program.
+- **`deli view`:** open the address it prints in your Windows browser.
+- **Your models:** Windows' folders are under `/mnt/c/`, so `C:\Users\you\Downloads` is
+  `/mnt/c/Users/you/Downloads`. Reading from there is slower than from WSL's own folders,
+  but fine for a few models.
+
+Each release's wheel is installed and tested this way, in WSL 2's Ubuntu 24.04 on
+GitHub's Windows machines. Sending to a printer and the viewer in a Windows browser have
+not been tried there, since they need a printer and a person.
 
 Then let deli set itself up:
 
@@ -419,8 +450,8 @@ Things that a user would notice, roughly in the order they matter:
 - **Bambu printers can't be sent to.** `deli send` does not speak Bambu's LAN or cloud
   protocols; write the G-code out with `deli slice -o .` and copy it over by hand (SD
   card, or another program's send).
-- **No Windows wheel.** Linux (x86-64, ARM64) and macOS (Apple Silicon, Intel) have
-  wheels; on Windows, `deli view`'s background server needs porting first.
+- **No Windows wheel.** On Windows, deli runs in WSL ([above](#on-windows-in-wsl)); a
+  wheel of its own needs `deli view`'s background server ported first.
 - **Settings apply to the whole print**, not to one part.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.
