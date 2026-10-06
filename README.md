@@ -480,6 +480,8 @@ Things that a user would notice, roughly in the order they matter:
 - **No Windows wheel.** On Windows, deli runs in WSL ([above](#on-windows-in-wsl)); a
   wheel of its own needs `deli view`'s background server ported first.
 - **Settings apply to the whole print**, not to one part.
+- **One plate per print.** A folder is one plate; a project that needs several plates is
+  a folder for each.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.
 - **One filament per print.** A change by hand at a `deli pause` is the only kind;

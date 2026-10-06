@@ -551,6 +551,15 @@ Done. 8 tests pass.
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
 per-part settings, multi-filament, more host types.
 
+**Multiple plates, to do (the user, 2026-10-05).** A print is one plate today; a project
+that needs several (a kit of parts that won't fit on one bed) is a folder per plate.
+Open: how `deli.toml` holds plates (a `[[plate]]` table that parts belong to, or parts
+that name a plate); whether arrange fills plates in turn when parts don't fit, or plates
+are only what the user says; how commands name a plate (`deli add x.stl --plate 2`,
+`deli slice 2`?) without breaking one-plate prints, which should not have to mention
+plates at all; one G-code file per plate in the cache, and what `deli send` and
+`deli view` do with several; and whether settings can differ per plate.
+
 **Viewer, to do:**
 
 - Speed with very large prints is unmeasured: organic supports on a Gridfinity bin came
