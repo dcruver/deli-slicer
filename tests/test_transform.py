@@ -250,22 +250,71 @@ def test_auto_gives_up_the_place_and_the_height(job, capsys):
     assert capsys.readouterr().out == "cube.stl is now placed automatically\n"
 
 
-def test_a_part_with_copies_cannot_be_given_a_place(job, capsys):
-    main(["add", "cube.stl"])
+def test_a_part_with_copies_is_moved_a_copy_at_a_time(job, capsys):
+    main(["add", "cube.stl", "--count", "2"])
+    capsys.readouterr()
 
     assert main(["move", "50", "60"]) == 1
-    assert "2 copies" in capsys.readouterr().err
+    assert "deli move cube --copy N 50 60" in capsys.readouterr().err
 
-    assert main(["move", "z", "-1"]) == 0  # every copy can be sunk
+    assert main(["move", "cube", "--copy", "2", "50", "60"]) == 0
+    assert capsys.readouterr().out == "copy 2 of cube.stl is now at 50, 60 mm\n"
+    assert part(job)["copy"] == {"2": {"at": [50, 60]}}
+    assert main(["move", "--copy", "2", "x", "40"]) == 0
+    assert part(job)["copy"]["2"]["at"] == [40, 60]
+    assert main(["move", "--copy", "3", "plate", "2"]) == 0
+    assert part(job)["copy"]["3"] == {"plate": 2}
+    capsys.readouterr()
+
+    assert main(["move"]) == 0
+    assert capsys.readouterr().out == "cube.stl x 3 is placed automatically; copy 2 at 40, 60 mm; copy 3 on plate 2\n"
+
+    assert main(["move", "--copy", "4", "1", "1"]) == 1
+    assert main(["move", "--copy", "2", "z", "-1"]) == 1  # every copy is at the same height
+    assert main(["move", "z", "-1"]) == 0
+
+    assert main(["move", "--copy", "2", "auto"]) == 0
+    assert part(job)["copy"] == {"3": {"plate": 2}}
+    assert main(["move", "auto"]) == 0
+    assert part(job) == {"file": "cube.stl", "count": 3}
 
 
-def test_a_part_with_a_place_cannot_be_given_copies(job, capsys):
+def test_a_place_becomes_the_first_copys_when_copies_are_added(job, capsys):
     main(["move", "50", "60"])
+    main(["move", "plate", "2"])
 
-    assert main(["add", "cube.stl"]) == 1
+    assert main(["add", "cube.stl"]) == 0
+    assert part(job) == {"file": "cube.stl", "plate": 2, "count": 2, "copy": {"1": {"at": [50, 60]}}}
 
-    assert "deli move cube auto" in capsys.readouterr().err
-    assert "count" not in part(job)
+    assert main(["remove", "cube", "--count", "1"]) == 0
+    assert part(job) == {"file": "cube.stl", "plate": 2, "at": [50, 60]}
+
+
+def test_the_last_copies_take_their_places_with_them(job, capsys):
+    main(["add", "cube.stl", "--count", "2"])
+    main(["move", "--copy", "3", "50", "60"])
+    main(["move", "--copy", "1", "plate", "2"])
+
+    main(["remove", "cube", "--count", "2"])
+
+    assert part(job) == {"file": "cube.stl", "plate": 2}
+
+
+def test_arrange_forgets_every_place_and_plate(job, capsys):
+    shutil.copy(CUBE, job / "box.stl")
+    main(["add", "box.stl", "--count", "2"])
+    main(["move", "cube", "50", "60"])
+    main(["move", "cube", "z", "-1"])
+    main(["move", "box", "--copy", "2", "plate", "2"])
+    capsys.readouterr()
+
+    assert main(["arrange"]) == 0
+
+    assert capsys.readouterr().out == "Every part is now placed automatically\n"
+    parts = tomllib.loads((job / "deli.toml").read_text())["part"]
+    assert parts == [{"file": "cube.stl", "z": -1}, {"file": "box.stl", "count": 2}]  # raised or sunk is not where
+    assert main(["arrange"]) == 0
+    assert capsys.readouterr().out == "Every part is already placed automatically\n"
 
 
 @pytest.mark.parametrize(("args", "message"), [(["far", "50"], "not a distance"), (["1", "2", "3"], "usage"), (["50"], "usage")])

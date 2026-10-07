@@ -275,14 +275,9 @@ def _add(args: argparse.Namespace) -> int:
     stored = project.stored_path(path)
 
     if existing := next((part for part in parts if part["file"] == stored), None):
-        # Adding a part again adds copies of it.
-        if project.part_place(existing):
-            raise CommandError(
-                f"{stored} has been moved to a place of its own, and copies are placed automatically; "
-                f"give that up first with: deli move {Path(stored).stem} auto"
-            )
+        # Adding a part again adds copies of it, arranged around those already there.
         count = project.part_count(existing) + args.count
-        existing["count"] = count
+        project.set_part_count(existing, count)
         project.write(doc)
         print(f"Added {args.count} more of {stored}: now x {count}")
         return 0
@@ -337,10 +332,7 @@ def _remove(args: argparse.Namespace) -> int:
     count = project.part_count(part)
     if args.count is not None and 0 < args.count < count:
         left = count - args.count
-        if left > 1:
-            part["count"] = left
-        else:
-            part.pop("count", None)
+        project.set_part_count(part, left)  # the last copies go
         print(f"Removed {args.count} of {part['file']}: now{_copies(left) or ' one'}")
     else:
         project.remove_part(doc, part)
@@ -485,45 +477,108 @@ def _mm(text: str) -> float:
         raise CommandError(f"'{text}' is not a distance; write it in millimetres, such as 50") from None
 
 
-def _placed(part: dict) -> str:
-    at, z = project.part_place(part), project.part_height(part)
+def _where(at: list[float] | None, plate: int | None) -> str:
     where = f"at {at[0]:g}, {at[1]:g} mm" if at else "placed automatically"
+    return where + (f" on plate {plate}" if plate else "")
+
+
+def _placed(part: dict, copy: int | None = None) -> str:
+    """Where a part is, or one of its copies: and for a part with copies, any copy with a
+    place or plate of its own."""
+    z = project.part_height(part)
+    if copy is not None or project.part_count(part) == 1:
+        where = _where(project.copy_place(part, copy or 1), project.copy_plate(part, copy or 1))
+    else:
+        plate = project.part_plate(part)
+        where = _where(None, plate)
+        for n, (at, own) in enumerate(zip(project.copy_places(part), project.copy_plates(part)), 1):
+            if at or own != plate:
+                where += f"; copy {n} " + (_where(at, own if own != plate else None) if at else f"on plate {own}")
     if z:
         where += f", sunk {-z:g} mm into the bed" if z < 0 else f", raised {z:g} mm off the bed"
     return where
+
+
+def _plate_number(text: str) -> int:
+    try:
+        plate = int(text)
+    except ValueError:
+        raise CommandError(f"'{text}' is not a plate; plates are numbered from 1") from None
+    if plate < 1:
+        raise CommandError("plates are numbered from 1")
+    return plate
 
 
 def _move(args: argparse.Namespace) -> int:
     doc = project.read()
     part, args.args = _transform_target(doc, args.args, "move")
     if part is None:
+        if args.copy is not None:
+            raise CommandError("say which part the copy is of: deli move <part> --copy N ...")
         for each in project.parts(doc):
             print(f"{each['file']}{_copies(project.part_count(each))} is {_placed(each)}")
         return 0
-    at, z = project.part_place(part), project.part_height(part)
+    count, copy = project.part_count(part), args.copy
+    if copy is not None and not 1 <= copy <= count:
+        raise CommandError(f"{part['file']} has {'only one copy' if count == 1 else f'{count} copies'}; copies are numbered from 1")
+    if count == 1:
+        copy = None  # a part's only copy is the part
+    name = f"copy {copy} of {part['file']}" if copy else part["file"]
+    which = f" --copy {copy}" if copy else ""
+    stem = Path(part["file"]).stem
 
     if not args.args:
-        print(f"{part['file']}{_copies(project.part_count(part))} is {_placed(part)}")
+        print(f"{name} is {_placed(part, copy)}" if which else f"{name}{_copies(count)} is {_placed(part)}")
         return 0
-    elif args.args == ["auto"]:
-        at, z = None, 0.0
-    elif len(args.args) == 2 and args.args[0].lower() in AXES:
-        axis, value = _axis(args.args[0]), _mm(args.args[1])
-        if axis == 2:
-            z = value
-        elif at is None:
-            raise CommandError(f"{part['file']} is placed automatically, so give both x and y: deli move X Y")
+    if args.args == ["auto"]:
+        if copy is None:  # the part and every copy of it
+            project.arrange(part)
+            project.set_part_height(part, 0)
         else:
-            at[axis] = value
+            project.set_copy_place(part, copy, None)
+            project.set_copy_plate(part, copy, None)
+    elif len(args.args) == 2 and args.args[0].lower() == "plate":
+        plate = _plate_number(args.args[1])
+        if copy is None:
+            project.set_part_plate(part, plate)
+        else:
+            project.set_copy_plate(part, copy, plate)
+    elif len(args.args) == 2 and args.args[0].lower() == "z":
+        if which:
+            raise CommandError(f"every copy of {part['file']} is at the same height; leave out --copy: deli move {stem} z {args.args[1]}")
+        project.set_part_height(part, _mm(args.args[1]))
     elif len(args.args) == 2:
-        at = [_mm(args.args[0]), _mm(args.args[1])]
+        if copy is None and count > 1:
+            raise CommandError(f"{part['file']} has {count} copies; say which to move: deli move {stem} --copy N {' '.join(args.args)}")
+        copy = copy or 1
+        at = project.copy_place(part, copy)
+        if args.args[0].lower() in AXES:
+            if at is None:
+                raise CommandError(f"{name} is placed automatically, so give both x and y: deli move {stem}{which} X Y")
+            at[_axis(args.args[0])] = _mm(args.args[1])
+        else:
+            at = [_mm(args.args[0]), _mm(args.args[1])]
+        project.set_copy_place(part, copy, at)
     else:
-        raise CommandError("usage: deli move [PART] X Y | x|y|z MM | auto")
-    if at and project.part_count(part) > 1:
-        raise CommandError(f"{part['file']} has {project.part_count(part)} copies, which are placed automatically; only a part without copies can be given a place")
-    project.set_part_place(part, at, z)
+        raise CommandError("usage: deli move [PART] [--copy N] X Y | x|y|z MM | plate N | auto")
     project.write(doc)
-    print(f"{part['file']} is now {_placed(part)}")
+    print(f"{name} is now {_placed(part, copy if which else None)}")
+    return 0
+
+
+def _arrange(args: argparse.Namespace) -> int:
+    doc = project.read()
+    parts = _parts_of(doc)
+    placed = [p for p in parts if "at" in p or "plate" in p or "copy" in p]
+    for part in placed:
+        project.arrange(part)
+    project.write(doc)
+    if not placed:
+        print("Every part is already placed automatically")
+    elif len(parts) == 1:
+        print(f"{parts[0]['file']}{_copies(project.part_count(parts[0]))} is now placed automatically")
+    else:
+        print("Every part is now placed automatically")
     return 0
 
 
@@ -536,9 +591,16 @@ def _layers(layers: list[int]) -> str:
 
 def _pause(args: argparse.Namespace) -> int:
     doc = project.read()
-    pauses = project.pauses(doc)
+    plate = args.plate or 1
+    pauses = project.pauses(doc, plate)
     if not args.args:
-        print(f"This print pauses after {_layers(pauses)}" if pauses else "This print does not pause. Add a pause with: deli pause <layer>")
+        if args.plate:
+            print(f"Plate {plate} pauses after {_layers(pauses)}" if pauses else f"Plate {plate} does not pause. Add a pause with: deli pause <layer> --plate {plate}")
+        elif project.paused_plates(doc) not in ([], [1]):
+            for each in project.paused_plates(doc):
+                print(f"Plate {each} pauses after {_layers(project.pauses(doc, each))}")
+        else:
+            print(f"This print pauses after {_layers(pauses)}" if pauses else "This print does not pause. Add a pause with: deli pause <layer>")
         return 0
 
     removing = args.args[0].lower() == "off"
@@ -550,14 +612,15 @@ def _pause(args: argparse.Namespace) -> int:
         raise CommandError("layers are counted from 1")
     if removing:
         if missing := [layer for layer in layers if layer not in pauses]:
-            raise CommandError(f"this print does not pause after {_layers(missing)}")
+            raise CommandError(f"{'plate ' + str(plate) if args.plate else 'this print'} does not pause after {_layers(missing)}")
         pauses = [layer for layer in pauses if layer not in layers] if layers else []
     else:
         pauses = sorted({*pauses, *layers})
-    project.set_pauses(doc, pauses)
+    project.set_pauses(doc, pauses, plate)
     _start(doc)
     project.write(doc)
-    print(f"This print now pauses after {_layers(pauses)}" if pauses else "This print no longer pauses")
+    which = f"Plate {plate}" if args.plate else "This print"
+    print(f"{which} now pauses after {_layers(pauses)}" if pauses else f"{which} no longer pauses")
     return 0
 
 
@@ -705,48 +768,83 @@ def _slice(args: argparse.Namespace) -> int:
     return 0
 
 
-def _slice_print(doc, copy_to: Path | None = None) -> Path:
-    """Slice the print into its G-code in deli's cache, where `deli send` and `deli view`
-    find it, and with `copy_to` (a file, or a directory to put it in) a copy there too."""
+def _slice_print(doc, copy_to: Path | None = None) -> dict[int, Path]:
+    """Slice the print into G-code in deli's cache, one file per plate, where `deli send`
+    and `deli view` find it, and with `copy_to` (a file, or a directory to put them in) a
+    copy there too."""
     parts = _parts_of(doc)
     config: dict[str, str] = {}
     for kind in library.KINDS:
         config |= _accepted_profile(doc, kind)
     config |= project.settings(doc)
-
-    output = project.gcode_path(doc)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    sources = project.made_from(doc)  # before slicing: a change made meanwhile is not in the G-code
-    (output.parent / "made-from").unlink(missing_ok=True)  # a slice that fails leaves nothing that looks current
     ini = settings.for_engine(config)
     what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
-    try:
-        result = _engine.slice(project.engine_parts(doc), ini, str(output), pauses=project.pauses(doc))
-    except ValueError as err:
-        raise CommandError(f"the settings of this print cannot be used: {err}") from None
-    except RuntimeError as err:
-        raise CommandError(f"cannot slice {what}: {err}") from None
+    engine_parts = project.engine_parts(doc)
 
-    if footer := config.get("gcode_footer"):
-        _write_footer(output, footer, result.layers)
-    project.keep_gcode(output, sources)
-    print(f"Sliced {what}")
-    used = f"{result.filament_mm / 1000:.2f} m of filament"
-    if result.filament_g:
-        used += f", {result.filament_g:.1f} g"
-    print(f"  {_duration(result.print_time)}, {used}")
-    for layer, height in result.pauses:
-        print(f"  pauses after layer {layer}, at {round(height, 2):g} mm")
-    for warning in result.warnings:
-        print(f"  warning: {warning}")
-    if copy_to is not None:
-        target = copy_to / output.name if copy_to.is_dir() else copy_to
+    def failed(err: Exception) -> CommandError:
+        if isinstance(err, ValueError):
+            return CommandError(f"the settings of this print cannot be used: {err}")
+        return CommandError(f"cannot slice {what}: {err}")
+
+    try:
+        on_plates, count = _engine.plates(engine_parts, ini)
+    except (ValueError, RuntimeError) as err:
+        raise failed(err) from None
+    if stray := [plate for plate in project.paused_plates(doc) if plate > count]:
+        raise CommandError(f"plate {stray[0]} has pauses, but the print has {count} {'plate' if count == 1 else 'plates'}; remove them with: deli pause off --plate {stray[0]}")
+    if copy_to is not None and count > 1 and not copy_to.is_dir():
+        raise CommandError(f"the print has {count} plates, a file each, so -o needs a directory to put them in")
+
+    folder = project.gcode_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    sources = project.made_from(doc)  # before slicing: a change made meanwhile is not in the G-code
+    (folder / "made-from").unlink(missing_ok=True)  # a slice that fails leaves nothing that looks current
+    outputs: dict[int, Path] = {}
+    results = {}
+    for plate in range(1, count + 1):
+        if not any(plate in copies for copies in on_plates):
+            continue
+        output = project.gcode_path(doc, plate, count)
         try:
-            shutil.copyfile(output, target)
-        except OSError as err:
-            raise CommandError(f"sliced, but cannot write {target}: {err.strerror}") from None
-        print(f"  G-code written to {target}")
-    return output
+            results[plate] = _engine.slice(engine_parts, ini, str(output), pauses=project.pauses(doc, plate), plate=plate)
+        except (ValueError, RuntimeError) as err:
+            raise failed(err if count == 1 else RuntimeError(f"plate {plate}: {err}")) from None
+        if footer := config.get("gcode_footer"):
+            _write_footer(output, footer, results[plate].layers)
+        outputs[plate] = output
+    project.keep_gcode(outputs, sources)
+
+    def report(result, indent: str) -> None:
+        used = f"{result.filament_mm / 1000:.2f} m of filament"
+        if result.filament_g:
+            used += f", {result.filament_g:.1f} g"
+        print(f"{indent}{_duration(result.print_time)}, {used}")
+        for layer, height in result.pauses:
+            print(f"{indent}pauses after layer {layer}, at {round(height, 2):g} mm")
+        for warning in result.warnings:
+            print(f"{indent}warning: {warning}")
+
+    if count == 1:
+        print(f"Sliced {what}")
+        report(results[1], "  ")
+    else:
+        print(f"Sliced {what} onto {count} plates")
+        for plate in range(1, count + 1):
+            on = [(p["file"], copies.count(plate)) for p, copies in zip(parts, on_plates) if plate in copies]
+            if not on:
+                print(f"  plate {plate}: nothing on it")
+                continue
+            print(f"  plate {plate}: " + ", ".join(f"{file}{_copies(n)}" for file, n in on))
+            report(results[plate], "    ")
+    if copy_to is not None:
+        for output in outputs.values():
+            target = copy_to / output.name if copy_to.is_dir() else copy_to
+            try:
+                shutil.copyfile(output, target)
+            except OSError as err:
+                raise CommandError(f"sliced, but cannot write {target}: {err.strerror}") from None
+            print(f"  G-code written to {target}")
+    return outputs
 
 
 def _orca_presets(args: argparse.Namespace) -> orca_install.Presets:
@@ -1023,29 +1121,45 @@ def _size_of(path: Path) -> str:
 def _send(args: argparse.Namespace) -> int:
     doc = project.read()
     if args.file:
-        path = Path(args.file)
-        if not path.is_file():
+        if args.plate:
+            raise CommandError("--plate chooses among the print's own G-code, not a file")
+        paths = [Path(args.file)]
+        if not paths[0].is_file():
             raise CommandError(f"no such file: {args.file}")
     else:
         # The print's own G-code, sliced again first when the print has changed since.
         _parts_of(doc)
-        path = project.fresh_gcode(doc)
-        if path is None:
-            print("Slicing first: " + ("the print has changed since it was sliced" if project.gcode_path(doc).exists() else "it has not been sliced yet"))
-            path = _slice_print(doc)
+        sliced = project.fresh_gcode(doc)
+        if not sliced:
+            print("Slicing first: " + ("the print has changed since it was sliced" if project.sliced(doc) else "it has not been sliced yet"))
+            sliced = _slice_print(doc)
+        if args.plate:
+            if args.plate not in sliced:
+                plates = max(sliced)
+                raise CommandError(f"the print has {plates} {'plate' if plates == 1 else 'plates'}, and nothing on a plate {args.plate}" if args.plate > plates else f"nothing is on plate {args.plate}")
+            paths = [sliced[args.plate]]
+        elif args.start and len(sliced) > 1:
+            raise CommandError(f"the print has {len(sliced)} plates, and a printer prints one at a time; say which to start with --plate N")
+        else:
+            paths = [sliced[plate] for plate in sorted(sliced)]
 
     printer = project.chosen_profile(doc, "printer")
     printer_name = project.selected(doc, "printer").get("name")
     host = send.host_for(printer_name, printer[1].get("host_type", "") if printer else "")
 
-    print(f"Sending {path.name} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
-
     def progress(sent: int, total: int) -> None:
         if total > send.CHUNK:
             print(f"  {sent / 1e6:.1f} of {total / 1e6:.1f} MB", flush=True)
 
-    send.send(host, path, start=args.start, level=args.level, progress=progress, printer=printer_name)
-    print("Printing started." if args.start else f"Sent. Start it from the printer, or send again with --print.")
+    for path in paths:
+        print(f"Sending {path.name} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
+        send.send(host, path, start=args.start, level=args.level, progress=progress, printer=printer_name)
+    if args.start:
+        print("Printing started.")
+    elif len(paths) > 1:
+        print("Sent. Start a plate from the printer, or send again with --plate N --print.")
+    else:
+        print("Sent. Start it from the printer, or send again with --print.")
     return 0
 
 
@@ -1106,7 +1220,7 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
-ENGINE_API = 8  # must match API_VERSION in _engine.cpp
+ENGINE_API = 10  # must match API_VERSION in _engine.cpp
 
 
 def _styled(code: str):
@@ -1580,20 +1694,33 @@ def build_parser() -> argparse.ArgumentParser:
         "move",
         aliases=["translate"],
         help="move the part on the bed, or show where it is",
-        usage="deli move [PART] [X Y | x|y|z MM | auto]",
+        usage="deli move [PART] [--copy N] [X Y | x|y|z MM | plate N | auto]",
         description="Put the middle of the part at X, Y on the bed, in millimetres from the bed's origin, instead of "
         "having it arranged; the parts that were not moved are arranged around it. `x`, `y` or `z` with a distance "
         "changes one of them: z is how far the part's underside is above the bed, so `deli move z -0.25` sinks it "
-        "0.25 mm, and what is below the bed is not printed. `auto` has it arranged again, on the bed. "
+        "0.25 mm, and what is below the bed is not printed. Parts that do not fit on the bed go on a second plate, "
+        "and so on, each sliced into G-code of its own; `plate N` keeps the part to plate N. `auto` has it arranged "
+        "again, on the first plate it fits on. A part with copies is moved a copy at a time, with --copy; "
+        "`plate N` and `auto` without it are for every copy. `deli arrange` has every part arranged again. "
         "Name the part when the print has more than one. Without a place, show where the parts are.",
     )
     move.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    move.add_argument("--copy", type=int, metavar="N", help="one copy of a part with copies, numbered from 1")
     move.set_defaults(run=_move)
+
+    arrange = commands.add_parser(
+        "arrange",
+        help="arrange every part again, forgetting where they were moved",
+        description="Have every part and copy arranged on the bed, and on further plates when they do not fit, "
+        "as a print is before anything is moved: drops the places and plates given with `deli move`. "
+        "How far a part is raised or sunk (`deli move z`) is kept.",
+    )
+    arrange.set_defaults(run=_arrange)
 
     pause = commands.add_parser(
         "pause",
         help="pause the print after a layer, or show where it pauses",
-        usage="deli pause [off] [LAYER ...]",
+        usage="deli pause [off] [LAYER ...] [--plate N]",
         description="Have the printer pause once LAYER is finished, to drop in a magnet or a nut or to change the "
         "filament: the printer's pause G-code (the setting pause_print_gcode) is written before the layer after it. "
         "Layers are counted from 1, as the slider in `deli view` counts them, so move the slider to the last layer "
@@ -1601,6 +1728,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Without arguments, show where the print pauses.",
     )
     pause.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    pause.add_argument("--plate", type=_plate_number, metavar="N", help="the plate whose layers these are, in a print with several (default: the first)")
     pause.set_defaults(run=_pause)
 
     slice_ = commands.add_parser(
@@ -1656,11 +1784,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="upload the sliced G-code to the printer in DELI_HOST",
         description="Upload G-code to the printer named by the DELI_HOST environment variable, such as "
         "elegoo://centauri.local, moonraker://voron.local or octoprint://ender.local (API key in DELI_API_KEY). "
-        "Without a file, the G-code sliced for this print is sent, if deli.toml has not changed since.",
+        "Without a file, the G-code sliced for this print is sent, if deli.toml has not changed since: every "
+        "plate's, when it has several.",
     )
     send_.add_argument("file", nargs="?", help="the G-code file to send (default: this print's)")
     send_.add_argument("--print", dest="start", action="store_true", help="start printing once it has arrived")
     send_.add_argument("--level", action="store_true", help="with --print on an Elegoo printer: level the bed first")
+    send_.add_argument("--plate", type=_plate_number, metavar="N", help="send only this plate's G-code, in a print with several (needed with --print)")
     send_.set_defaults(run=_send)
 
     config_ = commands.add_parser(
@@ -1709,11 +1839,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _is_option(word: str) -> bool:
+    if not word.startswith("-"):
+        return False
+    try:
+        float(word)
+        return False  # a negative number
+    except ValueError:
+        return True
+
+
 def main(argv: list[str] | None = None) -> int:
     if getattr(_engine, "API_VERSION", 1) != ENGINE_API:
         print("deli: the engine was built from older code than the rest of deli; rebuild it with: make reinstall", file=sys.stderr)
         return 1
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args, rest = parser.parse_known_args(argv)
+    # A command's words may go on after one of its options (`deli move cube --copy 2 40 50`),
+    # which argparse leaves over.
+    if rest and isinstance(getattr(args, "args", None), list) and not any(_is_option(word) for word in rest):
+        args.args += rest
+    elif rest:
+        parser.error("unrecognized arguments: " + " ".join(rest))
     try:
         return args.run(args)
     except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, config.ConfigError, CommandError) as err:

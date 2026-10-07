@@ -327,8 +327,16 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   place. A negative `z` sinks the part: PrusaSlicer prints it from the bed up and leaves
   out what is below (checked: a 20 mm cube sunk 5 mm gives 75 layers, top at 15 mm). A
   positive `z` needs supports, or PrusaSlicer refuses the empty first layer. `deli move
-  auto` drops both keys. A part with copies cannot have a place (`move` refuses, `add`
-  refuses more copies of a placed part, and the engine refuses a hand-edited file).
+  auto` drops both keys. A part with copies has a place and plate per copy (asked for
+  2026-10-06): `deli move <part> --copy N ...` records them in a `[part.copy.N]` table
+  (`project.copy_place`, `copy_plate`; a part-level `plate` is every copy's, a copy's own
+  wins), and the engine takes per-copy lists of places and plates. A part's only copy
+  keeps them in the part itself, so `project.set_part_count` moves them between there
+  and `[part.copy.1]` as copies are added and removed; removing copies takes the last.
+  `deli arrange` drops every place and plate, keeping `z`. The page's `/mesh` says which
+  triangles are each copy's, so a drag moves one copy and writes `--copy N`.
+  `cli.main` lets a command's words go on after an option (`deli move cube --copy 2 40
+  50`), which argparse alone leaves over.
   The place is not checked against the bed when it is given, since the printer may not
   be chosen yet; `slice` and `view` say so when it is off the bed.
   The user has looked at a moved part in the viewer and found it where it should be
@@ -578,14 +586,27 @@ already reads `PRINT_START`'s parameters, should also map the common Klipper one
 for adaptive meshing). That is Klipper convention, not per vendor. Heating before the
 macro stays as Orca has it.
 
-**Multiple plates, to do (the user, 2026-10-05).** A print is one plate today; a project
-that needs several (a kit of parts that won't fit on one bed) is a folder per plate.
-Open: how `deli.toml` holds plates (a `[[plate]]` table that parts belong to, or parts
-that name a plate); whether arrange fills plates in turn when parts don't fit, or plates
-are only what the user says; how commands name a plate (`deli add x.stl --plate 2`,
-`deli slice 2`?) without breaking one-plate prints, which should not have to mention
-plates at all; one G-code file per plate in the cache, and what `deli send` and
-`deli view` do with several; and whether settings can differ per plate.
+**Multiple plates, done 2026-10-06 (asked for 2026-10-05).** The user's choices:
+parts are arranged onto as many plates as it takes, a part can be kept to one
+(`deli move <part> plate N`, `plate = N` in its `[[part]]`; `auto` lets it go), and a
+print that fits on one plate never mentions plates; `deli view` shows one plate at a
+time, a button each; `deli send` uploads every plate, and `--print` needs `--plate N`.
+
+- Engine: PrusaSlicer 2.9's arrange already lays overflow out on a grid of virtual beds
+  (`GridStriderVBedHandler`, with the gap given in the bed) and takes per-copy bed
+  constraints (`set_bed_constraints`). `load_arranged` returns each copy's plate (from
+  where it lands), moved back onto the bed itself; `slice` and `mesh` take a plate and
+  work on a model of only that plate's copies (`Arranged::on_plate`), so PrusaSlicer's
+  global `s_multiple_beds` and its limit of 9 beds are not used (deli's limit is 100).
+  `_engine.plates` says where each copy goes. A place (`at`) is on the part's plate.
+- Files: one plate keeps `<name>.gcode`; several are `<name>-plateN.gcode`, and the
+  cache folder's `plates` file says which is which. A plate left empty (a part kept to
+  plate 3, nothing on 2) has no G-code and keeps its number.
+- Pauses: the first plate's stay the top-level `pause = [...]`; another's are in a
+  `[plate.N]` table, which is where anything else per plate would go later. Settings are
+  still the whole print's.
+- Not done: dragging a copy from one plate to another in the page; objects of one model
+  file arranged onto different plates are reported by the first's plate.
 
 **Viewer, to do:**
 

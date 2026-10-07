@@ -387,7 +387,18 @@ puts the middle of a part at x 60, y 80 instead, in millimetres from the bed's o
 `deli move z -0.25` sinks a part a quarter of a millimetre into the bed, which is what
 a part resting on an edge or a lip needs to get a first layer; what is below the bed
 is not printed. `deli move auto` gives the placing back, and `deli translate` is the
-same command under another name. A part with copies cannot be given a place.
+same command under another name. A part with copies is moved a copy at a time:
+`deli move box --copy 2 60 80` places the second, and the others are arranged around
+it. `deli arrange` has every part and copy arranged again, as before any was moved.
+
+What does not fit on the bed goes on a second plate, and so on, as many as it takes, and
+`deli slice` writes a G-code file for each (`stand-plate1.gcode`, `stand-plate2.gcode`)
+and says what is on each and how long it takes. `deli move box plate 2` keeps a part to
+plate 2, its place (`deli move box 60 80`) then on that plate, and `deli move box
+--copy 3 plate 2` keeps only the third copy there; `deli move box auto` lets it go on
+the first plate it fits on again. A print that fits on one plate never
+mentions plates. `deli send` uploads every plate; `deli send --plate 2 --print` uploads
+plate 2 and starts it, since a printer prints one plate at a time.
 
 `deli pause 30` has the printer pause once layer 30 is done, to drop in a magnet or a
 nut, or to change the filament: deli has no separate colour-change command, because a
@@ -396,7 +407,8 @@ many printers `M600`, the filament-change command itself; `deli set pause_print_
 changes it). Layers are counted as the slider in `deli view` counts
 them, so slide to the last layer you want printed before the pause and use that
 number. `deli slice` reports each pause with its height, and refuses a pause after a
-layer the print does not have.
+layer the print does not have. On a print with several plates, `deli pause 30 --plate 2`
+pauses plate 2; without `--plate` a pause is the first plate's.
 
 `deli view` opens a page in your browser and gives the shell straight back; the page
 follows the print as you change it. It shows the parts on the bed and, once `deli slice`
@@ -405,7 +417,8 @@ supports included, coloured by what it is for. The parts are then drawn faint ov
 extrusions, or hidden: Model in the legend shows or hides them, and they come up by
 themselves for the tools that need them. When the print has changed since it was
 sliced, or has never been, the page shows the parts and says so, with a Slice button
-that runs `deli slice` and shows what it printed. Sending stays in the shell.
+that runs `deli slice` and shows what it printed. Sending stays in the shell. A print
+with several plates has a button for each, and the page shows one plate at a time.
 
 The slider at the bottom goes through the layers, each with the time it takes, cutting
 the parts at the same height; a box shows only that layer. With no G-code it cuts the
@@ -419,8 +432,9 @@ Overhangs shows in red the faces supports would hold up (at the print's
 `support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
 
 Move and Lay flat change the print with deli's own commands: drag a part over the bed
-for its `deli move`, or click a face of one for the `deli rotate` that lays that face on
-the bed; Pause here, beside the layer slider, does the same for `deli pause` at that
+for its `deli move` (a copy is moved by itself, with `--copy`), or click a face of one
+for the `deli rotate` that lays that face on the bed; Arrange, once something has been
+moved, gives `deli arrange`; Pause here, beside the layer slider, does the same for `deli pause` at that
 layer. The page shows the command, and Apply runs it (Copy, to run it yourself); either
 way `deli.toml` changes as the command says and the page follows. Only the page at the
 address `deli view` printed can apply commands. To measure, press Measure (or M) and
@@ -438,7 +452,7 @@ minutes, or until `deli view --stop`. When the printer's profile asks for a thum
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli move` and `deli pause` without arguments show what
 is chosen. `deli remove`, `deli unset`, `deli scale 100%`, `deli rotate 0`,
-`deli move auto` and `deli pause off` undo things. Everything is in `deli.toml`, which
+`deli move auto`, `deli arrange` and `deli pause off` undo things. Everything is in `deli.toml`, which
 is plain TOML you can edit, comment and commit:
 
 ```toml
@@ -483,11 +497,12 @@ check the file arrived and start it from the printer's own screen.
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
-| `deli move [part] <x> <y>` | where the part's middle goes on the bed; `z -0.25` sinks it, `auto` has it arranged again. `deli translate` is the same command |
-| `deli pause [off] [layer ...]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
-| `deli slice [-o FILE\|DIR]` | slice, and say how long it takes and how much filament; `-o` writes a copy of the G-code |
+| `deli move [part] [--copy N] <x> <y>` | where the part's middle goes on the bed, or one copy's; `z -0.25` sinks it, `plate 2` keeps it to plate 2, `auto` has it arranged again. `deli translate` is the same command |
+| `deli arrange` | arrange every part and copy again, forgetting where they were moved |
+| `deli pause [off] [layer ...] [--plate N]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
+| `deli slice [-o FILE\|DIR]` | slice, and say how long it takes and how much filament; `-o` writes a copy of the G-code. Parts that do not fit go on further plates, a file each |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
-| `deli send [FILE] [--print]` | upload to the printer in your config, slicing first if the print has changed |
+| `deli send [FILE] [--print] [--plate N]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N` |
 | `deli config [key] [value]` | your default printer, and your printers' addresses and default filament and process |
 | `deli completion bash\|zsh\|fish` | shell completion |
 
@@ -520,8 +535,6 @@ Things that a user would notice, roughly in the order they matter:
 - **No Windows wheel.** On Windows, deli runs in WSL ([above](#on-windows-in-wsl)); a
   wheel of its own needs `deli view`'s background server ported first.
 - **Settings apply to the whole print**, not to one part.
-- **One plate per print.** A folder is one plate; a project that needs several plates is
-  a folder for each.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.
 - **One filament per print.** A change by hand at a `deli pause` is the only kind;

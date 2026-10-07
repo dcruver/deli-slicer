@@ -65,8 +65,9 @@ def test_parts_and_axes():
     assert complete("scale") == ["cube", "cube.stl", "x", "y", "z"]
     assert complete("rotate", "cube.stl") == ["x", "y", "z"]
     assert complete("remove") == ["cube", "cube.stl"]
-    assert complete("move") == ["auto", "cube", "cube.stl", "x", "y", "z"]
-    assert complete("move", "cube") == ["auto", "x", "y", "z"]
+    assert complete("move") == ["auto", "cube", "cube.stl", "plate", "x", "y", "z"]
+    assert complete("move", "cube") == ["auto", "plate", "x", "y", "z"]
+    assert complete("move", "cube", "--copy", "2") == ["auto", "plate", "x", "y", "z"]  # 2 is the option's
     assert complete("translate") == complete("move")
     assert complete("pause") == ["off"]
     main(["pause", "3", "7"])
@@ -89,7 +90,7 @@ def test_settings_and_their_short_names():
 
 def test_options_after_a_dash():
     assert complete("add", "-", new_word=False) == ["--count", "--help", "-h"]
-    assert complete("send", "--", new_word=False) == ["--help", "--level", "--print"]
+    assert complete("send", "--", new_word=False) == ["--help", "--level", "--plate", "--print"]
 
 
 def test_config_keys_and_values():

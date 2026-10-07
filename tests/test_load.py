@@ -69,7 +69,7 @@ def test_loaded_parts_slice_together(home, tmp_path):
     loaded = [library.load(kind, str(EXPORT)) for kind in library.KINDS]
     config = "".join(part.path.read_text() for part in loaded)
 
-    result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, None, 0)], config, str(tmp_path / "cube.gcode"))
+    result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, [], 0, [])], config, str(tmp_path / "cube.gcode"))
 
     assert result.print_time > 0
 

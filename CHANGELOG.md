@@ -3,6 +3,22 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- Prints with more than one plate. Parts that do not fit on the bed go on a second plate,
+  and so on, instead of being refused; `deli slice` writes a G-code file for each
+  (`<name>-plate2.gcode`) and says what is on each and how long it takes. `deli move
+  <part> plate N` keeps a part to a plate, `deli pause --plate N` pauses one, `deli send`
+  uploads every plate and `deli send --plate N --print` starts one. `deli view` has a
+  button per plate. A print that fits on one plate is unchanged.
+- Each copy of a part can be moved by itself: `deli move <part> --copy N X Y`, or
+  dragging it in `deli view`, kept as `[part.copy.N]` in `deli.toml`; `--copy N plate M`
+  keeps one copy to a plate. Adding copies to a part that has a place keeps it as the
+  first copy's. **Changed:** `deli move` and `deli add` used to refuse a place for a part
+  with copies.
+- `deli arrange` (and Arrange in `deli view`) has every part arranged again, dropping
+  the places and plates they were given.
+
 ## 0.6.1 (2026-10-06)
 
 - `deli view`'s speed and flow colours are the G-code's. Read move by move, small arcs and

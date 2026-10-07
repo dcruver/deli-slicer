@@ -78,7 +78,7 @@ def test_state_has_the_part_and_the_printers_bed(url):
     assert part["scale"] == [1, 1, 2]
     assert part["rotate"] == [0, 0, 45]
     assert part["count"] == 1
-    assert part["at"] == [60, 70] and part["z"] == -1
+    assert part["at"] == [[60, 70]] and part["z"] == -1  # per copy
     assert part["size"] == pytest.approx([28.28, 28.28, 40], abs=0.01)
 
 
@@ -107,7 +107,7 @@ def test_mesh_is_the_part_centred_on_the_bed(url):
     assert (min(vertices[2::3]), max(vertices[2::3])) == (0, 20)  # resting on the bed
     indices = struct.unpack_from(f"<{n_triangles * 3}I", body, 12 + n_vertices * 12)
     assert max(indices) == 7
-    assert struct.unpack_from("<2I", body, 12 + n_vertices * 12 + n_triangles * 12) == (8, 12)  # all the cube's
+    assert struct.unpack_from("<4I", body, 12 + n_vertices * 12 + n_triangles * 12) == (0, 1, 8, 12)  # all the cube's
 
 
 def test_mesh_has_every_copy_of_every_part(url):
@@ -118,8 +118,25 @@ def test_mesh_has_every_copy_of_every_part(url):
     status, _, body = get(url + "/mesh")
 
     assert status == 200
-    assert struct.unpack_from("<III", body) == (32, 48, 2)
-    assert struct.unpack_from("<4I", body, 12 + 32 * 12 + 48 * 12) == (24, 36, 8, 12)  # each part's, in order
+    assert struct.unpack_from("<III", body) == (32, 48, 4)
+    # each copy's part, number, vertices and triangles, in order
+    assert struct.unpack_from("<16I", body, 12 + 32 * 12 + 48 * 12) == (0, 1, 8, 12, 0, 2, 8, 12, 0, 3, 8, 12, 1, 1, 8, 12)
+
+
+def test_state_and_mesh_are_per_plate(url):
+    main(["add", "cube.stl", "--count", "3"])
+    shutil.copy(CUBE, "box.stl")
+    main(["add", "box.stl"])
+    main(["move", "box", "plate", "2"])
+
+    state = json.loads(get(url + "/state")[2])
+    assert state["plates"] == 2
+    assert [part["on"] for part in state["parts"]] == [[1, 1, 1], [2]]
+    assert state["parts"][1]["plate"] == 2
+
+    _, _, body = get(url + "/mesh?plate=2")
+    assert struct.unpack_from("<III", body) == (8, 12, 1)
+    assert struct.unpack_from("<4I", body, 12 + 8 * 12 + 12 * 12) == (1, 1, 8, 12)  # only the box is on plate 2
 
 
 def test_mesh_without_a_part_is_empty(url):
@@ -145,7 +162,7 @@ def test_state_names_the_gcode_once_the_print_is_sliced(url):
     sliced_cube()
 
     state = json.loads(get(url + "/state")[2])
-    assert state["gcode"] == "cube.gcode"
+    assert state["gcode"] == {"1": "cube.gcode"}
     assert state["filament"] == "generic-abs"  # what it was sliced for
     assert "Support material" in state["roles"]
     assert state["version"] != before["version"]
@@ -201,7 +218,7 @@ def test_a_copy_written_with_output_changes_nothing_shown(url, job):
     main(["slice", "-o", "out/elsewhere.gcode"])
     (job / "out" / "elsewhere.gcode").unlink()
 
-    assert json.loads(get(url + "/state")[2])["gcode"] == "cube.gcode"
+    assert json.loads(get(url + "/state")[2])["gcode"] == {"1": "cube.gcode"}
     assert struct.unpack_from("<I", get(url + "/toolpaths")[2])[0] > 1000
 
 def test_gcode_is_not_shown_once_the_print_has_changed(url):
@@ -218,7 +235,7 @@ def test_gcode_is_shown_for_a_model_file_dated_in_the_future(url, job):
     os.utime(job / "cube.stl", (future, future))
     sliced_cube()
 
-    assert json.loads(get(url + "/state")[2])["gcode"] == "cube.gcode"
+    assert json.loads(get(url + "/state")[2])["gcode"] == {"1": "cube.gcode"}
 
     os.utime(job / "cube.stl", (future + 1, future + 1))  # the model changes again
 
@@ -275,10 +292,15 @@ def test_the_page_runs_its_tools_commands(url):
     assert status == 200
     result = json.loads(body)
     assert result["code"] == 0 and "40.5, 60" in result["output"]
-    assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [40.5, 60]
+    assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [[40.5, 60]]
     assert json.loads(post(url, ["rotate", "cube", "x", "90"])[1])["code"] == 0
     assert json.loads(post(url, ["pause", "3"])[1])["code"] == 0
-    assert json.loads(get(url + "/state")[2])["pauses"] == [3]
+    assert json.loads(get(url + "/state")[2])["pauses"] == {"1": [3]}
+    main(["add", "cube.stl"])
+    assert json.loads(post(url, ["move", "cube", "--copy", "2", "120", "60"])[1])["code"] == 0
+    assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [[40.5, 60], [120, 60]]
+    assert json.loads(post(url, ["arrange"])[1])["code"] == 0
+    assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [None, None]
 
 
 def test_a_command_that_fails_says_why(url):
@@ -323,7 +345,7 @@ def test_the_page_slices_in_a_process_of_its_own(url):
         time.sleep(0.2)
     assert slicing["code"] == 0, slicing["output"]
     assert slicing["output"].startswith("Sliced cube.stl")
-    assert json.loads(get(url + "/state")[2])["gcode"] == "cube.gcode"
+    assert json.loads(get(url + "/state")[2])["gcode"] == {"1": "cube.gcode"}
 
 
 def test_a_slice_that_fails_says_why(url):
@@ -372,7 +394,7 @@ def test_view_serves_in_the_background_and_returns(background, job, capsys):
     assert json.loads(get(address + "state")[2])["parts"] == []
     main(["add", "cube.stl"])
     assert post(address.rstrip("/"), ["move", "cube", "50", "60"], token=token)[0] == 200  # the page's address lets it run commands
-    assert json.loads(get(address + "state")[2])["parts"][0]["at"] == [50, 60]
+    assert json.loads(get(address + "state")[2])["parts"][0]["at"] == [[50, 60]]
 
 
 def test_view_again_finds_the_viewer_already_running(background, capsys):

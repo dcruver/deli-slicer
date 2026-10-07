@@ -38,6 +38,7 @@ import secrets
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -47,7 +48,7 @@ PAGES = Path(__file__).parent / "viewer"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
-RUNNABLE = {"move", "rotate", "pause"}  # the commands the page's tools may run
+RUNNABLE = {"move", "rotate", "pause", "arrange"}  # the commands the page's tools may run
 _TOKEN = "DELI_VIEW_TOKEN"  # how `start` hands the background process its token: not on its command line, which others can read
 _running = threading.Lock()  # one command at a time: each takes over stdout and stderr while it runs
 
@@ -96,7 +97,7 @@ def _version() -> str:
     try:
         doc = project.read()
         paths += [Path(part["file"]) for part in project.parts(doc)]
-        paths.append(_gcode_path(doc))
+        paths += [project.gcode_folder() / "plates", project.gcode_path(doc), *project.sliced(doc).values()]
     except project.ProjectError:
         pass
     stamps = []
@@ -109,13 +110,31 @@ def _version() -> str:
     return hashlib.sha256("\n".join(stamps).encode()).hexdigest()[:16]
 
 
-def _gcode_path(doc) -> Path:
-    return project.gcode_path(doc)
+def _gcode(doc, plate: int = 1) -> Path | None:
+    """A plate's G-code `deli slice` wrote for this print, unless the print has changed since."""
+    return project.fresh_gcode(doc).get(plate)
 
 
-def _gcode(doc) -> Path | None:
-    """The G-code `deli slice` wrote for this print, unless the print has changed since."""
-    return project.fresh_gcode(doc)
+_plates_cache: dict[str, tuple[list[list[int]], int]] = {}
+
+
+def _plates(doc) -> tuple[list[list[int]], int]:
+    """Where `slice` prints each part, per copy, and how many plates there are. The page
+    asks for the state often, and this arranges every part, so it is kept per version."""
+    version = _version()
+    if version not in _plates_cache:
+        _plates_cache.clear()
+        _plates_cache[version] = _engine.plates(project.engine_parts(doc), _config(doc))
+    return _plates_cache[version]
+
+
+def _plate(path: str) -> int:
+    """The plate a request asks about: `?plate=N`, or the first."""
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+    try:
+        return max(1, int(query.get("plate", ["1"])[0]))
+    except ValueError:
+        return 1
 
 def _bed(doc) -> tuple[list[list[float]], float, str | None]:
     """The chosen printer's bed outline, height and name; a plain bed when there is none."""
@@ -158,7 +177,7 @@ def _overhang(doc) -> dict:
 
 def state() -> dict:
     """What the page needs to describe the print: the bed, the parts and their transforms."""
-    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "filament": None, "parts": [], "gcode": None, "pauses": []}
+    result: dict = {"version": _version(), "bed": DEFAULT_BED, "height": 0.0, "printer": None, "filament": None, "parts": [], "gcode": None, "pauses": {}, "plates": 1}
     try:
         doc = project.read()
         result["bed"], result["height"], result["printer"] = _bed(doc)
@@ -168,52 +187,60 @@ def state() -> dict:
             scale = project.part_transform(part, "scale")
             rotate = project.part_transform(part, "rotate")
             described = {"file": part["file"], "scale": scale, "rotate": rotate, "count": project.part_count(part)}
-            described |= {"at": project.part_place(part), "z": project.part_height(part)}
+            # Per copy: where it was moved to, and the plate it is kept to (its own, or the part's).
+            described |= {"at": project.copy_places(part), "kept": project.copy_plates(part)}
+            described |= {"z": project.part_height(part), "plate": project.part_plate(part)}
             try:
                 described["size"] = list(_engine.model_size(part["file"], scale=scale, rotate=rotate))
             except RuntimeError as err:
                 result["error"] = f"cannot read {part['file']}: {err}"
             result["parts"].append(described)
-        result["pauses"] = project.pauses(doc)
+        try:
+            on_plates, result["plates"] = _plates(doc)
+            for described, copies in zip(result["parts"], on_plates):
+                described["on"] = copies  # the plate of each copy
+        except (ValueError, RuntimeError) as err:  # slice says the same, and the page shows it
+            result.setdefault("error", str(err))
+        result["pauses"] = {str(plate): project.pauses(doc, plate) for plate in range(1, result["plates"] + 1)}
         try:
             result["overhang"] = _overhang(doc)
         except (KeyError, ValueError):  # a setting PrusaSlicer would not take; slice says so
             pass
-        if gcode := _gcode(doc):
-            result["gcode"] = gcode.name
-            result["sliced"] = str(gcode.stat().st_mtime_ns)  # which slicing made it
+        if gcode := project.fresh_gcode(doc):
+            result["gcode"] = {str(plate): path.name for plate, path in gcode.items()}
+            result["sliced"] = str(max(path.stat().st_mtime_ns for path in gcode.values()))  # which slicing made it
             result["roles"] = _engine.extrusion_roles()
-        elif _gcode_path(doc).exists():
+        elif project.sliced(doc):
             result["stale"] = True  # sliced, but the print has changed since
     except project.ProjectError as err:
         result["error"] = str(err)
     return result
 
 
-def mesh() -> bytes:
-    """Every part's triangles, placed as `slice` places them: a header of three uint32 counts
-    (vertices, triangles, parts), then float32 vertices, uint32 indices, and per part in
-    `/state`'s order two uint32, how many of the vertices and triangles are its, each part's
-    after the one before."""
+def mesh(plate: int = 1) -> bytes:
+    """Every part's triangles on a plate, placed as `slice` places them: a header of three uint32 counts
+    (vertices, triangles, copies on the plate), then float32 vertices, uint32 indices, and per
+    copy four uint32: its part's index in `/state`'s parts, its number from 1, and how many of
+    the vertices and triangles are its, each copy's after the one before."""
     doc = project.read()
     if not project.parts(doc):
         return struct.pack("<III", 0, 0, 0)
     try:
-        vertices, triangles, per_part = _engine.mesh(project.engine_parts(doc), _config(doc))
+        vertices, triangles, copies = _engine.mesh(project.engine_parts(doc), _config(doc), plate)
     except ValueError as err:  # the settings do not make a valid configuration
         raise RuntimeError(str(err)) from None
-    counts = struct.pack(f"<{len(per_part) * 2}I", *(n for pair in per_part for n in pair))
-    return struct.pack("<III", len(vertices) // 12, len(triangles) // 12, len(per_part)) + vertices + triangles + counts
+    counts = struct.pack(f"<{len(copies) * 4}I", *(n for copy in copies for n in copy))
+    return struct.pack("<III", len(vertices) // 12, len(triangles) // 12, len(copies)) + vertices + triangles + counts
 
 
-def toolpaths() -> bytes:
-    """The extrusions in the print's G-code, in printing order: a uint32 count, then for
+def toolpaths(plate: int = 1) -> bytes:
+    """The extrusions in a plate's G-code, in printing order: a uint32 count, then for
     each eight float32 (start x, y, z, end x, y, z, width, height), then two float32 for
     each (speed in mm/s, flow in mm³/s), then a uint32 layer for each, then a uint8 for
     each, an index into `/state`'s `roles`; and to end, JSON: the estimated seconds per
     role (`roles`, one more than `/state` names, for every other move) and per layer
     (`layers`). Empty when the print has not been sliced since it last changed."""
-    gcode = _gcode(project.read())
+    gcode = _gcode(project.read(), plate)
     if gcode is None:
         return struct.pack("<I", 0)
     segments, rates, layers, roles, role_times, layer_times = _engine.toolpaths(str(gcode))
@@ -237,9 +264,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     described["slicing"] = slicing.describe()
                 self._send(200, "application/json", json.dumps(described).encode())
             elif path == "/mesh":
-                self._send(200, "application/octet-stream", mesh())
+                self._send(200, "application/octet-stream", mesh(_plate(self.path)))
             elif path == "/toolpaths":
-                self._send(200, "application/octet-stream", toolpaths())
+                self._send(200, "application/octet-stream", toolpaths(_plate(self.path)))
             else:
                 self._send_page("index.html" if path == "/" else path.lstrip("/"))
         except (project.ProjectError, settings.SettingError, RuntimeError) as err:

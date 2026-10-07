@@ -47,7 +47,7 @@ def test_shipped_profiles_slice_a_cube(trio, tmp_path):
     config = settings.for_engine(merged)  # as `deli slice` hands them over
 
     out = tmp_path / "cube.gcode"
-    result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, None, 0)], config, str(out))
+    result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, [], 0, [])], config, str(out))
 
     assert result.warnings == []
     gcode = out.read_text()

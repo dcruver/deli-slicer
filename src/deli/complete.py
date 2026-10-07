@@ -83,7 +83,9 @@ def _orca_presets(before: list[str]):
 
 def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str]) -> list[str]:
     """Candidates for the positional the cursor is on, given the positionals already typed."""
-    typed = [w for w in before if not w.startswith("-")]
+    # The words typed that are not options, nor the value an option takes (`--copy 2`).
+    takes_value = {o for action in parser._actions if action.option_strings and action.nargs != 0 for o in action.option_strings}
+    typed = [w for i, w in enumerate(before) if not w.startswith("-") and not (i and before[i - 1] in takes_value)]
     position = len(typed)
     positionals = _positionals(parser)
     if position < len(positionals) and positionals[position].choices:
@@ -120,9 +122,9 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command in ("move", "translate"):
         parts = _part_names()
         if position == 0:
-            return parts + ["auto", "x", "y", "z"] if len(_parts()) <= 1 else parts
+            return parts + ["auto", "plate", "x", "y", "z"] if len(_parts()) <= 1 else parts
         if position == 1 and typed[0] in parts:
-            return ["auto", "x", "y", "z"]
+            return ["auto", "plate", "x", "y", "z"]
         return []
     if command == "set":
         return sorted([*settings.ALIASES, *settings.kinds()]) if position == 0 else []

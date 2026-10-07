@@ -170,7 +170,7 @@ def job(tmp_path, monkeypatch):
     gcode = project.gcode_path(project.read())
     gcode.parent.mkdir(parents=True)
     gcode.write_bytes(b"G28\n" * 1000)
-    project.keep_gcode(gcode, project.made_from(project.read()))
+    project.keep_gcode({1: gcode}, project.made_from(project.read()))
     (job / "cube.gcode").write_bytes(b"G28\n" * 1000)
     return job
 

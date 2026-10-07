@@ -134,9 +134,12 @@ DynamicPrintConfig complete_config(DynamicPrintConfig config)
 
 // A part of a print: a model file, per-axis scale factors, angles in degrees about X, Y
 // and Z (applied in that order after scaling), how many copies to print, where on the bed
-// its middle is to be (x and y in millimetres; left out, it is arranged), and how far its
-// underside is above the bed (negative: sunk into it, and what is below is not printed).
-using Part = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int, std::optional<std::array<double, 2>>, double>;
+// each copy's middle is to be (x and y in millimetres, per copy; one left out, or past the
+// end of the list, is arranged), how far its underside is above the bed (negative: sunk
+// into it, and what is below is not printed), and the plate each copy is printed on,
+// counted from 1 (per copy; left out, the first it fits on).
+using Place = std::optional<std::array<double, 2>>;
+using Part  = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int, std::vector<Place>, double, std::vector<std::optional<int>>>;
 
 // The model in a file, scaled by per-axis factors and then turned about X, Y and Z, in
 // that order, by angles in degrees; every object of it is then dropped onto the bed.
@@ -156,19 +159,23 @@ Model load_transformed(const std::string &model_path, const std::array<double, 3
     return model;
 }
 
-// Whether every copy of every object stands within the bed's outline. PrusaSlicer's own
-// test uses the outline's convex hull, which cannot see a cut-out corner, so this one
-// clips each footprint against the outline itself.
+// Whether a copy's footprint lies within the bed's outline. PrusaSlicer's own test uses the
+// outline's convex hull, which cannot see a cut-out corner, so this one clips the
+// footprint against the outline itself. `shift` takes the copy from its plate to the bed.
+bool on_the_bed(const ModelObject &object, size_t copy, const Points &bed, const Vec3d &shift = Vec3d::Zero())
+{
+    BoundingBoxf3 box = object.instance_bounding_box(copy);
+    box.translate(shift);
+    const BoundingBox footprint(Point::new_scale(box.min.x(), box.min.y()), Point::new_scale(box.max.x(), box.max.y()));
+    return diff_ex(Polygons{footprint.polygon()}, Polygons{Polygon(bed)}).empty();
+}
+
 bool on_the_bed(const ModelObjectPtrs &objects, const Points &bed)
 {
-    const Polygons outline{Polygon(bed)};
     for (const ModelObject *object : objects)
-        for (size_t i = 0; i < object->instances.size(); ++i) {
-            const BoundingBoxf3 box = object->instance_bounding_box(i);
-            const BoundingBox footprint(Point::new_scale(box.min.x(), box.min.y()), Point::new_scale(box.max.x(), box.max.y()));
-            if (!diff_ex(Polygons{footprint.polygon()}, outline).empty())
+        for (size_t i = 0; i < object->instances.size(); ++i)
+            if (!on_the_bed(*object, i, bed))
                 return false;
-        }
     return true;
 }
 
@@ -189,59 +196,195 @@ struct Unplaced : arr2::SelectionMask
     bool              is_wipe_tower_selected(int) const override { return false; }
 };
 
+// The parts of a print, arranged: the model, every copy standing on the bed itself, and
+// the plate each copy is printed on, counted from 0.
+struct Arranged
+{
+    Model                         model;
+    std::vector<std::vector<int>> plates;           // per object, per copy
+    std::vector<size_t>           objects_per_part; // how many of the model's objects each part's file gave
+    int                           count = 1;        // how many plates, up to the last with something on it
+
+    // The model with only the copies printed on one plate. An object with none there is
+    // kept, empty, so that objects line up with `objects_per_part`, unless `drop_empty`.
+    Model on_plate(int plate, bool drop_empty) const
+    {
+        Model one = model;
+        for (size_t o = 0; o < one.objects.size(); ++o)
+            for (size_t c = one.objects[o]->instances.size(); c-- > 0;)
+                if (plates[o][c] != plate)
+                    one.objects[o]->delete_instance(c);
+        if (drop_empty)
+            for (size_t o = one.objects.size(); o-- > 0;)
+                if (one.objects[o]->instances.empty())
+                    one.delete_object(o);
+        return one;
+    }
+};
+
+// The plates are laid out side by side for arranging, as PrusaSlicer lays out its beds,
+// with a gap between them: a copy on plate n is printed where it stands, moved by `to_bed`.
+struct Plates
+{
+    static constexpr int         most = 100;
+    static inline const Vec2crd  gap{scaled(50.), scaled(50.)}; // arrange's: half the space between two plates
+    BoundingBox                  bed;
+    arr2::GridStriderVBedHandler grid;
+
+    explicit Plates(const Points &outline) : bed(outline), grid(bed, gap) {}
+    Vec3d to_bed(int plate) const { return grid.get_physical_bed_trafo(plate).translation(); }
+    // The plate a copy stands on, by its middle; -1 when it is on none.
+    int of(const ModelObject &object, size_t copy) const
+    {
+        const Vec3d middle = object.instance_bounding_box(copy).center();
+        for (int plate = 0; plate < most; ++plate) {
+            const Vec3d there = middle + to_bed(plate);
+            if (BoundingBoxf(unscaled(bed.min), unscaled(bed.max)).contains(Vec2d(there.x(), there.y())))
+                return plate;
+        }
+        return -1;
+    }
+};
+
 // All the parts of a print in one model, each transformed, then arranged on the bed as
 // PrusaSlicer's command line would: spread out with the process's spacing, and a single
 // object centred. A part that was given a place stays there, and the others are arranged
-// around it. The bed may be any polygon, so a printer's unusable corner can be cut out of
+// around it. What does not fit goes on a second plate, and so on; a part given a plate is
+// kept to it. The bed may be any polygon, so a printer's unusable corner can be cut out of
 // its bed_shape and the parts keep clear of it.
-Model load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &config, std::vector<size_t> *objects_per_part = nullptr)
+Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig &config)
 {
     const Points bed = get_bed_shape(config);
-    Model        model;
+    const Plates layout(bed);
+    Arranged     arranged;
+    Model       &model = arranged.model;
     Unplaced     unplaced;
+    std::vector<std::vector<std::optional<int>>> pinned; // per object, per copy: the plate it was given
+    std::vector<std::string>                     named;  // per object: its part, as errors name it
     bool         any_unplaced = false;
-    for (const auto &[path, scale, rotate, count, place, height] : parts) {
-        if (place && count > 1)
-            throw std::runtime_error(path + " has a place of its own on the bed, which a part with copies cannot have");
-        Model one = load_transformed(path, scale, rotate, count);
-        // A file is moved as a whole, so that its objects stay as they are to each other.
-        Vec3d shift(0, 0, height);
-        if (place) {
-            const Vec3d middle = one.bounding_box_exact().center();
-            shift += Vec3d((*place)[0] - middle.x(), (*place)[1] - middle.y(), 0);
+    for (const auto &[path, scale, rotate, count, places, height, plates] : parts) {
+        if (int(places.size()) > count || int(plates.size()) > count)
+            throw std::runtime_error(path + " has places or plates for more copies than its " + std::to_string(count));
+        const auto copy_name = [&, count = count, &path = path](size_t c) {
+            return count > 1 ? "copy " + std::to_string(c + 1) + " of " + path : path;
+        };
+        std::vector<std::optional<int>> plate(count);
+        for (size_t c = 0; c < plates.size(); ++c) {
+            if (plates[c] && *plates[c] < 1)
+                throw std::runtime_error(copy_name(c) + " is given plate " + std::to_string(*plates[c]) + "; plates are counted from 1");
+            if (plates[c] && *plates[c] > Plates::most)
+                throw std::runtime_error(copy_name(c) + " is given plate " + std::to_string(*plates[c]) + "; a print has at most " + std::to_string(Plates::most));
+            plate[c] = plates[c];
         }
+        Model one = load_transformed(path, scale, rotate, count);
         for (ModelObject *object : one.objects)
             for (ModelInstance *copy : object->instances)
-                copy->set_offset(copy->get_offset() + shift);
-        if (place && !on_the_bed(one.objects, bed))
-            throw std::runtime_error(path + " is not on the bed where it has been moved to");
+                copy->set_offset(copy->get_offset() + Vec3d(0, 0, height));
+        // A file's objects are moved together, copy by copy, so that they stay as they are to each other.
+        for (size_t c = 0; c < places.size(); ++c) {
+            if (!places[c])
+                continue;
+            BoundingBoxf3 box;
+            for (const ModelObject *object : one.objects)
+                box.merge(object->instance_bounding_box(c));
+            const Vec3d middle = box.center();
+            Vec3d shift((*places[c])[0] - middle.x(), (*places[c])[1] - middle.y(), 0);
+            for (ModelObject *object : one.objects)
+                if (!on_the_bed(*object, c, bed, shift))
+                    throw std::runtime_error(copy_name(c) + " is not on the bed where it has been moved to");
+            if (plate[c]) // to its plate, where arrange sees it
+                shift -= layout.to_bed(*plate[c] - 1);
+            for (ModelObject *object : one.objects)
+                object->instances[c]->set_offset(object->instances[c]->get_offset() + shift);
+        }
         for (const ModelObject *object : one.objects) {
             model.add_object(*object);
-            unplaced.copies.emplace_back(object->instances.size(), !place);
+            std::vector<bool> arrange(count);
+            for (int c = 0; c < count; ++c)
+                any_unplaced |= arrange[c] = c >= int(places.size()) || !places[c];
+            unplaced.copies.push_back(arrange);
+            pinned.push_back(plate);
+            named.push_back(path);
         }
-        if (objects_per_part)
-            objects_per_part->push_back(one.objects.size());
-        any_unplaced |= !place;
+        arranged.objects_per_part.push_back(one.objects.size());
     }
-    if (!any_unplaced)
-        return model;
-
-    arr2::ArrangeSettings settings;
-    settings.set_distance_from_objects(min_object_distance(config));
-    const auto arrange_on = [&](const arr2::ArrangeBed &on) {
-        arr2::arrange(arr2::SceneBuilder{}.set_bed(on).set_arrange_settings(settings).set_model(model).set_selection(&unplaced));
+    const auto copy_name = [&](size_t o, size_t c) {
+        return model.objects[o]->instances.size() > 1 ? "copy " + std::to_string(c + 1) + " of " + named[o] : named[o];
     };
 
-    // On a rectangle PrusaSlicer centres what it arranges; on any other polygon it packs
-    // towards an edge. So arrange on the bed's rectangle first, and only when something
-    // then lands outside the real outline (in a cut-out corner) arrange on the outline.
-    arrange_on(arr2::ArrangeBed{arr2::RectangleBed{BoundingBox(bed), Vec2crd{0, 0}}});
-    if (!on_the_bed(model.objects, bed)) {
-        arrange_on(arr2::to_arrange_bed(bed, Vec2crd{0, 0}));
-        if (!on_the_bed(model.objects, bed))
-            throw std::runtime_error("the parts do not fit on the bed, keeping clear of the part of it that cannot be printed on");
+    // The plate of every copy, or nothing when one is off its plate's bed.
+    const auto plates = [&]() -> std::optional<std::vector<std::vector<int>>> {
+        std::vector<std::vector<int>> found;
+        for (const ModelObject *object : model.objects) {
+            found.emplace_back();
+            for (size_t c = 0; c < object->instances.size(); ++c) {
+                const int plate = layout.of(*object, c);
+                if (plate < 0 || !on_the_bed(*object, c, bed, layout.to_bed(plate)))
+                    return std::nullopt;
+                found.back().push_back(plate);
+            }
+        }
+        return found;
+    };
+
+    // A copy kept to a plate that does not have room for it is named; anything else that
+    // does not fit is too big for any plate.
+    const auto does_not_fit = [&]() {
+        for (size_t o = 0; o < model.objects.size(); ++o)
+            for (size_t c = 0; c < model.objects[o]->instances.size(); ++c) {
+                const int plate = layout.of(*model.objects[o], c);
+                if (pinned[o][c] && (plate < 0 || !on_the_bed(*model.objects[o], c, bed, layout.to_bed(plate))))
+                    return std::runtime_error(copy_name(o, c) + " is given plate " + std::to_string(*pinned[o][c]) + ", and does not fit there");
+            }
+        return std::runtime_error("the parts do not fit on the bed, keeping clear of the part of it that cannot be printed on");
+    };
+    if (any_unplaced) {
+        arr2::ArrangeSettings settings;
+        settings.set_distance_from_objects(min_object_distance(config));
+        const auto arrange_on = [&](const arr2::ArrangeBed &on) {
+            arr2::BedConstraints constraints;
+            for (size_t o = 0; o < model.objects.size(); ++o)
+                for (size_t c = 0; c < model.objects[o]->instances.size(); ++c)
+                    if (pinned[o][c])
+                        constraints.emplace(model.objects[o]->instances[c]->id(), *pinned[o][c] - 1);
+            arr2::arrange(arr2::SceneBuilder{}
+                              .set_bed(on)
+                              .set_arrange_settings(settings)
+                              .set_model(model)
+                              .set_selection(&unplaced)
+                              .set_bed_constraints(std::move(constraints)));
+        };
+
+        // On a rectangle PrusaSlicer centres what it arranges; on any other polygon it
+        // packs towards an edge. So arrange on the bed's rectangle first, and only when
+        // something then lands outside the real outline (in a cut-out corner) arrange on
+        // the outline.
+        arrange_on(arr2::ArrangeBed{arr2::RectangleBed{layout.bed, Plates::gap}});
+        if (!plates()) {
+            arrange_on(arr2::to_arrange_bed(bed, Plates::gap));
+            if (!plates())
+                throw does_not_fit();
+        }
     }
-    return model;
+
+    const std::optional<std::vector<std::vector<int>>> found = plates();
+    if (!found)
+        throw does_not_fit();
+    arranged.plates = *found;
+    for (size_t o = 0; o < model.objects.size(); ++o)
+        for (size_t c = 0; c < model.objects[o]->instances.size(); ++c) {
+            const int plate = arranged.plates[o][c];
+            if (pinned[o][c] && plate != *pinned[o][c] - 1)
+                throw std::runtime_error(copy_name(o, c) + " is given plate " + std::to_string(*pinned[o][c]) + ", and does not fit there");
+            ModelInstance *copy = model.objects[o]->instances[c];
+            copy->set_offset(copy->get_offset() + layout.to_bed(plate));
+            arranged.count = std::max(arranged.count, plate + 1);
+        }
+    for (const std::vector<std::optional<int>> &copies : pinned)
+        for (const std::optional<int> &plate : copies)
+            if (plate)
+                arranged.count = std::max(arranged.count, *plate);
+    return arranged;
 }
 
 // A picture of the parts for the printer's screen. libslic3r leaves thumbnails to
@@ -349,12 +492,17 @@ std::vector<double> layer_tops(const Print &print)
     return tops;
 }
 
-SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini, const std::string &output_path, std::vector<int> pauses)
+SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini, const std::string &output_path, std::vector<int> pauses, int plate)
 {
     nb::gil_scoped_release release;
 
-    DynamicPrintConfig config = complete_config(parse_config(config_ini));
-    Model              model  = load_arranged(parts, config);
+    DynamicPrintConfig config   = complete_config(parse_config(config_ini));
+    const Arranged     arranged = load_arranged(parts, config);
+    if (plate < 1 || plate > arranged.count)
+        throw std::runtime_error("the print has " + std::to_string(arranged.count) + (arranged.count == 1 ? " plate" : " plates") + ", not a plate " + std::to_string(plate));
+    Model model = arranged.on_plate(plate - 1, true);
+    if (model.objects.empty())
+        throw std::runtime_error("nothing is on plate " + std::to_string(plate));
 
     Print print;
     print.set_status_silent();
@@ -421,36 +569,68 @@ std::array<double, 3> model_size(const std::string &model_path, std::array<doubl
     return {size.x(), size.y(), size.z()};
 }
 
-// The triangles of every part, every copy, placed on the bed exactly as `slice` places
-// them. Vertices are float32 x, y, z; triangles are three uint32 vertex indices each.
-std::tuple<nb::bytes, nb::bytes, std::vector<std::pair<size_t, size_t>>> mesh(const std::vector<Part> &parts, const std::string &config_ini)
+// The triangles of every copy of every part on a plate, placed exactly as `slice` places
+// them. Vertices are float32 x, y, z; triangles are three uint32 vertex indices each. Each
+// copy's are after the one before, and said which they are: the part's index, the copy's
+// number (from 1), and how many vertices and triangles.
+using CopyRange = std::tuple<size_t, int, size_t, size_t>;
+std::tuple<nb::bytes, nb::bytes, std::vector<CopyRange>> mesh(const std::vector<Part> &parts, const std::string &config_ini, int plate)
 {
-    std::vector<float>    vertices;
-    std::vector<uint32_t> triangles;
-    std::vector<std::pair<size_t, size_t>> per_part;  // vertices and triangles, each part's after the one before
+    std::vector<float>     vertices;
+    std::vector<uint32_t>  triangles;
+    std::vector<CopyRange> copies;
     {
         nb::gil_scoped_release release;
 
         const DynamicPrintConfig config = complete_config(parse_config(config_ini));
-        std::vector<size_t>      objects_per_part;
-        const Model              model  = load_arranged(parts, config, &objects_per_part);
-        size_t object_id = 0;
-        for (const size_t objects : objects_per_part) {
-            const size_t first_vertex = vertices.size() / 3, first_triangle = triangles.size() / 3;
-            for (const size_t end = object_id + objects; object_id < end; ++object_id) {
-                const TriangleMesh m    = model.objects[object_id]->mesh();
-                const uint32_t     base = uint32_t(vertices.size() / 3);
-                for (const Vec3f &v : m.its.vertices)
-                    vertices.insert(vertices.end(), {v.x(), v.y(), v.z()});
-                for (const Vec3i &t : m.its.indices)
-                    triangles.insert(triangles.end(), {base + uint32_t(t(0)), base + uint32_t(t(1)), base + uint32_t(t(2))});
+        const Arranged           arranged = load_arranged(parts, config);
+        if (plate < 1 || plate > arranged.count)
+            throw std::runtime_error("the print has " + std::to_string(arranged.count) + (arranged.count == 1 ? " plate" : " plates") + ", not a plate " + std::to_string(plate));
+        const Model &model = arranged.model;
+        size_t first_object = 0;
+        for (size_t part = 0; part < arranged.objects_per_part.size(); ++part) {
+            const size_t objects = arranged.objects_per_part[part];
+            // A file's objects are copied together: a copy is the same instance of each.
+            for (size_t c = 0; objects && c < model.objects[first_object]->instances.size(); ++c) {
+                if (arranged.plates[first_object][c] != plate - 1)
+                    continue;
+                const size_t first_vertex = vertices.size() / 3, first_triangle = triangles.size() / 3;
+                for (size_t o = first_object; o < first_object + objects; ++o) {
+                    TriangleMesh m = model.objects[o]->raw_mesh();
+                    m.transform(model.objects[o]->instances[c]->get_matrix());
+                    const uint32_t base = uint32_t(vertices.size() / 3);
+                    for (const Vec3f &v : m.its.vertices)
+                        vertices.insert(vertices.end(), {v.x(), v.y(), v.z()});
+                    for (const Vec3i &t : m.its.indices)
+                        triangles.insert(triangles.end(), {base + uint32_t(t(0)), base + uint32_t(t(1)), base + uint32_t(t(2))});
+                }
+                copies.emplace_back(part, int(c) + 1, vertices.size() / 3 - first_vertex, triangles.size() / 3 - first_triangle);
             }
-            per_part.emplace_back(vertices.size() / 3 - first_vertex, triangles.size() / 3 - first_triangle);
+            first_object += objects;
         }
     }
     return {nb::bytes(reinterpret_cast<const char *>(vertices.data()), vertices.size() * sizeof(float)),
             nb::bytes(reinterpret_cast<const char *>(triangles.data()), triangles.size() * sizeof(uint32_t)),
-            per_part};
+            copies};
+}
+
+// The plate each copy of each part is printed on, counted from 1, and how many plates
+// the print has: up to the last with something on it, or the highest a part is given.
+std::pair<std::vector<std::vector<int>>, int> plates(const std::vector<Part> &parts, const std::string &config_ini)
+{
+    nb::gil_scoped_release release;
+
+    const Arranged arranged = load_arranged(parts, complete_config(parse_config(config_ini)));
+    std::vector<std::vector<int>> per_part;
+    size_t object = 0;
+    for (const size_t objects : arranged.objects_per_part) {
+        per_part.emplace_back();
+        // A file's objects are copied together, so a copy's plate is its first object's.
+        for (const int plate : arranged.plates[object])
+            per_part.back().push_back(plate + 1);
+        object += objects;
+    }
+    return {per_part, arranged.count};
 }
 
 // The arcs (G2, G3) in a G-code file by line number, counted from 1 as the reader's
@@ -648,7 +828,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 8;
+    m.attr("API_VERSION") = 10;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -660,13 +840,15 @@ NB_MODULE(_engine, m)
         .def_ro("layers", &SliceResult::layers, "How many layers the print has, as the G-code's layer changes count them.")
         .def_ro("height", &SliceResult::height, "Height of the top of the last layer, in mm.");
 
-    m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{},
+    m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{}, "plate"_a = 1,
           "Slice the parts of a print and write G-code to `output`.\n\n"
-          "Each part is (model file, scale, rotate, count, place, height): per-axis scale factors,\n"
-          "degrees about X, Y and Z applied in that order after scaling, the number of copies, the\n"
-          "x and y of its middle on the bed or None to have it arranged, and how far its underside\n"
-          "is above the bed (negative sinks it). The parts are dropped onto the bed and those\n"
-          "without a place are arranged on it. `config` is PrusaSlicer INI text; settings it\n"
+          "Each part is (model file, scale, rotate, count, places, height, plates): per-axis scale\n"
+          "factors, degrees about X, Y and Z applied in that order after scaling, the number of\n"
+          "copies, per copy the x and y of its middle on the bed or None to have it arranged, how\n"
+          "far its underside is above the bed (negative sinks it), and per copy the plate it is\n"
+          "printed on, from 1, or None for the first it fits on (a list shorter than the copies\n"
+          "leaves the rest arranged). The parts are dropped onto the bed and those without\n"
+          "a place are arranged, onto further plates when they do not fit. Only `plate` is sliced. `config` is PrusaSlicer INI text; settings it\n"
           "leaves out take PrusaSlicer's defaults. A picture of the parts is written into the\n"
           "G-code for each size in the `thumbnails` setting. `pauses` are layers, counted from 1\n"
           "as the G-code's layer changes count them, after which the printer's pause G-code\n"
@@ -678,11 +860,15 @@ NB_MODULE(_engine, m)
           "`rotate` are applied as `slice` applies them.\n\n"
           "Raises RuntimeError when the file cannot be read as a model.");
 
-    m.def("mesh", &mesh, "parts"_a, "config"_a,
-          "The triangles of every part and copy, placed on the bed as `slice` places them: bytes\n"
-          "of float32 vertex coordinates, bytes of uint32 triangle vertex indices, and per part, in\n"
-          "the order given, how many of the vertices and triangles are its, each part's after\n"
-          "the one before.");
+    m.def("plates", &plates, "parts"_a, "config"_a,
+          "Where `slice` prints each part: per part, the plate of each copy, counted from 1; and\n"
+          "how many plates the print has.");
+
+    m.def("mesh", &mesh, "parts"_a, "config"_a, "plate"_a = 1,
+          "The triangles of every part and copy on `plate`, placed on its bed as `slice` places them: bytes\n"
+          "of float32 vertex coordinates, bytes of uint32 triangle vertex indices, and per copy on the\n"
+          "plate (part index, copy number from 1, vertices, triangles): which of the vertices and\n"
+          "triangles are that copy's, each copy's after the one before.");
 
     m.def("toolpaths", &toolpaths, "gcode"_a,
           "The extrusions and travel moves in a G-code file, in order, and the time they take.\n"

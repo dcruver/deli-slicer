@@ -123,19 +123,20 @@ function drawBed(points, height) {
 }
 
 async function drawPart(parts) {
-  const response = await fetch('/mesh');
+  const response = await fetch(`/mesh?plate=${plate}`);
   if (!response.ok) throw new Error(await response.text());
   const data = await response.arrayBuffer();
-  const [nVertices, nTriangles, nParts] = new Uint32Array(data, 0, 3);
+  const [nVertices, nTriangles, nCopies] = new Uint32Array(data, 0, 3);
   const vertices = new Float32Array(data, 12, nVertices * 3);
   const indices = new Uint32Array(data, 12 + nVertices * 12, nTriangles * 3);
-  const counts = new Uint32Array(data, 12 + nVertices * 12 + nTriangles * 12, nParts * 2);
-  // Which vertices and triangles are each part's, for the tools that act on one part.
+  const counts = new Uint32Array(data, 12 + nVertices * 12 + nTriangles * 12, nCopies * 4);
+  // Which vertices and triangles are each copy's, of which part, for the tools that act on one.
   partRanges = [];
-  for (let i = 0, vertex = 0, triangle = 0; i < nParts; i++) {
-    partRanges.push({ part: parts[i], vertex, vertices: counts[i * 2], triangle, triangles: counts[i * 2 + 1] });
-    vertex += counts[i * 2];
-    triangle += counts[i * 2 + 1];
+  for (let i = 0, vertex = 0, triangle = 0; i < nCopies; i++) {
+    const [index, copy, nv, nt] = counts.subarray(i * 4, i * 4 + 4);
+    partRanges.push({ part: parts[index], copy, vertex, vertices: nv, triangle, triangles: nt });
+    vertex += nv;
+    triangle += nt;
   }
   placed = vertices.slice();  // where the parts are, before a drag moves one
 
@@ -260,7 +261,7 @@ function duration(seconds) {
 // Travel moves are thin lines, shown when asked for. After each pause the colours change,
 // lighter and back again, as a change of filament there would show.
 async function drawToolpaths(roles, pauses) {
-  const response = await fetch('/toolpaths');
+  const response = await fetch(`/toolpaths?plate=${plate}`);
   if (!response.ok) throw new Error(await response.text());
   const data = await response.arrayBuffer();
   const n = new Uint32Array(data, 0, 1)[0];
@@ -391,11 +392,18 @@ function redrawLegend() {
   if (box) box.innerHTML = legend();
 }
 
+// Whether any part or copy was moved, or kept to a plate, so that arranging would change something.
+const handPlaced = () => (lastState?.parts ?? []).some(part => part.at.some(Boolean) || part.kept.some(Boolean));
+
 function options() {
   return '<div class="options">'
     + (partMesh && overhang ? `<div id="overhangNote" class="dim"${showOverhangs ? '' : ' hidden'}>Red: faces that look down at less than `
         + `${Math.round(overhang.angle)}° from level, which supports hold up${overhang.auto ? ' (the automatic angle: half a wall\'s width per layer)' : ''}</div>` : '')
-    + (partMesh ? `<div class="tools"><button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button></div>` : '')
+    // Arrange is there also when the parts cannot be drawn, as when one was moved off the bed.
+    + (partMesh || handPlaced() ? '<div class="tools">'
+        + (partMesh ? `<button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button>` : '')
+        + (handPlaced() ? '<button type="button" id="arrange" title="Arrange every part again, as before any was moved">Arrange</button>' : '')
+        + '</div>' : '')
     + '<div class="tools">'
     + Object.entries(TOOLS).filter(([, tool]) => partMesh || !tool.needsPart).map(([name, tool]) =>
         `<button type="button" data-tool="${name}" title="${tool.title}" aria-pressed="${mode === name}">${tool.label}</button>`).join('')
@@ -427,8 +435,13 @@ document.getElementById('onlyLayer').addEventListener('change', event => {
 // The info box is rewritten on every redraw, so the box listens for its buttons and rows.
 info.addEventListener('click', event => {
   const button = event.target.closest('button');
+  if (button?.dataset.plate) {
+    plate = Number(button.dataset.plate);
+    return lastState && redraw(lastState);
+  }
   if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
   if (button?.id === 'sliceNow') return startSlice(button);
+  if (button?.id === 'arrange') return showCommand('deli arrange', 'to arrange every part again', [['arrange']]);
   if (button?.id === 'overhangs') {
     showOverhangs = !showOverhangs;
     button.setAttribute('aria-pressed', showOverhangs);
@@ -745,7 +758,6 @@ function startDrag(event) {
   const hit = partHit(event.clientX, event.clientY);
   if (!hit) return;
   const range = rangeOf(hit.faceIndex);
-  if (range.part.count > 1) return showCommand(null, `${range.part.file} has copies, and a part with copies cannot be given a place.`);
   controls.enabled = false;
   renderer.domElement.style.cursor = 'grabbing';
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -769,8 +781,11 @@ function drag(event) {
   }
   position.needsUpdate = true;
   const [x, y] = [dragging.middle[0] + by.x, dragging.middle[1] + by.y];
-  showCommand(`deli move ${partName(range.part)} ${number(x)} ${number(y)}`, 'to move it there',
-    [['move', range.part.file, number(x), number(y)]]);
+  // A place is on the copy's own plate, so a copy only arranged onto this one is kept to it.
+  const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
+  const steps = [...(plate > 1 && part.kept[copy - 1] !== plate ? [['plate', String(plate)]] : []), [number(x), number(y)]];
+  showCommand(steps.map(step => `deli move ${partName(part)} ${[...which, ...step].join(' ')}`).join(' && '),
+    `to move ${part.count > 1 ? `copy ${copy}` : 'it'} there`, steps.map(step => ['move', part.file, ...which, ...step]));
 }
 function endDrag() {
   controls.enabled = true;
@@ -822,32 +837,52 @@ document.getElementById('pauseHere').addEventListener('click', () => {
   if (!paths) return;
   const layer = Number(layerSlider.value);
   const off = paths.pauses.includes(layer);
-  showCommand(off ? `deli pause off ${layer}` : `deli pause ${layer}`,
-    off ? 'to stop pausing after this layer' : 'to pause after this layer',
-    [off ? ['pause', 'off', String(layer)] : ['pause', String(layer)]]);
+  const which = plate > 1 ? ['--plate', String(plate)] : [];  // the first plate's are the print's own
+  const args = [...(off ? ['pause', 'off', String(layer)] : ['pause', String(layer)]), ...which];
+  showCommand(`deli ${args.join(' ')}`, off ? 'to stop pausing after this layer' : 'to pause after this layer', [args]);
 });
 
 const mm = n => Math.round(n * 100) / 100;
 const pct = f => `${Math.round(f * 1000) / 10}%`;
 
+// The copies of a part on a plate, as `deli slice` arranges them.
+const copiesOn = (part, n) => (part.on ?? []).filter(p => p === n).length;
+
 function describe(state) {
   const lines = [];
+  if (state.plates > 1)
+    lines.push('<div class="plates">' + Array.from({ length: state.plates }, (_, i) => i + 1).map(n =>
+      `<button type="button" data-plate="${n}" aria-pressed="${n === plate}">Plate ${n}</button>`).join('') + '</div>');
   for (const part of state.parts) {
-    lines.push(`<b>${part.file}</b>${part.count > 1 ? ` × ${part.count}` : ''}`);
+    if (state.plates > 1 && !copiesOn(part, plate)) continue;
+    const count = state.plates > 1 ? copiesOn(part, plate) : part.count;
+    lines.push(`<b>${part.file}</b>${count > 1 ? ` × ${count}` : ''}`
+      + (state.plates > 1 && count < part.count ? ` <span class="dim">of ${part.count}</span>` : ''));
     if (part.size) lines.push(part.size.map(mm).join(' × ') + ' mm');
     const s = part.scale, r = part.rotate;
     if (s.some(f => f !== 1)) lines.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
     const turns = ['x', 'y', 'z'].map((a, i) => r[i] ? `${r[i]}° about ${a}` : null).filter(Boolean);
     if (turns.length) lines.push(`<span class="dim">rotate</span> ${turns.join(', ')}`);
-    if (part.at) lines.push(`<span class="dim">at</span> ${part.at.map(mm).join(', ')} mm`);
+    if (part.plate) lines.push(`<span class="dim">kept to plate</span> ${part.plate}`);
+    // Where the copies on this plate were moved to, or kept to it on their own.
+    part.at.forEach((at, i) => {
+      if ((part.on?.[i] ?? 1) !== plate) return;
+      const own = part.kept[i] !== part.plate ? part.kept[i] : null;
+      if (!at && !own) return;
+      const which = part.count > 1 ? `copy ${i + 1} ` : '';
+      lines.push(`<span class="dim">${which}${at ? 'at' : 'kept to plate'}</span> ${at ? `${at.map(mm).join(', ')} mm` : own}`);
+    });
     if (part.z) lines.push(`<span class="dim">${part.z < 0 ? 'sunk' : 'raised'}</span> ${mm(Math.abs(part.z))} mm`);
   }
   if (!state.parts.length) lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
+  else if (state.plates > 1 && !state.parts.some(part => copiesOn(part, plate))) lines.push('<span class="dim">Nothing on this plate.</span>');
   lines.push(state.printer ? `<span class="dim">printer</span> ${state.printer}`
                            : '<span class="dim">No printer chosen: deli printer &lt;name&gt;</span>');
   if (state.filament) lines.push(`<span class="dim">filament</span> ${state.filament}`);
-  if (state.pauses.length) lines.push(`<span class="dim">pauses after layer</span> ${state.pauses.join(', ')}`);
-  if (state.gcode) lines.push(`<span class="dim">sliced</span> ${state.gcode}`);
+  const pauses = state.pauses[plate] ?? [];
+  if (pauses.length) lines.push(`<span class="dim">pauses after layer</span> ${pauses.join(', ')}`);
+  if (state.gcode?.[plate]) lines.push(`<span class="dim">sliced</span> ${state.gcode[plate]}`);
+  else if (state.gcode) {}  // sliced, with nothing on this plate
   else if (state.parts.length) {
     const slice = state.slicing?.running ? '<span class="dim">slicing…</span>'
       : token ? '<button type="button" id="sliceNow" title="deli slice">Slice</button>' : 'deli slice';
@@ -858,6 +893,8 @@ function describe(state) {
 }
 
 let sliced = null;  // which slicing made the G-code shown, if any
+let plate = 1;  // the plate shown, of a print with several
+let lastState = null;  // what was drawn, to draw again for another plate
 
 async function refresh() {
   try {
@@ -874,6 +911,8 @@ async function refresh() {
 }
 
 async function redraw(state) {
+  lastState = state;
+  plate = Math.min(plate, state.plates ?? 1);
   if ((state.sliced ?? null) !== sliced) modelChoice = null;  // sliced again, or out of date: the model as it should be shown
   sliced = state.sliced ?? null;
   overhang = state.overhang ?? null;
@@ -889,12 +928,12 @@ async function redraw(state) {
     clearModel();
     problem = err;
   }
-  if (state.gcode) await drawToolpaths(state.roles, state.pauses);
+  if (state.gcode?.[plate]) await drawToolpaths(state.roles, state.pauses[plate] ?? []);
   else clearPaths();
   if (TOOLS[mode]?.needsPart && !partMesh) setMode(null);
   showModel();
   setUpSlider();
-  if (problem) info.innerHTML += `<div class="error">${problem.message}</div>`;
+  if (problem && problem.message !== state.error) info.innerHTML += `<div class="error">${problem.message}</div>`;
   info.innerHTML += options();
 }
 
