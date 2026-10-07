@@ -3,6 +3,10 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- `deli --version` says which deli is installed.
+
 ## 0.7.0 (2026-10-06)
 
 - Prints with more than one plate. Parts that do not fit on the bed go on a second plate,

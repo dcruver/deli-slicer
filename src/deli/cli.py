@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib.metadata
 import os
 import re
 import shutil
@@ -1568,6 +1569,7 @@ def _complete(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="deli", description="CLI-first slicer front end for 3D printing.")
+    parser.add_argument("--version", action="version", version=f"deli {importlib.metadata.version('deli')}")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     load = commands.add_parser(
