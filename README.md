@@ -383,13 +383,18 @@ are ordinary settings (`support_material`, `support_material_style`, ...), so
 
 Parts are arranged on the bed for you, a single part in the middle. `deli move 60 80`
 puts the middle of a part at x 60, y 80 instead, in millimetres from the bed's origin
-(the axes `deli view` draws), and the parts you have not moved are arranged around it.
+(the axes `deli view` draws). The first time something on a plate is moved, everything
+else on that plate keeps where it is, given a place of its own (`deli move` says so), so
+that moving one thing never moves another; moved parts and copies that would overlap are
+refused.
 `deli move z -0.25` sinks a part a quarter of a millimetre into the bed, which is what
 a part resting on an edge or a lip needs to get a first layer; what is below the bed
 is not printed. `deli move auto` gives the placing back, and `deli translate` is the
 same command under another name. A part with copies is moved a copy at a time:
-`deli move box --copy 2 60 80` places the second, and the others are arranged around
-it. `deli arrange` has every part and copy arranged again, as before any was moved.
+`deli move box --copy 2 60 80` places the second, and `deli rotate box --copy 2 x 90`
+turns it alone (rotating the part turns every copy). `deli arrange` has every part and
+copy arranged again, as before any was moved; `deli arrange --plate 2` only what was
+moved on plate 2, which stays there.
 
 What does not fit on the bed goes on a second plate, and so on, as many as it takes, and
 `deli slice` writes a G-code file for each (`stand-plate1.gcode`, `stand-plate2.gcode`)
@@ -431,12 +436,15 @@ G-code viewer makes it, and can be a minute or two from the one `deli slice` rep
 Overhangs shows in red the faces supports would hold up (at the print's
 `support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
 
-Move and Lay flat change the print with deli's own commands: drag a part over the bed
-for its `deli move` (a copy is moved by itself, with `--copy`), or click a face of one
-for the `deli rotate` that lays that face on the bed; Arrange, once something has been
-moved, gives `deli arrange`; Pause here, beside the layer slider, does the same for `deli pause` at that
+Dragging and Lay flat change the print with deli's own commands: drag a part over the
+bed for its `deli move` (a copy is moved by itself, with `--copy`; a drag that would put
+it off the bed or on another part offers nothing), or with Lay flat click a face of one
+for the `deli rotate` that lays that face on the bed (that copy's only); Arrange, once something has been
+moved, gives `deli arrange` (`--plate N` for the plate shown, on a print of several); Pause here, beside the layer slider, does the same for `deli pause` at that
 layer. The page shows the command, and Apply runs it (Copy, to run it yourself); either
-way `deli.toml` changes as the command says and the page follows. Only the page at the
+way `deli.toml` changes as the command says and the page follows. Once the print is
+sliced, and deli knows the printer's address, Send and Print run `deli send` for the
+plate shown (Print, which starts the printer, asks once more). Only the page at the
 address `deli view` printed can apply commands. To measure, press Measure (or M) and
 click two points on the parts or the print: the line follows the pointer from the first,
 and the page shows the distance between them and along each axis, in mm or inches as
@@ -498,7 +506,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli move [part] [--copy N] <x> <y>` | where the part's middle goes on the bed, or one copy's; `z -0.25` sinks it, `plate 2` keeps it to plate 2, `auto` has it arranged again. `deli translate` is the same command |
-| `deli arrange` | arrange every part and copy again, forgetting where they were moved |
+| `deli arrange [--plate N]` | arrange every part and copy again, or one plate's, forgetting where they were moved |
 | `deli pause [off] [layer ...] [--plate N]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
 | `deli slice [-o FILE\|DIR]` | slice, and say how long it takes and how much filament; `-o` writes a copy of the G-code. Parts that do not fit go on further plates, a file each |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |

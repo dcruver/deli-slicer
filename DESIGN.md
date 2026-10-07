@@ -89,19 +89,23 @@ without starting the print unless you add `--print`. Where a command does someth
 extra to be helpful, it says so on its first line ("Slicing first: the print has changed
 since it was sliced").
 
-## The page changes a print only through deli's commands
+## The shell can do everything; the page runs the shell's commands
 
-`deli view` is for looking at a print, and most of it does nothing else. Where looking is
-naturally followed by a change (a part dragged over the bed, a face to lay flat, a layer
-to pause after), the page writes the deli command that makes it, and Apply runs that
-command, the same one the shell would, through the same code; Copy is there to run it
-yourself. So `deli.toml` stays the one record of the print, changed only by deli's
-commands, each change has one implementation, and the page always shows the command it
-ran and what it printed, which is also how the shell form is learned. It slices too, as
-`deli slice` (Slice, where the G-code is missing or out of date), in a process of its
-own, since a slice can take a while. It never sends to a printer: that reaches a
-machine, and stays in the shell. Only the page at the address `deli view` printed can
-run anything (it carries a token), so no other web page can.
+Everything deli does can be done from the shell, without `deli view`. The page is a
+better place for some of it (dragging a part over the bed, picking a face to lay flat, a
+layer to pause after, sending a plate you have just looked at), and there it writes the
+deli command that does it, and Apply runs that command, the same one the shell would,
+through the same code; Copy is there to run it yourself. So `deli.toml` stays the one
+record of the print, changed only by deli's commands, each change has one
+implementation, and the page always shows the command it ran and what it printed, which
+is also how the shell form is learned. Slice and Send run `deli slice` and `deli send` in
+a process of their own, since either can take a while. Print, which starts the printer,
+takes a second click that says so; and the page can send only the print's own G-code.
+Setting a printer up and choosing a printer, filament or process stay in the shell:
+they are done once, not while looking at a print. Only the page at the address
+`deli view` printed can run anything (it carries a token), so no other web page can.
+(Until 0.7, the page never sent to a printer; the user changed that once the page had
+become where a print is looked over before it is sent.)
 
 ## The network only where it has to be
 

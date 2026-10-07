@@ -18,7 +18,7 @@ def top_z(gcode: Path) -> float:
 
 def part(scale=(1, 1, 1), rotate=(0, 0, 0), count=1, place=None, height=0, plate=None):
     """A cube as `_engine` takes a part; a place is the first copy's, a plate every copy's."""
-    return [(str(CUBE), scale, rotate, count, [place] if place else [], height, [plate] * count if plate else [])]
+    return [(str(CUBE), scale, rotate, count, [place] if place else [], height, [plate] * count if plate else [], [])]
 
 
 def test_slices_a_cube(tmp_path):
@@ -64,7 +64,7 @@ def test_object_larger_than_the_bed_is_an_error(tmp_path):
 
 def test_missing_model_is_an_error(tmp_path):
     with pytest.raises(RuntimeError):
-        _engine.slice([(str(tmp_path / "missing.stl"), (1, 1, 1), (0, 0, 0), 1, [], 0, [])], CONFIG, str(tmp_path / "x.gcode"))
+        _engine.slice([(str(tmp_path / "missing.stl"), (1, 1, 1), (0, 0, 0), 1, [], 0, [], [])], CONFIG, str(tmp_path / "x.gcode"))
 
 
 NOTCHED = "bed_shape = 0x0,246x0,246x20,256x20,256x256,0x256\nmax_print_height = 256\n" + CONFIG
@@ -226,7 +226,7 @@ def test_toolpaths_flow_is_the_gcodes(tmp_path):
 def test_toolpaths_include_supports(tmp_path):
     overhang = ROOT / "vendor/PrusaSlicer/tests/data/U_overhang.obj"
     out = tmp_path / "overhang.gcode"
-    _engine.slice([(str(overhang), (1, 1, 1), (0, 0, 0), 1, [], 0, [])], CONFIG + "support_material = 1\n", str(out))
+    _engine.slice([(str(overhang), (1, 1, 1), (0, 0, 0), 1, [], 0, [], [])], CONFIG + "support_material = 1\n", str(out))
 
     assert "Support material" in {role for *_, role in toolpaths(out)}
 
@@ -268,7 +268,7 @@ def test_each_copy_can_have_a_place():
     import struct
 
     places = [None, (50, 50), None]
-    vertices, _, copies = _engine.mesh([(str(CUBE), (1, 1, 1), (0, 0, 0), 3, places, 0, [])], CONFIG)
+    vertices, _, copies = _engine.mesh([(str(CUBE), (1, 1, 1), (0, 0, 0), 3, places, 0, [], [])], CONFIG)
 
     assert [copy for _, copy, _, _ in copies] == [1, 2, 3]
     second = struct.unpack(f"{len(vertices) // 4}f", vertices)[8 * 3:16 * 3]
@@ -277,15 +277,86 @@ def test_each_copy_can_have_a_place():
     assert x1 - x0 > 40  # the others are arranged around it
 
 
+def test_copies_keep_clear_of_the_cut_out_corner_around_one_with_a_place():
+    # Vs of 160 x 72 mm, three to a plate: with one placed, PrusaSlicer's arrange on the
+    # outline put another in the corner, and the print could not be laid out at all.
+    v = ROOT / "vendor/PrusaSlicer/tests/data/V.obj"
+    width, depth, _ = _engine.model_size(str(v))
+    stand = (str(v), (160 / width, 72 / depth, 1), (0, 0, 0), 4, [None, (174, 115)], 0, [], [])
+
+    on, count = _engine.plates([stand], NOTCHED)
+
+    assert sorted(on[0]) == [1, 1, 1, 2] and count == 2
+
+
+def test_a_part_without_copies_is_an_error():
+    with pytest.raises(RuntimeError, match="1 copy or more"):
+        _engine.plates([(str(CUBE), (1, 1, 1), (0, 0, 0), 0, [], 0, [], [])], CONFIG)
+
+
+def middles(places):
+    """Where each of three cubes ends up, by their middles, given the places of some."""
+    import struct
+
+    vertices, _, _ = _engine.mesh([(str(CUBE), (1, 1, 1), (0, 0, 0), 3, places, 0, [], [])], CONFIG)
+    floats = struct.unpack(f"{len(vertices) // 4}f", vertices)
+    found = []
+    for copy in range(3):
+        xyz = floats[copy * 24:(copy + 1) * 24]
+        found.append((round((min(xyz[0::3]) + max(xyz[0::3])) / 2, 1), round((min(xyz[1::3]) + max(xyz[1::3])) / 2, 1)))
+    return found
+
+
+def test_moving_one_copy_leaves_the_others_where_they_were():
+    before = middles([])
+
+    after = middles([None, None, (40, 180)])  # somewhere free
+
+    assert after[:2] == before[:2] and after[2] == (40, 180)
+
+
+def test_a_copy_in_the_way_of_one_moved_is_arranged_again():
+    before = middles([])
+
+    after = middles([None, None, before[0]])  # onto the first
+
+    assert after[1] == before[1] and after[2] == before[0]
+    assert after[0] != before[0]
+
+
+def test_copies_moved_into_each_other_are_refused():
+    def cubes(*places):
+        return [(str(CUBE), (1, 1, 1), (0, 0, 0), 2, list(places), 0, [], [])]
+
+    _engine.plates(cubes((50, 50), (70, 50)), CONFIG)  # side by side, touching: fine
+    with pytest.raises(RuntimeError, match="copy 2 of .*20mmbox-LF.stl overlap on plate 1; move one of them"):
+        _engine.plates(cubes((50, 50), (60, 50)), CONFIG)
+
+
+def test_a_copy_can_be_turned_its_own_way():
+    import struct
+
+    # A 40 x 20 x 20 box, and its second copy stood on end: 20 x 20 x 40, also on the bed.
+    box = (str(CUBE), (2, 1, 1), (0, 0, 0), 2, [(60, 60), (150, 60)], 0, [], [None, (0, 90, 0)])
+    vertices, _, copies = _engine.mesh([box], CONFIG)
+
+    floats = struct.unpack(f"{len(vertices) // 4}f", vertices)
+    sizes = []
+    for first, count in ((0, 8), (8, 8)):
+        xyz = floats[first * 3:(first + count) * 3]
+        sizes.append(tuple(round(max(xyz[a::3]) - min(xyz[a::3]), 3) for a in range(3)) + (round(min(xyz[2::3]), 3),))
+    assert sizes == [(40, 20, 20, 0), (20, 20, 40, 0)]
+
+
 def test_places_for_more_copies_than_there_are_are_an_error():
     with pytest.raises(RuntimeError, match="more copies than its 1"):
-        _engine.mesh([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, [None, (50, 50)], 0, [])], CONFIG)
+        _engine.mesh([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, [None, (50, 50)], 0, [], [])], CONFIG)
 
 
 def test_pauses_count_the_layers_of_supports_too(tmp_path):
     overhang = ROOT / "vendor/PrusaSlicer/tests/data/U_overhang.obj"
     out = tmp_path / "overhang.gcode"
-    result = _engine.slice([(str(overhang), (1, 1, 1), (0, 0, 0), 1, [], 0, [])], CONFIG + "support_material = 1\n", str(out), pauses=[20])
+    result = _engine.slice([(str(overhang), (1, 1, 1), (0, 0, 0), 1, [], 0, [], [])], CONFIG + "support_material = 1\n", str(out), pauses=[20])
 
     gcode = out.read_text()
     assert gcode.count(";LAYER_CHANGE") > 55  # more than the part's own 55 layers: supports have some of their own

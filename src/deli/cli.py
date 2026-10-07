@@ -438,34 +438,61 @@ def _turned(rotate: list[float]) -> str:
     return ", ".join(f"{angle:g}° about {axis}" for axis, angle in zip(AXES, rotate) if angle)
 
 
-def _show_rotation(part: dict) -> None:
+def _rotated(rotate: list[float]) -> str:
+    return f"is rotated {_turned(rotate)}" if rotate != project.IDENTITY["rotate"] else "is not rotated"
+
+
+def _show_rotation(part: dict, copy: int | None = None) -> None:
+    scale = project.part_transform(part, "scale")
+    if copy:
+        rotate = project.copy_rotate(part, copy)
+        print(f"copy {copy} of {part['file']} {_rotated(rotate)}")
+        print(f"  {_size_text(_size(part, scale, rotate))}")
+        return
     rotate = project.part_transform(part, "rotate")
-    state = f"is rotated {_turned(rotate)}" if rotate != project.IDENTITY["rotate"] else "is not rotated"
-    print(f"{part['file']}{_copies(project.part_count(part))} {state}")
-    print(f"  {_size_text(_size(part, project.part_transform(part, 'scale'), rotate))}")
+    print(f"{part['file']}{_copies(project.part_count(part))} {_rotated(rotate)}")
+    print(f"  {_size_text(_size(part, scale, rotate))}")
+    for n, turn in enumerate(project.copy_turns(part), 1):
+        if turn is not None and project.part_count(part) > 1:
+            print(f"  copy {n} {_rotated(turn)}")
+
+
+def _copy_of(part: dict, copy: int | None) -> int | None:
+    """The copy a command is about, checked; None for the whole part, as for a part without copies."""
+    count = project.part_count(part)
+    if copy is not None and not 1 <= copy <= count:
+        raise CommandError(f"{part['file']} has {'only one copy' if count == 1 else f'{count} copies'}; copies are numbered from 1")
+    return copy if count > 1 else None
 
 
 def _rotate(args: argparse.Namespace) -> int:
     doc = project.read()
     part, args.args = _transform_target(doc, args.args, "rotate")
     if part is None:
+        if args.copy is not None:
+            raise CommandError("say which part the copy is of: deli rotate <part> --copy N ...")
         for each in project.parts(doc):
             _show_rotation(each)
         return 0
+    copy = _copy_of(part, args.copy)
     scale = project.part_transform(part, "scale")
-    rotate = project.part_transform(part, "rotate")
+    rotate = project.copy_rotate(part, copy)
 
     if len(args.args) > 2:
-        raise CommandError("usage: deli rotate [PART] [x|y|z] DEGREES")
+        raise CommandError("usage: deli rotate [PART] [--copy N] [x|y|z] DEGREES")
     if not args.args:
-        _show_rotation(part)
+        _show_rotation(part, copy)
         return 0
     # Without an axis, turn the part on the bed: about z.
     axis = _axis(args.args[0]) if len(args.args) == 2 else 2
     rotate[axis] = _degrees(args.args[-1])
-    print(f"Rotated {part['file']} {_turned(rotate) or 'back to how it lies in the file'}")
+    name = f"copy {copy} of {part['file']}" if copy else part["file"]
+    print(f"Rotated {name} {_turned(rotate) or 'back to how it lies in the file'}")
     size = _size(part, scale, rotate)
-    project.set_part_transform(part, "rotate", rotate)
+    if copy:  # turned as the part is, it has no angles of its own
+        project.set_copy_turn(part, copy, None if rotate == project.part_transform(part, "rotate") else rotate)
+    else:
+        project.set_part_rotate(part, rotate)
     project.write(doc)
     print(f"  {_size_text(size)}")
     return 0
@@ -510,6 +537,31 @@ def _plate_number(text: str) -> int:
     return plate
 
 
+def _keep_the_rest(doc, moving: dict, copy: int) -> list[str]:
+    """Give every other part and copy on the plate the moved one is on the place it has now, so
+    that moving one does not have the rest arranged afresh around it; what was given one.
+    Nothing, when the print cannot be laid out as it is."""
+    plate = project.copy_plate(moving, copy) or 1
+    parts = project.parts(doc)
+    try:
+        vertices, _, copies = _engine.mesh(project.engine_parts(doc), view._config(doc), plate)
+    except (RuntimeError, ValueError):
+        return []
+    floats = memoryview(vertices).cast("f")
+    kept, first = [], 0
+    for index, n, count, _ in copies:
+        xs, ys = floats[first * 3:(first + count) * 3:3], floats[first * 3 + 1:(first + count) * 3:3]
+        first += count
+        part = parts[index]
+        if (part is moving and n == copy) or project.copy_place(part, n) is not None:
+            continue
+        project.set_copy_place(part, n, [round((min(xs) + max(xs)) / 2, 2), round((min(ys) + max(ys)) / 2, 2)])
+        if plate > 1 and project.copy_plate(part, n) != plate:
+            project.set_copy_plate(part, n, plate)  # a place is on the plate it is kept to
+        kept.append(part["file"] if project.part_count(part) == 1 else f"copy {n} of {part['file']}")
+    return kept
+
+
 def _move(args: argparse.Namespace) -> int:
     doc = project.read()
     part, args.args = _transform_target(doc, args.args, "move")
@@ -519,11 +571,7 @@ def _move(args: argparse.Namespace) -> int:
         for each in project.parts(doc):
             print(f"{each['file']}{_copies(project.part_count(each))} is {_placed(each)}")
         return 0
-    count, copy = project.part_count(part), args.copy
-    if copy is not None and not 1 <= copy <= count:
-        raise CommandError(f"{part['file']} has {'only one copy' if count == 1 else f'{count} copies'}; copies are numbered from 1")
-    if count == 1:
-        copy = None  # a part's only copy is the part
+    count, copy = project.part_count(part), _copy_of(part, args.copy)
     name = f"copy {copy} of {part['file']}" if copy else part["file"]
     which = f" --copy {copy}" if copy else ""
     stem = Path(part["file"]).stem
@@ -559,6 +607,10 @@ def _move(args: argparse.Namespace) -> int:
             at[_axis(args.args[0])] = _mm(args.args[1])
         else:
             at = [_mm(args.args[0]), _mm(args.args[1])]
+        kept = _keep_the_rest(doc, part, copy)
+        if kept:
+            print(f"Keeping where they are the other {len(kept)} {'part or copy' if len(kept) == 1 else 'parts and copies'} on its plate, "
+                  "so that moving this one does not move them: " + ", ".join(kept) + " (deli arrange gives that back)")
         project.set_copy_place(part, copy, at)
     else:
         raise CommandError("usage: deli move [PART] [--copy N] X Y | x|y|z MM | plate N | auto")
@@ -567,8 +619,27 @@ def _move(args: argparse.Namespace) -> int:
     return 0
 
 
+def _arrange_plate(doc, plate: int) -> int:
+    """Have what was moved on one plate arranged again, on that plate: a copy's place is on
+    the plate it is kept to (the first when none), and that plate it keeps."""
+    moved = []
+    for part in _parts_of(doc):
+        for n, at in enumerate(project.copy_places(part), 1):
+            if at and (project.copy_plate(part, n) or 1) == plate:
+                project.set_copy_place(part, n, None)
+                moved.append(part["file"] if project.part_count(part) == 1 else f"copy {n} of {part['file']}")
+    project.write(doc)
+    if not moved:
+        print(f"Nothing on plate {plate} has been moved; it is already arranged")
+    else:
+        print(f"Plate {plate} is now arranged again: " + ", ".join(moved) + (" is" if len(moved) == 1 else " are") + " placed automatically")
+    return 0
+
+
 def _arrange(args: argparse.Namespace) -> int:
     doc = project.read()
+    if args.plate is not None:
+        return _arrange_plate(doc, args.plate)
     parts = _parts_of(doc)
     placed = [p for p in parts if "at" in p or "plate" in p or "copy" in p]
     for part in placed:
@@ -1221,7 +1292,7 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
-ENGINE_API = 10  # must match API_VERSION in _engine.cpp
+ENGINE_API = 11  # must match API_VERSION in _engine.cpp
 
 
 def _styled(code: str):
@@ -1683,13 +1754,15 @@ def build_parser() -> argparse.ArgumentParser:
     rotate = commands.add_parser(
         "rotate",
         help="rotate the part, or show its rotation",
-        usage="deli rotate [PART] [x|y|z] [DEGREES]",
+        usage="deli rotate [PART] [--copy N] [x|y|z] [DEGREES]",
         description="Rotate a part. `deli rotate 45` turns it 45 degrees on the bed, about z; `deli rotate x 90` "
         "turns it about another axis. Rotations are applied about x, then y, then z, after scaling, and each is of "
         "the model as it is in its file, so `deli rotate 0` undoes it. With more than one part, name the part first. "
+        "--copy N turns one copy of a part with copies its own way; rotating the part turns every copy with it. "
         "Without arguments, show each part's rotation and the size it gives.",
     )
     rotate.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    rotate.add_argument("--copy", type=int, metavar="N", help="one copy of a part with copies, numbered from 1")
     rotate.set_defaults(run=_rotate)
 
     move = commands.add_parser(
@@ -1715,8 +1788,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="arrange every part again, forgetting where they were moved",
         description="Have every part and copy arranged on the bed, and on further plates when they do not fit, "
         "as a print is before anything is moved: drops the places and plates given with `deli move`. "
-        "How far a part is raised or sunk (`deli move z`) is kept.",
+        "How far a part is raised or sunk (`deli move z`) is kept. With --plate, only what was moved on that "
+        "plate is arranged again, there: their places are dropped, and they stay on that plate.",
     )
+    arrange.add_argument("--plate", type=_plate_number, metavar="N", help="arrange only plate N again")
     arrange.set_defaults(run=_arrange)
 
     pause = commands.add_parser(

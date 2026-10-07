@@ -1,3 +1,4 @@
+import http.server
 import json
 import os
 import shutil
@@ -270,9 +271,10 @@ def test_broken_project_file_is_reported_not_fatal(url, job):
     assert get(url + "/mesh")[0] == 500
 
 
-def post(url: str, args, token: str | None = TOKEN, origin: str | None = None, path: str = "/run") -> tuple[int, bytes]:
-    """A command sent to the viewer's /run (or /slice), as the page sends it."""
-    request = urllib.request.Request(url + path, data=json.dumps({"args": args}).encode(), method="POST")
+def post(url: str, args, token: str | None = TOKEN, origin: str | None = None, path: str = "/run", body=None) -> tuple[int, bytes]:
+    """A command sent to the viewer's /run (or /slice, /send), as the page sends it."""
+    data = json.dumps(body if body is not None else {"args": args}).encode()
+    request = urllib.request.Request(url + path, data=data, method="POST")
     request.add_header("Content-Type", "application/json")
     request.add_header("Origin", origin or url)
     if token:
@@ -364,6 +366,75 @@ def test_no_other_page_can_slice(url):
     assert post(url, None, path="/slice", token="guessed")[0] == 403
     assert post(url, None, path="/slice", origin="http://evil.example")[0] == 403
     assert "slicing" not in json.loads(get(url + "/state")[2])
+
+
+class Moonraker(http.server.BaseHTTPRequestHandler):
+    """A printer that takes uploads, as Moonraker does, and notes what it was asked to print."""
+
+    received: list[bytes] = []
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        type(self).received.append(self.rfile.read(int(self.headers["Content-Length"])))
+        self.send_response(201)
+        self.end_headers()
+        self.wfile.write(b'{"item": {"path": "cube.gcode"}}')
+
+
+def sliced_print():
+    for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
+        library.load(kind, str(EXPORT))
+        main([kind, name])
+    main(["add", "cube.stl"])
+    main(["slice"])
+
+
+def finished(url: str, job: str) -> dict:
+    deadline = time.monotonic() + 60
+    while (running := json.loads(get(url + "/state")[2])[job])["running"]:
+        assert time.monotonic() < deadline
+        time.sleep(0.1)
+    return running
+
+
+def test_the_page_sends_to_the_printer_in_a_process_of_its_own(url, monkeypatch):
+    printer = http.server.HTTPServer(("127.0.0.1", 0), Moonraker)
+    threading.Thread(target=printer.serve_forever, daemon=True).start()
+    Moonraker.received = []
+    sliced_print()
+    assert json.loads(get(url + "/state")[2])["host"] is None  # no address: no sending
+    monkeypatch.setenv("DELI_HOST", f"moonraker://127.0.0.1:{printer.server_address[1]}")
+    assert json.loads(get(url + "/state")[2])["host"]["kind"] == "moonraker"
+
+    assert post(url, None, path="/send")[0] == 202
+    sending = finished(url, "sending")
+    assert sending["code"] == 0, sending["output"]
+    assert b'name="print"\r\n\r\nfalse' in Moonraker.received[0]
+
+    assert post(url, None, path="/send", body={"plate": 1, "print": True})[0] == 202
+    sending = finished(url, "sending")
+    assert sending["code"] == 0 and "Printing started" in sending["output"], sending["output"]
+    assert b'name="print"\r\n\r\ntrue' in Moonraker.received[1]
+    printer.shutdown()
+
+
+def test_the_page_can_send_only_the_prints_own_gcode():
+    assert view.send_args({"file": "/etc/passwd", "args": ["send", "x.gcode"]}) == ["send"]  # only plate and print are read
+    assert view.send_args({"plate": 2, "print": True}) == ["send", "--plate", "2", "--print"]
+
+
+@pytest.mark.parametrize("body", [{"plate": "1; rm"}, {"plate": 0}, {"plate": True}, {"print": "yes"}, ["send", "x.gcode"]])
+def test_a_send_the_page_cannot_ask_for_is_refused(url, body):
+    assert post(url, None, path="/send", body=body)[0] == 400
+    assert "sending" not in json.loads(get(url + "/state")[2])
+
+
+def test_no_other_page_can_send(url):
+    assert post(url, None, path="/send", token="guessed")[0] == 403
+    assert post(url, None, path="/send", origin="http://evil.example")[0] == 403
+    assert "sending" not in json.loads(get(url + "/state")[2])
 
 
 def test_without_a_token_the_page_can_only_look():

@@ -337,6 +337,13 @@ Each edits `deli.toml` and exits. Friendly aliases for settings (`infill` for
   triangles are each copy's, so a drag moves one copy and writes `--copy N`.
   `cli.main` lets a command's words go on after an option (`deli move cube --copy 2 40
   50`), which argparse alone leaves over.
+  Arranging around a placed copy shuffled the others each time one was moved (the user,
+  2026-10-07: "moving moves all 3"): an arranged copy's spot is not stored, so it cannot
+  be kept. So the first move on a plate gives everything else on it its current place
+  (as PrusaSlicer leaves objects where they are), the engine refuses placed copies whose
+  hulls overlap, and the page will not offer a drop off the bed or onto another copy.
+  Copies can be turned their own way (`[part.copy.N]` `rotate`, an instance rotation
+  relative to the part's in the engine).
   The place is not checked against the bed when it is given, since the printer may not
   be chosen yet; `slice` and `view` say so when it is off the bed.
   The user has looked at a moved part in the viewer and found it where it should be

@@ -137,14 +137,28 @@ DynamicPrintConfig complete_config(DynamicPrintConfig config)
 // each copy's middle is to be (x and y in millimetres, per copy; one left out, or past the
 // end of the list, is arranged), how far its underside is above the bed (negative: sunk
 // into it, and what is below is not printed), and the plate each copy is printed on,
-// counted from 1 (per copy; left out, the first it fits on).
+// counted from 1 (per copy; left out, the first it fits on), and per copy the angles it is
+// turned by instead of the part's (left out, the part's).
 using Place = std::optional<std::array<double, 2>>;
-using Part  = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int, std::vector<Place>, double, std::vector<std::optional<int>>>;
+using Turn  = std::optional<std::array<double, 3>>;
+using Part  = std::tuple<std::string, std::array<double, 3>, std::array<double, 3>, int, std::vector<Place>, double, std::vector<std::optional<int>>,
+                        std::vector<Turn>>;
+
+// Angles in degrees about X, Y and Z, applied in that order, as one rotation.
+Transform3d turned(const std::array<double, 3> &rotate)
+{
+    Transform3d turn = Transform3d::Identity();
+    turn.rotate(Eigen::AngleAxisd(Geometry::deg2rad(rotate[2]), Vec3d::UnitZ()));
+    turn.rotate(Eigen::AngleAxisd(Geometry::deg2rad(rotate[1]), Vec3d::UnitY()));
+    turn.rotate(Eigen::AngleAxisd(Geometry::deg2rad(rotate[0]), Vec3d::UnitX()));
+    return turn;
+}
 
 // The model in a file, scaled by per-axis factors and then turned about X, Y and Z, in
-// that order, by angles in degrees; every object of it is then dropped onto the bed.
+// that order, by angles in degrees; a copy given angles of its own is turned by those
+// instead. Every copy of every object of it is then dropped onto the bed.
 Model load_transformed(const std::string &model_path, const std::array<double, 3> &scale,
-                       const std::array<double, 3> &rotate, int count = 1)
+                       const std::array<double, 3> &rotate, int count = 1, const std::vector<Turn> &turns = {})
 {
     Model model = FileReader::load_model(model_path);
     for (ModelObject *object : model.objects) {
@@ -154,7 +168,18 @@ Model load_transformed(const std::string &model_path, const std::array<double, 3
         object->rotate(Geometry::deg2rad(rotate[2]), Z);
         for (int copy = 1; copy < count; ++copy)
             object->add_instance(*object->instances.front());
-        object->ensure_on_bed();
+        // The object is already turned the part's way; such a copy is turned back, then its own.
+        for (size_t copy = 0; copy < turns.size() && copy < object->instances.size(); ++copy)
+            if (turns[copy]) {
+                Transform3d own = turned(*turns[copy]) * turned(rotate).inverse();
+                own.pretranslate(object->instances[copy]->get_offset());
+                object->instances[copy]->set_transformation(Geometry::Transformation(own));
+            }
+        for (size_t copy = 0; copy < object->instances.size(); ++copy) {
+            ModelInstance *instance = object->instances[copy];
+            instance->set_offset(instance->get_offset() - Vec3d(0, 0, object->instance_bounding_box(copy).min.z()));
+        }
+        object->invalidate_bounding_box();
     }
     return model;
 }
@@ -232,6 +257,31 @@ struct Plates
     arr2::GridStriderVBedHandler grid;
 
     explicit Plates(const Points &outline) : bed(outline), grid(bed, gap) {}
+    // Rectangles within the bed's rectangle that keep clear of every part of it the outline
+    // cuts out, largest first: each cut-out taken off one side or another.
+    std::vector<BoundingBox> clear_rectangles(const Points &outline) const
+    {
+        std::vector<BoundingBox> found{bed};
+        for (const ExPolygon &cut : diff_ex(Polygons{bed.polygon()}, Polygons{Polygon(outline)})) {
+            const BoundingBox out = get_extents(cut);
+            std::vector<BoundingBox> clear;
+            for (const BoundingBox &r : found) {
+                if (!r.overlap(out)) {
+                    clear.push_back(r);
+                    continue;
+                }
+                for (BoundingBox side : {BoundingBox(r.min, Point(out.min.x(), r.max.y())), BoundingBox(Point(out.max.x(), r.min.y()), r.max),
+                                         BoundingBox(r.min, Point(r.max.x(), out.min.y())), BoundingBox(Point(r.min.x(), out.max.y()), r.max)})
+                    if (side.min.x() < side.max.x() && side.min.y() < side.max.y())
+                        clear.push_back(side);
+            }
+            found = std::move(clear);
+        }
+        std::sort(found.begin(), found.end(), [](const BoundingBox &a, const BoundingBox &b) { return double(a.size().x()) * a.size().y() > double(b.size().x()) * b.size().y(); });
+        if (found.size() > 8)
+            found.resize(8);
+        return found;
+    }
     Vec3d to_bed(int plate) const { return grid.get_physical_bed_trafo(plate).translation(); }
     // The plate a copy stands on, by its middle; -1 when it is on none.
     int of(const ModelObject &object, size_t copy) const
@@ -261,10 +311,13 @@ Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig 
     Unplaced     unplaced;
     std::vector<std::vector<std::optional<int>>> pinned; // per object, per copy: the plate it was given
     std::vector<std::string>                     named;  // per object: its part, as errors name it
+    std::vector<size_t>                          part_of; // per object: which part it is of
     bool         any_unplaced = false;
-    for (const auto &[path, scale, rotate, count, places, height, plates] : parts) {
-        if (int(places.size()) > count || int(plates.size()) > count)
-            throw std::runtime_error(path + " has places or plates for more copies than its " + std::to_string(count));
+    for (const auto &[path, scale, rotate, count, places, height, plates, turns] : parts) {
+        if (count < 1)
+            throw std::runtime_error(path + " is to be printed " + std::to_string(count) + " times; a part has 1 copy or more");
+        if (int(places.size()) > count || int(plates.size()) > count || int(turns.size()) > count)
+            throw std::runtime_error(path + " has places, plates or turns for more copies than its " + std::to_string(count));
         const auto copy_name = [&, count = count, &path = path](size_t c) {
             return count > 1 ? "copy " + std::to_string(c + 1) + " of " + path : path;
         };
@@ -276,7 +329,7 @@ Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig 
                 throw std::runtime_error(copy_name(c) + " is given plate " + std::to_string(*plates[c]) + "; a print has at most " + std::to_string(Plates::most));
             plate[c] = plates[c];
         }
-        Model one = load_transformed(path, scale, rotate, count);
+        Model one = load_transformed(path, scale, rotate, count, turns);
         for (ModelObject *object : one.objects)
             for (ModelInstance *copy : object->instances)
                 copy->set_offset(copy->get_offset() + Vec3d(0, 0, height));
@@ -305,6 +358,7 @@ Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig 
             unplaced.copies.push_back(arrange);
             pinned.push_back(plate);
             named.push_back(path);
+            part_of.push_back(arranged.objects_per_part.size());
         }
         arranged.objects_per_part.push_back(one.objects.size());
     }
@@ -340,8 +394,9 @@ Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig 
     };
     if (any_unplaced) {
         arr2::ArrangeSettings settings;
-        settings.set_distance_from_objects(min_object_distance(config));
-        const auto arrange_on = [&](const arr2::ArrangeBed &on) {
+        const double distance = min_object_distance(config);
+        settings.set_distance_from_objects(distance);
+        const auto arrange_on = [&](const arr2::ArrangeBed &on, const Unplaced &selection) {
             arr2::BedConstraints constraints;
             for (size_t o = 0; o < model.objects.size(); ++o)
                 for (size_t c = 0; c < model.objects[o]->instances.size(); ++c)
@@ -351,18 +406,73 @@ Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig 
                               .set_bed(on)
                               .set_arrange_settings(settings)
                               .set_model(model)
-                              .set_selection(&unplaced)
+                              .set_selection(&selection)
                               .set_bed_constraints(std::move(constraints)));
         };
 
         // On a rectangle PrusaSlicer centres what it arranges; on any other polygon it
         // packs towards an edge. So arrange on the bed's rectangle first, and only when
         // something then lands outside the real outline (in a cut-out corner) arrange on
-        // the outline.
-        arrange_on(arr2::ArrangeBed{arr2::RectangleBed{layout.bed, Plates::gap}});
-        if (!plates()) {
-            arrange_on(arr2::to_arrange_bed(bed, Plates::gap));
-            if (!plates())
+        // the outline. PrusaSlicer's arrange on an outline can still put a copy in a cut-out
+        // corner when another stays where it is; so last, the largest rectangles clear of
+        // every cut-out, each laid out with the same stride as the plates.
+        const auto arrange = [&](const Unplaced &selection) {
+            arrange_on(arr2::ArrangeBed{arr2::RectangleBed{layout.bed, Plates::gap}}, selection);
+            if (plates())
+                return true;
+            arrange_on(arr2::to_arrange_bed(bed, Plates::gap), selection);
+            for (const BoundingBox &inside : layout.clear_rectangles(bed)) {
+                if (plates())
+                    return true;
+                const Vec2crd widened = Plates::gap + (layout.bed.size() - inside.size()) / 2;
+                arrange_on(arr2::ArrangeBed{arr2::RectangleBed{inside, widened}}, selection);
+            }
+            return bool(plates());
+        };
+
+        bool any_placed = false;
+        for (const std::vector<bool> &copies : unplaced.copies)
+            any_placed |= std::find(copies.begin(), copies.end(), false) != copies.end();
+        if (!any_placed) {
+            if (!arrange(unplaced))
+                throw does_not_fit();
+        } else {
+            // The copies not moved stay where they would be if none had been, so that moving one
+            // does not shuffle the rest: everything is arranged as if nothing had a place, the
+            // moved copies are put back in theirs, and only the copies then in their way are
+            // arranged again, around everything else.
+            std::vector<std::vector<Geometry::Transformation>> moved(model.objects.size());
+            Unplaced everything;
+            for (size_t o = 0; o < model.objects.size(); ++o) {
+                for (const ModelInstance *copy : model.objects[o]->instances)
+                    moved[o].push_back(copy->get_transformation());
+                everything.copies.emplace_back(model.objects[o]->instances.size(), true);
+            }
+            arrange(everything);
+            std::vector<BoundingBoxf3> placed_boxes;
+            for (size_t o = 0; o < model.objects.size(); ++o)
+                for (size_t c = 0; c < model.objects[o]->instances.size(); ++c)
+                    if (!unplaced.copies[o][c]) {
+                        model.objects[o]->instances[c]->set_transformation(moved[o][c]);
+                        placed_boxes.push_back(model.objects[o]->instance_bounding_box(c));
+                    }
+            Unplaced in_the_way;
+            bool any_in_the_way = false;
+            for (size_t o = 0; o < model.objects.size(); ++o) {
+                in_the_way.copies.emplace_back(model.objects[o]->instances.size(), false);
+                for (size_t c = 0; c < model.objects[o]->instances.size(); ++c) {
+                    if (!unplaced.copies[o][c])
+                        continue;
+                    const BoundingBoxf3 box = model.objects[o]->instance_bounding_box(c);
+                    for (const BoundingBoxf3 &placed : placed_boxes)
+                        if (box.min.x() < placed.max.x() + distance && placed.min.x() < box.max.x() + distance &&
+                            box.min.y() < placed.max.y() + distance && placed.min.y() < box.max.y() + distance) {
+                            in_the_way.copies[o][c] = true;
+                            any_in_the_way = true;
+                        }
+                }
+            }
+            if (any_in_the_way && !arrange(in_the_way))
                 throw does_not_fit();
         }
     }
@@ -379,6 +489,24 @@ Arranged load_arranged(const std::vector<Part> &parts, const DynamicPrintConfig 
             ModelInstance *copy = model.objects[o]->instances[c];
             copy->set_offset(copy->get_offset() + layout.to_bed(plate));
             arranged.count = std::max(arranged.count, plate + 1);
+        }
+    // Copies put where they are by hand are not moved out of each other's way, so two that
+    // overlap are refused: they would print into each other.
+    for (size_t o = 0; o < model.objects.size(); ++o)
+        for (size_t c = 0; c < model.objects[o]->instances.size(); ++c) {
+            if (unplaced.copies[o][c])
+                continue;
+            const Polygon hull = model.objects[o]->convex_hull_2d(model.objects[o]->instances[c]->get_matrix());
+            for (size_t p = o; p < model.objects.size(); ++p)
+                for (size_t d = (p == o ? c + 1 : 0); d < model.objects[p]->instances.size(); ++d) {
+                    const bool same_copy = part_of[p] == part_of[o] && d == c; // one file's objects
+                    if (unplaced.copies[p][d] || same_copy || arranged.plates[p][d] != arranged.plates[o][c])
+                        continue;
+                    const Polygon other = model.objects[p]->convex_hull_2d(model.objects[p]->instances[d]->get_matrix());
+                    if (area(intersection(Polygons{hull}, Polygons{other})) > sqr(scaled(0.1)))
+                        throw std::runtime_error(copy_name(o, c) + " and " + copy_name(p, d) + " overlap on plate " +
+                                                 std::to_string(arranged.plates[o][c] + 1) + "; move one of them");
+                }
         }
     for (const std::vector<std::optional<int>> &copies : pinned)
         for (const std::optional<int> &plate : copies)
@@ -828,7 +956,7 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 10;
+    m.attr("API_VERSION") = 11;
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -842,12 +970,12 @@ NB_MODULE(_engine, m)
 
     m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{}, "plate"_a = 1,
           "Slice the parts of a print and write G-code to `output`.\n\n"
-          "Each part is (model file, scale, rotate, count, places, height, plates): per-axis scale\n"
+          "Each part is (model file, scale, rotate, count, places, height, plates, turns): per-axis scale\n"
           "factors, degrees about X, Y and Z applied in that order after scaling, the number of\n"
           "copies, per copy the x and y of its middle on the bed or None to have it arranged, how\n"
           "far its underside is above the bed (negative sinks it), and per copy the plate it is\n"
-          "printed on, from 1, or None for the first it fits on (a list shorter than the copies\n"
-          "leaves the rest arranged). The parts are dropped onto the bed and those without\n"
+          "printed on, from 1, or None for the first it fits on, and per copy its own rotate or None\n"
+          "for the part's (a list shorter than the copies leaves the rest as the part has them). The parts are dropped onto the bed and those without\n"
           "a place are arranged, onto further plates when they do not fit. Only `plate` is sliced. `config` is PrusaSlicer INI text; settings it\n"
           "leaves out take PrusaSlicer's defaults. A picture of the parts is written into the\n"
           "G-code for each size in the `thumbnails` setting. `pauses` are layers, counted from 1\n"

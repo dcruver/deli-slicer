@@ -252,31 +252,78 @@ def test_auto_gives_up_the_place_and_the_height(job, capsys):
 
 def test_a_part_with_copies_is_moved_a_copy_at_a_time(job, capsys):
     main(["add", "cube.stl", "--count", "2"])
+    main(["move", "--copy", "3", "plate", "2"])
     capsys.readouterr()
 
     assert main(["move", "50", "60"]) == 1
     assert "deli move cube --copy N 50 60" in capsys.readouterr().err
 
     assert main(["move", "cube", "--copy", "2", "50", "60"]) == 0
-    assert capsys.readouterr().out == "copy 2 of cube.stl is now at 50, 60 mm\n"
-    assert part(job)["copy"] == {"2": {"at": [50, 60]}}
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("Keeping where they are the other 1 part or copy on its plate") and out[0].endswith(": copy 1 of cube.stl (deli arrange gives that back)")
+    assert out[1] == "copy 2 of cube.stl is now at 50, 60 mm"
+    copies = part(job)["copy"]
+    assert copies["2"] == {"at": [50, 60]} and copies["3"] == {"plate": 2} and set(copies["1"]) == {"at"}
     assert main(["move", "--copy", "2", "x", "40"]) == 0
+    assert "Keeping" not in capsys.readouterr().out  # copy 1 has its place already
     assert part(job)["copy"]["2"]["at"] == [40, 60]
-    assert main(["move", "--copy", "3", "plate", "2"]) == 0
-    assert part(job)["copy"]["3"] == {"plate": 2}
-    capsys.readouterr()
 
     assert main(["move"]) == 0
-    assert capsys.readouterr().out == "cube.stl x 3 is placed automatically; copy 2 at 40, 60 mm; copy 3 on plate 2\n"
+    first = ", ".join(f"{v:g}" for v in copies["1"]["at"])
+    assert capsys.readouterr().out == f"cube.stl x 3 is placed automatically; copy 1 at {first} mm; copy 2 at 40, 60 mm; copy 3 on plate 2\n"
 
     assert main(["move", "--copy", "4", "1", "1"]) == 1
     assert main(["move", "--copy", "2", "z", "-1"]) == 1  # every copy is at the same height
     assert main(["move", "z", "-1"]) == 0
 
     assert main(["move", "--copy", "2", "auto"]) == 0
-    assert part(job)["copy"] == {"3": {"plate": 2}}
+    assert set(part(job)["copy"]) == {"1", "3"}
     assert main(["move", "auto"]) == 0
     assert part(job) == {"file": "cube.stl", "count": 3}
+
+
+def test_moving_one_keeps_the_rest_of_its_plate_where_it_is(job, capsys):
+    shutil.copy(CUBE, job / "box.stl")
+    main(["add", "box.stl", "--count", "2"])
+    main(["move", "box", "--copy", "2", "plate", "2"])
+    capsys.readouterr()
+
+    assert main(["move", "box", "--copy", "1", "plate", "2"]) == 0
+    assert main(["move", "box", "--copy", "1", "60", "60"]) == 0  # on plate 2: copy 2 is kept there, cube is not on it
+
+    parts = tomllib.loads((job / "deli.toml").read_text())["part"]
+    assert parts[0] == {"file": "cube.stl"}
+    assert parts[1]["copy"]["1"] == {"plate": 2, "at": [60, 60]}
+    assert set(parts[1]["copy"]["2"]) == {"plate", "at"}
+
+
+def test_a_copy_is_rotated_its_own_way(job, capsys):
+    main(["add", "cube.stl", "--count", "2"])
+    main(["rotate", "x", "10"])
+    capsys.readouterr()
+
+    assert main(["rotate", "--copy", "2", "y", "90"]) == 0
+    assert capsys.readouterr().out.startswith("Rotated copy 2 of cube.stl 10° about x, 90° about y\n")
+    assert part(job)["copy"] == {"2": {"rotate": [10, 90, 0]}}  # its own, from the part's
+    main(["rotate"])
+    assert "  copy 2 is rotated 10° about x, 90° about y\n" in capsys.readouterr().out
+
+    assert main(["rotate", "--copy", "2", "y", "0"]) == 0  # as the part is again: nothing of its own
+    assert "copy" not in part(job)
+
+    main(["rotate", "--copy", "3", "45"])
+    assert main(["rotate", "20"]) == 0  # the part, and every copy with it
+    assert part(job) == {"file": "cube.stl", "count": 3, "rotate": [10, 0, 20]}
+
+
+def test_the_last_copy_left_keeps_its_own_turn(job, capsys):
+    main(["add", "cube.stl"])
+    main(["rotate", "--copy", "1", "x", "90"])
+    main(["rotate", "--copy", "2", "y", "45"])
+
+    main(["remove", "cube", "--count", "1"])
+
+    assert part(job) == {"file": "cube.stl", "rotate": [90, 0, 0]}
 
 
 def test_a_place_becomes_the_first_copys_when_copies_are_added(job, capsys):
@@ -292,12 +339,35 @@ def test_a_place_becomes_the_first_copys_when_copies_are_added(job, capsys):
 
 def test_the_last_copies_take_their_places_with_them(job, capsys):
     main(["add", "cube.stl", "--count", "2"])
-    main(["move", "--copy", "3", "50", "60"])
     main(["move", "--copy", "1", "plate", "2"])
+    main(["move", "--copy", "3", "50", "60"])  # copy 2, beside it on the first plate, keeps its place
 
     main(["remove", "cube", "--count", "2"])
 
     assert part(job) == {"file": "cube.stl", "plate": 2}
+
+
+def test_arrange_one_plate_drops_only_its_places_and_keeps_its_plates(job, capsys):
+    shutil.copy(CUBE, job / "box.stl")
+    main(["add", "cube.stl", "--count", "2"])
+    main(["add", "box.stl"])
+    main(["move", "cube", "--copy", "1", "50", "60"])  # on the first plate
+    main(["move", "cube", "--copy", "2", "plate", "2"])
+    main(["move", "cube", "--copy", "2", "70", "80"])
+    main(["move", "box", "plate", "2"])
+    main(["move", "box", "90", "90"])
+    capsys.readouterr()
+
+    assert main(["arrange", "--plate", "2"]) == 0
+
+    assert capsys.readouterr().out == "Plate 2 is now arranged again: copy 2 of cube.stl, box.stl are placed automatically\n"
+    parts = tomllib.loads((job / "deli.toml").read_text())["part"]
+    copies = parts[0]["copy"]
+    assert copies["1"] == {"at": [50, 60]} and copies["2"] == {"plate": 2}
+    assert set(copies["3"]) == {"at"}  # kept where it was on the first plate when copy 1 was moved
+    assert parts[1] == {"file": "box.stl", "plate": 2}
+    assert main(["arrange", "--plate", "2"]) == 0
+    assert "Nothing on plate 2 has been moved" in capsys.readouterr().out
 
 
 def test_arrange_forgets_every_place_and_plate(job, capsys):

@@ -95,10 +95,11 @@ def part_count(part: dict) -> int:
     return count
 
 
-def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple[str, list[float], list[float], int, list[list[float] | None], float, list[int | None]]]:
+def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple]:
     """The parts as `_engine.slice`, `_engine.plates` and `_engine.mesh` take them."""
     return [
-        (p["file"], part_transform(p, "scale"), part_transform(p, "rotate"), part_count(p), copy_places(p), part_height(p), copy_plates(p))
+        (p["file"], part_transform(p, "scale"), part_transform(p, "rotate"), part_count(p), copy_places(p), part_height(p), copy_plates(p),
+         copy_turns(p))
         for p in parts(doc)
     ]
 
@@ -329,6 +330,42 @@ def copy_plate(part: dict, copy: int = 1) -> int | None:
     return _plate_of(part["plate"], "a part's 'plate'") if "plate" in part else None
 
 
+def copy_turn(part: dict, copy: int) -> list[float] | None:
+    """The angles a copy (from 1) of a part with copies is turned by instead of the part's; None
+    when it is turned as the part is."""
+    found = _copy_tables(part).get(str(copy), {})
+    if "rotate" not in found:
+        return None
+    return part_transform(found, "rotate")
+
+
+def copy_rotate(part: dict, copy: int | None = None) -> list[float]:
+    """How a copy is turned: its own angles, or the part's."""
+    return (copy_turn(part, copy) if copy else None) or part_transform(part, "rotate")
+
+
+def copy_turns(part: dict) -> list[list[float] | None]:
+    return [copy_turn(part, n) for n in range(1, part_count(part) + 1)] if part_count(part) > 1 else [None]
+
+
+def set_copy_turn(part: dict, copy: int, rotate: list[float] | None) -> None:
+    """Turn one copy of a part with copies its own way, or (None) as the part is."""
+    own = _own(part, copy)
+    if rotate is None:
+        own.pop("rotate", None)
+    else:
+        own["rotate"] = [_whole(v) for v in rotate]
+    _tidy_copies(part)
+
+
+def set_part_rotate(part: dict, rotate: list[float]) -> None:
+    """Turn a part, and every copy of it: those turned their own way are turned with it."""
+    for table in part.get("copy", {}).values():
+        table.pop("rotate", None)
+    _tidy_copies(part)
+    set_part_transform(part, "rotate", rotate)
+
+
 def copy_places(part: dict) -> list[list[float] | None]:
     return [copy_place(part, n) for n in range(1, part_count(part) + 1)]
 
@@ -433,20 +470,24 @@ def set_part_count(part: dict, count: int) -> None:
     there and [part.copy.1] as copies come and go."""
     tables = _copy_tables(part)
     if part_count(part) == 1:
-        own = [(copy_place(part), None)]  # its plate is the part's, for every copy
+        own = [(copy_place(part), None, None)]  # its plate and turn are the part's, for every copy
     else:
-        own = [(copy_place(part, n), tables.get(str(n), {}).get("plate")) for n in range(1, part_count(part) + 1)]
+        own = [(copy_place(part, n), tables.get(str(n), {}).get("plate"), copy_turn(part, n)) for n in range(1, part_count(part) + 1)]
+    if count == 1 and own[0][2] is not None:
+        set_part_transform(part, "rotate", own[0][2])  # the copy left is turned its own way: the part is
     part.pop("copy", None)
     part.pop("at", None)
     if count > 1:
         part["count"] = count
     else:
         part.pop("count", None)
-    for n, (at, plate) in enumerate(own[:count], 1):
+    for n, (at, plate, turn) in enumerate(own[:count], 1):
         if at is not None:
             set_copy_place(part, n, at)
         if plate is not None:
             set_copy_plate(part, n, plate)
+        if turn is not None and count > 1:
+            set_copy_turn(part, n, turn)
 
 
 def chosen_profile(doc: tomlkit.TOMLDocument, kind: str) -> tuple[str, dict[str, str]] | None:

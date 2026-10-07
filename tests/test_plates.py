@@ -20,7 +20,7 @@ ENGINE_CONFIG = f"bed_shape = {SMALL_BED}\nlayer_height = 0.2\nfirst_layer_heigh
 
 def cube(count=1, place=None, plate=None):
     """A cube as `_engine` takes a part; a place is the first copy's, a plate every copy's."""
-    return (str(CUBE), (1, 1, 1), (0, 0, 0), count, [place] if place else [], 0, [plate] * count if plate else [])
+    return (str(CUBE), (1, 1, 1), (0, 0, 0), count, [place] if place else [], 0, [plate] * count if plate else [], [])
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def test_a_part_too_big_for_its_plate_is_an_error():
 
 def test_each_copy_can_be_given_a_plate():
     places = [None, None, (25, 25)]
-    on, count = _engine.plates([(str(CUBE), (1, 1, 1), (0, 0, 0), 3, places, 0, [None, 3, 2])], ENGINE_CONFIG)
+    on, count = _engine.plates([(str(CUBE), (1, 1, 1), (0, 0, 0), 3, places, 0, [None, 3, 2], [])], ENGINE_CONFIG)
     assert on == [[1, 3, 2]] and count == 3
 
 

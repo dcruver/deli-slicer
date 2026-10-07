@@ -8,9 +8,10 @@ wrote, supports included, for as long as nothing has changed since. The page ask
 the shell shows up in the browser.
 
 The page changes a print only by running deli's own commands, the ones its tools show
-(`deli move`, `deli rotate`, `deli pause`), through `/run`, and slices it with `/slice`,
-which runs `deli slice` in a process of its own: POSTs that must carry the token the
-page's address was given, from the page itself, so that no other web page can.
+(`deli move`, `deli rotate`, `deli pause`, `deli arrange`), through `/run`; it slices with
+`/slice` and sends to the printer with `/send`, which run `deli slice` and `deli send` in a
+process of their own: POSTs that must carry the token the page's address was given, from
+the page itself, so that no other web page can.
 
 The server runs in the background, so `deli view` gives the shell back at once: `start`
 opens the listening socket and hands it to a detached process, which `serve`s it until
@@ -42,7 +43,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from deli import _engine, project, settings
+from deli import _engine, project, send, settings
 
 PAGES = Path(__file__).parent / "viewer"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
@@ -53,16 +54,16 @@ _TOKEN = "DELI_VIEW_TOKEN"  # how `start` hands the background process its token
 _running = threading.Lock()  # one command at a time: each takes over stdout and stderr while it runs
 
 
-class Slicing:
-    """`deli slice` run for the page, in a process of its own: a slice can take a while, and
-    the engine slicing should not be able to take the viewer down with it."""
+class Job:
+    """`deli slice` or `deli send` run for the page, in a process of its own: either can take
+    a while, and the engine slicing should not be able to take the viewer down with it."""
 
-    def __init__(self) -> None:
+    def __init__(self, args: list[str]) -> None:
         self.started = time.monotonic()
         self.output = ""
         self.code: int | None = None
         self.process = subprocess.Popen(
-            [sys.executable, "-c", "import sys; from deli.cli import main; sys.exit(main())", "slice"],
+            [sys.executable, "-c", "import sys; from deli.cli import main; sys.exit(main())", *args],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         threading.Thread(target=self._read, daemon=True).start()
@@ -75,6 +76,28 @@ class Slicing:
     def describe(self) -> dict:
         return {"running": self.code is None, "code": self.code, "output": self.output,
                 "seconds": round(time.monotonic() - self.started)}
+
+
+def send_args(body: dict) -> list[str]:
+    """The `deli send` the page asks for: only the print's own G-code, a plate of it, and
+    whether to start printing; never a file, so the page cannot send anything else."""
+    plate, start = body.get("plate"), body.get("print", False)
+    if plate is not None and not (isinstance(plate, int) and not isinstance(plate, bool) and plate >= 1):
+        raise ValueError("plate")
+    if not isinstance(start, bool):
+        raise ValueError("print")
+    return ["send", *(["--plate", str(plate)] if plate else []), *(["--print"] if start else [])]
+
+
+def _host(doc) -> dict | None:
+    """Where `deli send` would send the print, if it knows."""
+    printer = project.chosen_profile(doc, "printer")
+    name = project.selected(doc, "printer").get("name")
+    try:
+        host = send.host_for(name, printer[1].get("host_type", "") if printer else "")
+    except send.SendError:
+        return None
+    return {"kind": host.kind, "url": host.url}
 
 
 def run(args: list[str]) -> tuple[int, str]:
@@ -188,7 +211,7 @@ def state() -> dict:
             rotate = project.part_transform(part, "rotate")
             described = {"file": part["file"], "scale": scale, "rotate": rotate, "count": project.part_count(part)}
             # Per copy: where it was moved to, and the plate it is kept to (its own, or the part's).
-            described |= {"at": project.copy_places(part), "kept": project.copy_plates(part)}
+            described |= {"at": project.copy_places(part), "kept": project.copy_plates(part), "turns": project.copy_turns(part)}
             described |= {"z": project.part_height(part), "plate": project.part_plate(part)}
             try:
                 described["size"] = list(_engine.model_size(part["file"], scale=scale, rotate=rotate))
@@ -206,6 +229,7 @@ def state() -> dict:
             result["overhang"] = _overhang(doc)
         except (KeyError, ValueError):  # a setting PrusaSlicer would not take; slice says so
             pass
+        result["host"] = _host(doc)
         if gcode := project.fresh_gcode(doc):
             result["gcode"] = {str(plate): path.name for plate, path in gcode.items()}
             result["sliced"] = str(max(path.stat().st_mtime_ns for path in gcode.values()))  # which slicing made it
@@ -260,8 +284,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, "text/plain; charset=utf-8", str(Path.cwd()).encode())
             elif path == "/state":
                 described = state()
-                if slicing := getattr(self.server, "slicing", None):
-                    described["slicing"] = slicing.describe()
+                for job in ("slicing", "sending"):
+                    if running := getattr(self.server, job, None):
+                        described[job] = running.describe()
                 self._send(200, "application/json", json.dumps(described).encode())
             elif path == "/mesh":
                 self._send(200, "application/octet-stream", mesh(_plate(self.path)))
@@ -287,16 +312,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.server.asked = time.monotonic()
-        if self.path not in ("/run", "/slice") or not self._from_the_page():
+        if self.path not in ("/run", "/slice", "/send") or not self._from_the_page():
             self._send(403, "text/plain; charset=utf-8", b"forbidden")
             return
-        if self.path == "/slice":
-            slicing = getattr(self.server, "slicing", None)
-            if slicing and slicing.code is None:
-                self._send(409, "text/plain; charset=utf-8", b"already slicing")
+        if self.path in ("/slice", "/send"):
+            # One at a time, and no sending while slicing: send would read G-code being written.
+            for job in ("slicing", "sending"):
+                if (running := getattr(self.server, job, None)) and running.code is None:
+                    self._send(409, "text/plain; charset=utf-8", f"already {job}".encode())
+                    return
+            if self.path == "/slice":
+                self.server.slicing = Job(["slice"])
+                self._send(202, "application/json", json.dumps(self.server.slicing.describe()).encode())
                 return
-            self.server.slicing = Slicing()
-            self._send(202, "application/json", json.dumps(self.server.slicing.describe()).encode())
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 10_000)) or "{}")
+                args = send_args(body)
+            except (ValueError, TypeError, AttributeError):
+                self._send(400, "text/plain; charset=utf-8", b"the page can send the print's G-code, a plate of it with plate, and start it with print")
+                return
+            self.server.sending = Job(args)
+            self._send(202, "application/json", json.dumps(self.server.sending.describe()).encode())
             return
         try:
             args = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 10_000)))["args"]

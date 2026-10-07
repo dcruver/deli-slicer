@@ -63,7 +63,9 @@ const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clipping
 // use; over the G-code it is faint. Clicking Model in the legend overrules that until the
 // print is sliced again or its G-code goes out of date.
 let modelChoice = null;
-const modelVisible = () => modelChoice ?? (!paths || mode === 'move' || mode === 'flat' || showOverhangs);
+// A part being moved is shown, over the G-code too, until it is applied or put back.
+const modelVisible = () => moving || (modelChoice ?? (!paths || mode === 'flat' || showOverhangs));
+let moving = false;
 function showModel() {
   if (!partMesh) return;
   const visible = modelVisible(), faint = Boolean(paths);
@@ -139,6 +141,8 @@ async function drawPart(parts) {
     triangle += nt;
   }
   placed = vertices.slice();  // where the parts are, before a drag moves one
+  moving = false;
+  for (const range of partRanges) range.hull = hull(placed, range.vertex, range.vertices);
 
   clearModel();
   if (nTriangles === 0) return;
@@ -392,8 +396,11 @@ function redrawLegend() {
   if (box) box.innerHTML = legend();
 }
 
-// Whether any part or copy was moved, or kept to a plate, so that arranging would change something.
-const handPlaced = () => (lastState?.parts ?? []).some(part => part.at.some(Boolean) || part.kept.some(Boolean));
+// Whether arranging would change something: on a print of one plate, any part or copy moved or
+// kept to a plate; on one of several, any moved on the plate shown, which alone is arranged.
+const handPlaced = () => (lastState?.parts ?? []).some(part => lastState.plates > 1
+  ? part.at.some((at, i) => at && (part.kept[i] ?? 1) === plate)
+  : part.at.some(Boolean) || part.kept.some(Boolean));
 
 function options() {
   return '<div class="options">'
@@ -402,7 +409,7 @@ function options() {
     // Arrange is there also when the parts cannot be drawn, as when one was moved off the bed.
     + (partMesh || handPlaced() ? '<div class="tools">'
         + (partMesh ? `<button type="button" id="overhangs" title="Show overhangs" aria-pressed="${showOverhangs}">Overhangs</button>` : '')
-        + (handPlaced() ? '<button type="button" id="arrange" title="Arrange every part again, as before any was moved">Arrange</button>' : '')
+        + (handPlaced() ? '<button type="button" id="arrange" title="Arrange again what was moved">Arrange</button>' : '')
         + '</div>' : '')
     + '<div class="tools">'
     + Object.entries(TOOLS).filter(([, tool]) => partMesh || !tool.needsPart).map(([name, tool]) =>
@@ -441,7 +448,12 @@ info.addEventListener('click', event => {
   }
   if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
   if (button?.id === 'sliceNow') return startSlice(button);
-  if (button?.id === 'arrange') return showCommand('deli arrange', 'to arrange every part again', [['arrange']]);
+  if (button?.id === 'sendNow' || button?.id === 'printNow') return showSend(button.id === 'printNow');
+  if (button?.id === 'arrange') {
+    const which = lastState.plates > 1 ? ['--plate', String(plate)] : [];
+    return showCommand(`deli ${['arrange', ...which].join(' ')}`,
+      which.length ? 'to arrange this plate again' : 'to arrange every part again', [['arrange', ...which]]);
+  }
   if (button?.id === 'overhangs') {
     showOverhangs = !showOverhangs;
     button.setAttribute('aria-pressed', showOverhangs);
@@ -477,7 +489,6 @@ info.addEventListener('change', event => {
 // and need a part.
 const TOOLS = {
   measure: { label: 'Measure', title: 'Measure between two points (M)' },
-  move: { label: 'Move', title: 'Drag a part to where it should go', needsPart: true },
   flat: { label: 'Lay flat', title: 'Click the face of a part to lay on the bed', needsPart: true },
 };
 let mode = null;
@@ -577,9 +588,9 @@ function clearMeasurement() {
 function setMode(name) {
   if (mode === 'measure' && name !== 'measure') clearMeasurement();
   mode = name;
-  renderer.domElement.style.cursor = { measure: 'crosshair', move: 'grab', flat: 'pointer' }[name] ?? '';
+  renderer.domElement.style.cursor = { measure: 'crosshair', flat: 'pointer' }[name] ?? '';
   for (const button of info.querySelectorAll('[data-tool]')) button.setAttribute('aria-pressed', button.dataset.tool === name);
-  showModel();  // Move and Lay flat bring the model up
+  showModel();  // Lay flat brings the model up
   if (paths) redrawLegend();
 }
 
@@ -590,6 +601,16 @@ function setUnits(name) {
   drawMeasurement();
 }
 
+// Over a part, with no tool in hand, the pointer says it can be dragged: looked at once a
+// frame at most, as picking is slow on a big model.
+let hovering = null;
+function followHover() {
+  if (!hovering) return;
+  const over = !mode && partHit(...hovering);
+  hovering = null;
+  if (!mode && !dragging) renderer.domElement.style.cursor = over ? 'grab' : '';
+}
+
 // Once a frame at most, since picking among a large print's extrusions takes a while.
 function followPointer() {
   if (!pointer) return;
@@ -598,12 +619,13 @@ function followPointer() {
   drawMeasurement();
 }
 
-// A click marks a point, or picks a face to lay flat, and a right-click puts the tool down; a
-// drag, with either button, still turns or moves the view, except a part dragged to move it.
+// A click marks a point, or picks a face to lay flat, and a right-click puts the tool down. A
+// drag with the left button on a part moves it (with no tool in hand); anywhere else, or with
+// another button, a drag turns or moves the view.
 let pressedAt = null;
 renderer.domElement.addEventListener('pointerdown', event => {
   pressedAt = [event.clientX, event.clientY];
-  if (mode === 'move' && event.button === 0) startDrag(event);
+  if (!mode && event.button === 0) startDrag(event);
 }, { capture: true });  // before the view's controls, so that a drag on a part does not turn the view too
 renderer.domElement.addEventListener('pointerup', event => {
   if (dragging) return endDrag();
@@ -621,6 +643,7 @@ renderer.domElement.addEventListener('pointerup', event => {
 });
 renderer.domElement.addEventListener('pointermove', event => {
   if (dragging) return drag(event);
+  if (!mode && !event.buttons) hovering = [event.clientX, event.clientY];
   if (mode === 'measure' && picks.length === 1 && !event.buttons) pointer = [event.clientX, event.clientY];
 });
 renderer.domElement.addEventListener('pointerleave', () => {
@@ -655,6 +678,7 @@ function showCommand(text, note = '', runs = null) {
   document.getElementById('copyCommand').hidden = !text;
   document.getElementById('copyCommand').textContent = 'Copy';
   document.getElementById('applyCommand').hidden = !(runs && token);
+  document.getElementById('applyCommand').textContent = 'Apply';
   // With commands to run, the note says what for ("to move it there"); else it is the whole note.
   document.getElementById('commandNote').textContent = !runs ? note
     : token ? `Apply, or run in the print's directory, ${note}:`
@@ -665,6 +689,7 @@ function hideCommand() {
   if (!commandRan) commandBox.hidden = true;
 }
 document.getElementById('applyCommand').addEventListener('click', async event => {
+  if (commandRuns?.send) return startJob('send', commandRuns.send);
   const runs = commandRuns, output = document.getElementById('commandOutput');
   event.target.disabled = true;
   let printed = '', failed = false;
@@ -699,31 +724,50 @@ function showRan(printed, failed) {
   output.hidden = !printed.trim();
 }
 
-// Slice: `deli slice`, which the server runs in a process of its own; /state says how it is
-// getting on, and the G-code shows up by itself once it is written.
-let followingSlice = false;
-async function startSlice(button) {
-  button.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'slicing…' }));
-  showCommand('deli slice', 'Slicing…');
+// Slice and Send: `deli slice` and `deli send`, which the server runs in a process of its own;
+// /state says how each is getting on, and the G-code shows up by itself once it is written.
+const JOBS = { slice: { state: 'slicing', doing: 'Slicing' }, send: { state: 'sending', doing: 'Sending' } };
+let following = null;  // the job whose progress the panel shows
+async function startJob(kind, body = {}) {
+  const shown = document.getElementById('commandText').textContent;
+  showCommand(shown, `${JOBS[kind].doing}…`);
   document.getElementById('copyCommand').hidden = true;
   commandRan = true;  // stays up while the page redraws
   try {
-    const response = await fetch('/slice', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Deli-Token': token }, body: '{}' });
-    if (response.ok || response.status === 409) followingSlice = true;  // 409: one already running, which is followed instead
-    else showRan(await response.text(), true);
+    const response = await fetch(`/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Deli-Token': token },
+                                               body: JSON.stringify(body) });
+    if (response.ok) following = { kind, shown };
+    else showRan(await response.text(), true);  // 409: one is already running
   } catch (err) {
     showRan(err instanceof TypeError ? 'The viewer has stopped. Run deli view again.' : err.message, true);
   }
 }
-function followSlice(slicing) {
-  if (!followingSlice || !slicing) return;
-  if (slicing.running) {
-    document.getElementById('commandNote').textContent = `Slicing… ${slicing.seconds} s`;
+function startSlice(button) {
+  button.replaceWith(Object.assign(document.createElement('span'), { className: 'dim', textContent: 'slicing…' }));
+  document.getElementById('commandText').textContent = 'deli slice';
+  return startJob('slice');
+}
+function followJobs(state) {
+  if (!following) return;
+  const job = state[JOBS[following.kind].state];
+  if (!job) return;
+  if (job.running) {
+    document.getElementById('commandNote').textContent = `${JOBS[following.kind].doing}… ${job.seconds} s`;
     return;
   }
-  followingSlice = false;
-  document.getElementById('commandText').textContent = 'deli slice';
-  showRan(slicing.output, slicing.code !== 0);
+  document.getElementById('commandText').textContent = following.shown;
+  following = null;
+  showRan(job.output, job.code !== 0);
+}
+// Send and Print give the `deli send` for the plate shown; Apply runs it. Print starts the
+// printer, so its Apply says so.
+function showSend(start) {
+  const several = lastState.plates > 1, args = ['send', ...(several ? ['--plate', String(plate)] : []), ...(start ? ['--print'] : [])];
+  const what = several ? `plate ${plate}` : 'the print';
+  showCommand(`deli ${args.join(' ')}`, start
+    ? `to upload ${what} to ${lastState.host.url} and start printing it; check the bed is clear first`
+    : `to upload ${what} to ${lastState.host.url}`, { send: { plate: several ? plate : null, print: start } });
+  if (start) document.getElementById('applyCommand').textContent = 'Start printing';
 }
 document.getElementById('copyCommand').addEventListener('click', async event => {
   try {
@@ -760,13 +804,15 @@ function startDrag(event) {
   const range = rangeOf(hit.faceIndex);
   controls.enabled = false;
   renderer.domElement.style.cursor = 'grabbing';
+  moving = true;
+  showModel();
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
     minX = Math.min(minX, placed[v * 3]); maxX = Math.max(maxX, placed[v * 3]);
     minY = Math.min(minY, placed[v * 3 + 1]); maxY = Math.max(maxY, placed[v * 3 + 1]);
   }
   dragging = { range, plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -hit.point.z), from: hit.point.clone(),
-               middle: [(minX + maxX) / 2, (minY + maxY) / 2], by: new THREE.Vector3() };
+               middle: [(minX + maxX) / 2, (minY + maxY) / 2], box: [minX, minY, maxX, maxY], by: new THREE.Vector3() };
   putBack(range);  // another part moved before goes back where it is
 }
 function drag(event) {
@@ -781,13 +827,71 @@ function drag(event) {
   }
   position.needsUpdate = true;
   const [x, y] = [dragging.middle[0] + by.x, dragging.middle[1] + by.y];
+  const [x0, y0, x1, y1] = dragging.box;
+  if (!onTheBed(x0 + by.x, y0 + by.y, x1 + by.x, y1 + by.y))
+    return showCommand(null, 'Off the bed: it would not be printed there.');
+  const moved = range.hull.map(([hx, hy]) => [hx + by.x, hy + by.y]);
+  const hit = partRanges.find(other => other !== range && overlap(moved, other.hull));
+  if (hit) return showCommand(null, `That is on ${hit.part.count > 1 ? `copy ${hit.copy} of ` : ''}${hit.part.file}; move it clear.`);
   // A place is on the copy's own plate, so a copy only arranged onto this one is kept to it.
   const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
   const steps = [...(plate > 1 && part.kept[copy - 1] !== plate ? [['plate', String(plate)]] : []), [number(x), number(y)]];
   showCommand(steps.map(step => `deli move ${partName(part)} ${[...which, ...step].join(' ')}`).join(' && '),
     `to move ${part.count > 1 ? `copy ${copy}` : 'it'} there`, steps.map(step => ['move', part.file, ...which, ...step]));
 }
+// A copy's footprint: the convex hull of its vertices seen from above, as the engine checks
+// copies put by hand against each other.
+function hull(points, first, count) {
+  const xy = [];
+  for (let v = first; v < first + count; v++) xy.push([points[v * 3], points[v * 3 + 1]]);
+  xy.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = list => {
+    const out = [];
+    for (const p of list) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    return out.slice(0, -1);
+  };
+  return [...half(xy), ...half([...xy].reverse())];
+}
+// Whether two convex footprints overlap by more than a touch: no direction of an edge of
+// either separates them.
+function overlap(a, b) {
+  for (const poly of [a, b])
+    for (let i = 0; i < poly.length; i++) {
+      const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
+      const nx = y1 - y2, ny = x2 - x1, length = Math.hypot(nx, ny);
+      if (!length) continue;
+      const along = p => (p[0] * nx + p[1] * ny) / length;
+      const pa = a.map(along), pb = b.map(along);
+      if (Math.min(Math.max(...pa), Math.max(...pb)) - Math.max(Math.min(...pa), Math.min(...pb)) < 0.1) return false;
+    }
+  return true;
+}
+
+// Whether a footprint lies within the bed's outline, cut-out corners and all: every corner of
+// it inside, and no corner of the bed inside it.
+function onTheBed(x0, y0, x1, y1) {
+  const bed = lastState?.bed ?? [];
+  const inside = (x, y) => {
+    let odd = false;
+    for (let i = 0, j = bed.length - 1; i < bed.length; j = i++) {
+      const [xi, yi] = bed[i], [xj, yj] = bed[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) odd = !odd;
+    }
+    return odd;
+  };
+  const e = 0.01;  // touching the edge is on the bed
+  return [[x0 + e, y0 + e], [x1 - e, y0 + e], [x1 - e, y1 - e], [x0 + e, y1 - e]].every(([x, y]) => inside(x, y))
+    && !bed.some(([x, y]) => x > x0 + e && x < x1 - e && y > y0 + e && y < y1 - e);
+}
 function endDrag() {
+  if (!dragging.by.lengthSq()) {  // a click, not a drag: nothing moved
+    moving = false;
+    showModel();
+  }
   controls.enabled = true;
   renderer.domElement.style.cursor = 'grab';
   partMesh.geometry.computeBoundingSphere();
@@ -796,6 +900,10 @@ function endDrag() {
 }
 // Every part back where the print has it, but the one given.
 function putBack(except) {
+  if (!except && moving) {
+    moving = false;
+    showModel();
+  }
   if (!partMesh || !placed) return;
   const position = partMesh.geometry.attributes.position;
   for (const range of partRanges) {
@@ -813,7 +921,8 @@ function putBack(except) {
 function layFlat(x, y) {
   const hit = partHit(x, y);
   if (!hit) return;
-  const range = rangeOf(hit.faceIndex), [rx, ry, rz] = range.part.rotate;
+  const range = rangeOf(hit.faceIndex), { part, copy } = range;
+  const [rx, ry, rz] = part.turns?.[copy - 1] ?? part.rotate;  // the copy's own, or the part's
   const toRadians = Math.PI / 180;
   const turned = new THREE.Matrix4().makeRotationZ(rz * toRadians)
     .multiply(new THREE.Matrix4().makeRotationY(ry * toRadians)).multiply(new THREE.Matrix4().makeRotationX(rx * toRadians));
@@ -824,12 +933,13 @@ function layFlat(x, y) {
     return degrees <= -180 ? degrees + 360 : degrees === -0 ? 0 : degrees;
   };
   const ax = angle(Math.atan2(-m.y, -m.z)), ay = angle(Math.atan2(m.x, r));
-  const name = partName(range.part);
+  // Only the copy clicked is turned, in a part with copies.
+  const name = partName(part), which = part.count > 1 ? ['--copy', String(copy)] : [];
   const steps = [['x', ax, rx], ['y', ay, ry]].filter(([, to, from]) => Math.abs(to - from) > 0.01);
   if (!steps.length) return showCommand(null, 'That face already lies on the bed.');
-  showCommand(steps.map(([axis, to]) => `deli rotate ${name} ${axis} ${number(to)}`).join(' && '),
-    'to lay that face on the bed',
-    steps.map(([axis, to]) => ['rotate', range.part.file, axis, number(to)]));
+  showCommand(steps.map(([axis, to]) => `deli rotate ${[name, ...which, axis, number(to)].join(' ')}`).join(' && '),
+    `to lay that face of ${which.length ? `copy ${copy}` : 'it'} on the bed`,
+    steps.map(([axis, to]) => ['rotate', part.file, ...which, axis, number(to)]));
 }
 
 // Pause: the `deli pause` for the layer on the slider, or the one that takes it away.
@@ -867,6 +977,9 @@ function describe(state) {
     // Where the copies on this plate were moved to, or kept to it on their own.
     part.at.forEach((at, i) => {
       if ((part.on?.[i] ?? 1) !== plate) return;
+      const turn = part.count > 1 && part.turns?.[i];
+      if (turn) lines.push(`<span class="dim">copy ${i + 1} rotate</span> `
+        + (['x', 'y', 'z'].map((a, j) => turn[j] ? `${turn[j]}° about ${a}` : null).filter(Boolean).join(', ') || 'none'));
       const own = part.kept[i] !== part.plate ? part.kept[i] : null;
       if (!at && !own) return;
       const which = part.count > 1 ? `copy ${i + 1} ` : '';
@@ -881,7 +994,14 @@ function describe(state) {
   if (state.filament) lines.push(`<span class="dim">filament</span> ${state.filament}`);
   const pauses = state.pauses[plate] ?? [];
   if (pauses.length) lines.push(`<span class="dim">pauses after layer</span> ${pauses.join(', ')}`);
-  if (state.gcode?.[plate]) lines.push(`<span class="dim">sliced</span> ${state.gcode[plate]}`);
+  if (state.gcode?.[plate]) {
+    lines.push(`<span class="dim">sliced</span> ${state.gcode[plate]}`);
+    // Sending, where deli send knows the printer's address; setting it up stays in the shell.
+    if (token && state.host) lines.push(state.sending?.running ? '<span class="dim">sending…</span>'
+      : `<button type="button" id="sendNow" title="Upload to the printer">Send</button> `
+        + `<button type="button" id="printNow" title="Upload and start printing">Print</button>`
+        + ` <span class="dim">to ${state.host.url}</span>`);
+  }
   else if (state.gcode) {}  // sliced, with nothing on this plate
   else if (state.parts.length) {
     const slice = state.slicing?.running ? '<span class="dim">slicing…</span>'
@@ -899,7 +1019,7 @@ let lastState = null;  // what was drawn, to draw again for another plate
 async function refresh() {
   try {
     const state = await (await fetch('/state')).json();
-    followSlice(state.slicing);
+    followJobs(state);
     if (state.version !== version) {
       version = state.version;
       await redraw(state);
@@ -984,6 +1104,6 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-renderer.setAnimationLoop(() => { controls.update(); followPointer(); placeMeasurement(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); followPointer(); followHover(); placeMeasurement(); renderer.render(scene, camera); });
 refresh();
 setInterval(refresh, 500);

@@ -3,9 +3,26 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.8.0 (2026-10-07)
 
+- **Changed:** moving a part or copy no longer has the others arranged afresh around it.
+  The first time something on a plate is moved, everything else on that plate keeps
+  where it is, given a place of its own (`deli move` says so; `deli arrange` gives it
+  back), and parts or copies moved so that they overlap are refused.
+- **Changed:** in `deli view`, a part is moved by dragging it; the Move button is gone. A
+  drag that would put it off the bed or on another part offers no command.
+- Each copy can be turned its own way: `deli rotate <part> --copy N ...`, kept in
+  `[part.copy.N]`; Lay flat in `deli view` turns only the copy clicked. Rotating the part
+  turns every copy with it.
 - `deli --version` says which deli is installed.
+- `deli view` can send: Send uploads the plate shown (`deli send --plate N`, or the print
+  when it has one plate), and Print uploads it and starts it, after a second click that
+  says so. They show once the print is sliced and deli knows the printer's address.
+- `deli arrange --plate N` arranges one plate again, keeping what is on it there; in
+  `deli view`, Arrange on a print of several plates is the plate shown's.
+- A print on a bed with a cut-out corner (the Centauri Carbon's) could not be laid out
+  when one part or copy had been moved and the others were arranged around it: arrange
+  put one in the corner, and `deli slice` and `deli view` said the parts did not fit.
 
 ## 0.7.0 (2026-10-06)
 
