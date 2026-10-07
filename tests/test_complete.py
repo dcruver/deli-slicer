@@ -102,6 +102,10 @@ def test_config_keys_and_values():
     assert complete("config", "printer") == ["original-prusa-i3-mk3"]
     main(["config", "printers.original-prusa-i3-mk3.host", "elegoo://mk3.local"])
     assert complete("config", "--unset") == ["printers.original-prusa-i3-mk3.host"]
+    main(["config", "printer", "original-prusa-i3-mk3"])  # a default printer, a key without a dot
+    assert "printers.original-prusa-i3-mk3.host" in complete("config")
+    main(["config", "printers.mk4-0.6-nozzle.host", "elegoo://mk4.local"])  # a name with a dot in it
+    assert [key for key in complete("config") if "mk4" in key] == [f"printers.mk4-0.6-nozzle.{field}" for field in ("api_key", "filament", "host", "process")]
 
 
 def test_nothing_breaks_on_a_broken_project(job):

@@ -58,7 +58,8 @@ def _overridden() -> list[str]:
 
 def _config_keys() -> list[str]:
     names = _quiet(lambda: library.names("printer"), [])
-    names += [key.split(".")[1] for key, _ in _quiet(config.entries, [])]
+    # The printers the config has keys for (not its default `printer`); a name can hold dots, as in "0.6-nozzle".
+    names += [key.removeprefix("printers.").rsplit(".", 1)[0] for key, _ in _quiet(config.entries, []) if key.startswith("printers.")]
     return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS)})
 
 

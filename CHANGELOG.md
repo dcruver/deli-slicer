@@ -3,6 +3,23 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+## 0.9.0 (2026-10-07)
+
+- `deli view`'s mm / in switch is below the print's description and shows every length in the
+  units chosen: sizes, places, how far a part is sunk, layer heights and measurements.
+- `deli view` has a Supports button, which gives `deli supports on` or `off`.
+- `deli move` refuses a move that puts a part on another or off the bed, instead of
+  leaving `deli slice` to find out.
+- In `deli view`, a part being dragged over a sliced print is drawn solid and the G-code
+  hidden, as with Lay flat and Overhangs; the G-code is where the parts were, and the
+  part was a faint shadow beside it.
+- **Changed:** Lay flat puts itself down once its command is applied, or its panel closed;
+  Esc puts any tool down.
+- Tab completion of `deli config` keys works again with a default printer set; it
+  completed nothing.
+
 ## 0.8.0 (2026-10-07)
 
 - **Changed:** moving a part or copy no longer has the others arranged afresh around it.

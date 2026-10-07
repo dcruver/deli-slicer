@@ -260,7 +260,7 @@ def test_a_part_with_copies_is_moved_a_copy_at_a_time(job, capsys):
 
     assert main(["move", "cube", "--copy", "2", "50", "60"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("Keeping where they are the other 1 part or copy on its plate") and out[0].endswith(": copy 1 of cube.stl (deli arrange gives that back)")
+    assert out[0] == "Keeping the other 1 part or copy on plate 1 where they are, so that moving this one does not move them (deli arrange gives that back)"
     assert out[1] == "copy 2 of cube.stl is now at 50, 60 mm"
     copies = part(job)["copy"]
     assert copies["2"] == {"at": [50, 60]} and copies["3"] == {"plate": 2} and set(copies["1"]) == {"at"}
@@ -280,6 +280,20 @@ def test_a_part_with_copies_is_moved_a_copy_at_a_time(job, capsys):
     assert set(part(job)["copy"]) == {"1", "3"}
     assert main(["move", "auto"]) == 0
     assert part(job) == {"file": "cube.stl", "count": 3}
+
+
+def test_a_move_onto_another_part_or_off_the_bed_is_refused(job, capsys):
+    main(["add", "cube.stl"])
+    main(["move", "--copy", "1", "50", "50"])
+    before = (job / "deli.toml").read_text()
+    other = ", ".join(f"{v:g}" for v in part(job)["copy"]["2"]["at"])
+    capsys.readouterr()
+
+    assert main(["move", "--copy", "1", *other.split(", ")]) == 1
+    assert "overlap on plate 1" in capsys.readouterr().err
+    assert main(["move", "--copy", "1", "-50", "50"]) == 1
+    assert "not on the bed" in capsys.readouterr().err
+    assert (job / "deli.toml").read_text() == before
 
 
 def test_moving_one_keeps_the_rest_of_its_plate_where_it_is(job, capsys):

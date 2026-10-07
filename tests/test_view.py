@@ -301,6 +301,9 @@ def test_the_page_runs_its_tools_commands(url):
     main(["add", "cube.stl"])
     assert json.loads(post(url, ["move", "cube", "--copy", "2", "120", "60"])[1])["code"] == 0
     assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [[40.5, 60], [120, 60]]
+    assert json.loads(get(url + "/state")[2])["supports"] is False
+    assert json.loads(post(url, ["supports", "on"])[1])["code"] == 0
+    assert json.loads(get(url + "/state")[2])["supports"] is True
     assert json.loads(post(url, ["arrange"])[1])["code"] == 0
     assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [None, None]
 

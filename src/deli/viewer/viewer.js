@@ -59,16 +59,22 @@ const insideMaterial = new THREE.MeshBasicMaterial({ color: 0x5c3510, side: THRE
 const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clippingPlanes: [ceiling, floor],  // unlit: they face away from the light
   polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 
-// The model is shown whenever there is no G-code to show, or a tool that works on it is in
-// use; over the G-code it is faint. Clicking Model in the legend overrules that until the
-// print is sliced again or its G-code goes out of date.
+// The model is shown whenever there is no G-code to show; over the G-code it is faint.
+// Clicking Model in the legend overrules that until the print is sliced again or its G-code
+// goes out of date. While a part is being moved (until it is applied or put back), or a tool
+// that works on the model is in use, the model is shown by itself, the G-code hidden: the
+// G-code is where the parts were.
 let modelChoice = null;
-// A part being moved is shown, over the G-code too, until it is applied or put back.
-const modelVisible = () => moving || (modelChoice ?? (!paths || mode === 'flat' || showOverhangs));
+const modelAlone = () => Boolean(partMesh) && (moving || mode === 'flat' || showOverhangs);
+const modelVisible = () => modelAlone() || (modelChoice ?? !paths);
 let moving = false;
 function showModel() {
+  if (paths) {
+    paths.mesh.visible = !modelAlone();
+    paths.travel.visible = !modelAlone() && !hiddenRoles.has('Travel');
+  }
   if (!partMesh) return;
-  const visible = modelVisible(), faint = Boolean(paths);
+  const visible = modelVisible(), faint = Boolean(paths) && !modelAlone();
   partMesh.visible = visible;
   partExtras[0].visible = visible && !faint;  // the inside
   overhangMesh.visible = visible && showOverhangs;
@@ -366,7 +372,7 @@ function colourPaths() {
 
 function showRoles() {
   hiddenMask.value = paths.roles.reduce((mask, name, role) => hiddenRoles.has(name) ? mask | (1 << role) : mask, 0);
-  paths.travel.visible = !hiddenRoles.has('Travel');
+  paths.travel.visible = !modelAlone() && !hiddenRoles.has('Travel');
 }
 
 // The roles in the print, each with the time it takes, to click to hide or show; and the
@@ -414,8 +420,10 @@ function options() {
     + '<div class="tools">'
     + Object.entries(TOOLS).filter(([, tool]) => partMesh || !tool.needsPart).map(([name, tool]) =>
         `<button type="button" data-tool="${name}" title="${tool.title}" aria-pressed="${mode === name}">${tool.label}</button>`).join('')
-    + `<span class="units">${Object.keys(UNITS).map(name =>
-        `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div></div>`;
+    + (lastState?.parts.length && 'supports' in lastState
+        ? `<button type="button" id="supports" title="${lastState.supports ? 'Supports are on: turn them off' : 'Turn on automatic supports'}"`
+          + ` aria-pressed="${lastState.supports}">Supports</button>` : '')
+    + '</div></div>';
 }
 
 function showLayers() {
@@ -423,7 +431,7 @@ function showLayers() {
   if (!paths) {
     ceiling.constant = top ? NO_CUT : at;
     floor.constant = NO_CUT;
-    layerLabel.textContent = top ? 'no section' : `cut at ${mm(at)} mm`;
+    layerLabel.textContent = top ? 'no section' : `cut at ${length(at)} ${units}`;
     return;
   }
   const layer = at;
@@ -431,7 +439,7 @@ function showLayers() {
   paths.travel.geometry.setDrawRange(0, paths.travelEnds[layer - 1] * 2);
   ceiling.constant = top ? NO_CUT : paths.tops[layer - 1] + 0.001;  // the model cut where the print has got to
   floor.constant = onlyLayer && layer > 1 ? -(paths.tops[layer - 2] + 0.001) : NO_CUT;
-  layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${mm(paths.tops[layer - 1])} mm, `
+  layerLabel.textContent = `layer ${layer} of ${paths.ends.length}, ${length(paths.tops[layer - 1])} ${units}, `
     + duration(paths.layerTimes[layer - 1] ?? 0) + (paths.pauses.includes(layer) ? ', then a pause' : '');
 }
 layerSlider.addEventListener('input', showLayers);
@@ -449,6 +457,10 @@ info.addEventListener('click', event => {
   if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
   if (button?.id === 'sliceNow') return startSlice(button);
   if (button?.id === 'sendNow' || button?.id === 'printNow') return showSend(button.id === 'printNow');
+  if (button?.id === 'supports') {
+    const to = lastState.supports ? 'off' : 'on';
+    return showCommand(`deli supports ${to}`, `to turn supports ${to}`, [['supports', to]]);
+  }
   if (button?.id === 'arrange') {
     const which = lastState.plates > 1 ? ['--plate', String(plate)] : [];
     return showCommand(`deli ${['arrange', ...which].join(' ')}`,
@@ -497,7 +509,7 @@ let mode = null;
 // follows the pointer over what is drawn until a second click pins the other, and the line is
 // labelled with its length and how far apart its ends are along each axis, in millimetres or
 // inches. On the part, an end snaps to a corner of the triangle under the pointer when one is
-// within a few pixels. A third click starts again; Esc clears; a right-click clears and puts
+// within a few pixels. A third click starts again; Esc or a right-click clears it and puts
 // the tool down. The points are dropped when the print changes, since what they were on may
 // have moved.
 const picks = [];
@@ -535,7 +547,7 @@ function onScreen(point) {
 // shown, or null.
 const uncut = point => ceiling.distanceToPoint(point) >= 0 && floor.distanceToPoint(point) >= 0;
 function pickAt(x, y) {
-  const targets = [partMesh?.visible && partMesh, paths?.mesh].filter(Boolean);
+  const targets = [partMesh?.visible && partMesh, paths?.mesh.visible && paths.mesh].filter(Boolean);
   if (!targets.length) return null;
   raycaster.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, 1 - y / innerHeight * 2), camera);
   const hit = raycaster.intersectObjects(targets, false).find(hit => uncut(hit.point)
@@ -598,6 +610,8 @@ function setUnits(name) {
   units = name;
   try { localStorage.setItem('units', name); } catch {}
   for (const button of info.querySelectorAll('[data-units]')) button.setAttribute('aria-pressed', button.dataset.units === name);
+  relabelLengths();
+  showLayers();
   drawMeasurement();
 }
 
@@ -654,7 +668,8 @@ renderer.domElement.addEventListener('pointerleave', () => {
 addEventListener('keydown', event => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === 'm' || event.key === 'M') setMode(mode === 'measure' ? null : 'measure');
-  else if (event.key === 'Escape') {
+  else if (event.key === 'Escape') {  // done: the tool put down, and whatever it wrote
+    setMode(null);
     clearMeasurement();
     putBack();
     commandRan = false;
@@ -708,6 +723,7 @@ document.getElementById('applyCommand').addEventListener('click', async event =>
   }
   event.target.disabled = false;
   putBack();  // the print, redrawn from deli.toml, shows where the part is now
+  if (!failed && mode === 'flat') setMode(null);  // the face is laid flat: the tool is done
   showRan(printed, failed);
 });
 // The panel, once a command has run: what it printed. It stays up through redraws.
@@ -777,7 +793,12 @@ document.getElementById('copyCommand').addEventListener('click', async event => 
     getSelection().selectAllChildren(document.getElementById('commandText'));  // to copy by hand
   }
 });
-document.getElementById('closeCommand').addEventListener('click', () => { putBack(); commandRan = false; hideCommand(); });
+document.getElementById('closeCommand').addEventListener('click', () => {
+  if (mode === 'flat') setMode(null);
+  putBack();
+  commandRan = false;
+  hideCommand();
+});
 
 // How a part is named on the command line: its file, without the extension, quoted if needed.
 function partName(part) {
@@ -953,6 +974,14 @@ document.getElementById('pauseHere').addEventListener('click', () => {
 });
 
 const mm = n => Math.round(n * 100) / 100;
+// Lengths in the units chosen (millimetres or inches): marked with the millimetres they
+// are, so that choosing other units rewrites them where they stand.
+const lengths = (values, between = ', ') =>
+  `<span data-mm="${values.join(' ')}" data-between="${between}">${values.map(length).join(between)} ${units}</span>`;
+function relabelLengths() {
+  for (const span of info.querySelectorAll('[data-mm]'))
+    span.textContent = span.dataset.mm.split(' ').map(Number).map(length).join(span.dataset.between) + ` ${units}`;
+}
 const pct = f => `${Math.round(f * 1000) / 10}%`;
 
 // The copies of a part on a plate, as `deli slice` arranges them.
@@ -968,7 +997,7 @@ function describe(state) {
     const count = state.plates > 1 ? copiesOn(part, plate) : part.count;
     lines.push(`<b>${part.file}</b>${count > 1 ? ` × ${count}` : ''}`
       + (state.plates > 1 && count < part.count ? ` <span class="dim">of ${part.count}</span>` : ''));
-    if (part.size) lines.push(part.size.map(mm).join(' × ') + ' mm');
+    if (part.size) lines.push(lengths(part.size, ' × '));
     const s = part.scale, r = part.rotate;
     if (s.some(f => f !== 1)) lines.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
     const turns = ['x', 'y', 'z'].map((a, i) => r[i] ? `${r[i]}° about ${a}` : null).filter(Boolean);
@@ -983,9 +1012,9 @@ function describe(state) {
       const own = part.kept[i] !== part.plate ? part.kept[i] : null;
       if (!at && !own) return;
       const which = part.count > 1 ? `copy ${i + 1} ` : '';
-      lines.push(`<span class="dim">${which}${at ? 'at' : 'kept to plate'}</span> ${at ? `${at.map(mm).join(', ')} mm` : own}`);
+      lines.push(`<span class="dim">${which}${at ? 'at' : 'kept to plate'}</span> ${at ? lengths(at) : own}`);
     });
-    if (part.z) lines.push(`<span class="dim">${part.z < 0 ? 'sunk' : 'raised'}</span> ${mm(Math.abs(part.z))} mm`);
+    if (part.z) lines.push(`<span class="dim">${part.z < 0 ? 'sunk' : 'raised'}</span> ${lengths([Math.abs(part.z)])}`);
   }
   if (!state.parts.length) lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
   else if (state.plates > 1 && !state.parts.some(part => copiesOn(part, plate))) lines.push('<span class="dim">Nothing on this plate.</span>');
@@ -1009,6 +1038,9 @@ function describe(state) {
     lines.push(`<span class="dim">${state.stale ? 'The print has changed since it was sliced:' : 'Not sliced yet:'}</span> ${slice}`);
   }
   if (state.error) lines.push(`<span class="error">${state.error}</span>`);
+  // The units every length on the page is shown in, below what they describe.
+  lines.push(`<div class="unitsRow"><span class="units" title="Units for every length shown">${Object.keys(UNITS).map(name =>
+    `<button type="button" data-units="${name}" aria-pressed="${name === units}">${name}</button>`).join('')}</span></div>`);
   info.innerHTML = lines.join('<br>');
 }
 

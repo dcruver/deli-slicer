@@ -8,7 +8,7 @@ wrote, supports included, for as long as nothing has changed since. The page ask
 the shell shows up in the browser.
 
 The page changes a print only by running deli's own commands, the ones its tools show
-(`deli move`, `deli rotate`, `deli pause`, `deli arrange`), through `/run`; it slices with
+(`deli move`, `deli rotate`, `deli pause`, `deli arrange`, `deli supports`), through `/run`; it slices with
 `/slice` and sends to the printer with `/send`, which run `deli slice` and `deli send` in a
 process of their own: POSTs that must carry the token the page's address was given, from
 the page itself, so that no other web page can.
@@ -49,7 +49,7 @@ PAGES = Path(__file__).parent / "viewer"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
-RUNNABLE = {"move", "rotate", "pause", "arrange"}  # the commands the page's tools may run
+RUNNABLE = {"move", "rotate", "pause", "arrange", "supports"}  # the commands the page's tools may run
 _TOKEN = "DELI_VIEW_TOKEN"  # how `start` hands the background process its token: not on its command line, which others can read
 _running = threading.Lock()  # one command at a time: each takes over stdout and stderr while it runs
 
@@ -226,6 +226,7 @@ def state() -> dict:
             result.setdefault("error", str(err))
         result["pauses"] = {str(plate): project.pauses(doc, plate) for plate in range(1, result["plates"] + 1)}
         try:
+            result["supports"] = settings.effective(doc, "support_material")[0] == "1"
             result["overhang"] = _overhang(doc)
         except (KeyError, ValueError):  # a setting PrusaSlicer would not take; slice says so
             pass

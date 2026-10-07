@@ -537,6 +537,15 @@ def _plate_number(text: str) -> int:
     return plate
 
 
+def _lays_out(doc) -> str | None:
+    """Why the print's parts cannot be laid out on its plates, if they cannot."""
+    try:
+        _engine.plates(project.engine_parts(doc), view._config(doc))
+    except (RuntimeError, ValueError) as err:
+        return str(err)
+    return None
+
+
 def _keep_the_rest(doc, moving: dict, copy: int) -> list[str]:
     """Give every other part and copy on the plate the moved one is on the place it has now, so
     that moving one does not have the rest arranged afresh around it; what was given one.
@@ -607,11 +616,17 @@ def _move(args: argparse.Namespace) -> int:
             at[_axis(args.args[0])] = _mm(args.args[1])
         else:
             at = [_mm(args.args[0]), _mm(args.args[1])]
+        laid_out = _lays_out(doc) is None
         kept = _keep_the_rest(doc, part, copy)
-        if kept:
-            print(f"Keeping where they are the other {len(kept)} {'part or copy' if len(kept) == 1 else 'parts and copies'} on its plate, "
-                  "so that moving this one does not move them: " + ", ".join(kept) + " (deli arrange gives that back)")
         project.set_copy_place(part, copy, at)
+        # A move that puts it on another part, or off the bed, is refused; one that leaves a
+        # print that could not be laid out before no better is not, so that it can be mended.
+        if laid_out and (problem := _lays_out(doc)):
+            raise CommandError(f"{name} cannot go to {at[0]:g}, {at[1]:g}: {problem}")
+        if kept:
+            plate = project.copy_plate(part, copy) or 1
+            print(f"Keeping the other {len(kept)} {'part or copy' if len(kept) == 1 else 'parts and copies'} on plate {plate} where they are, "
+                  "so that moving this one does not move them (deli arrange gives that back)")
     else:
         raise CommandError("usage: deli move [PART] [--copy N] X Y | x|y|z MM | plate N | auto")
     project.write(doc)

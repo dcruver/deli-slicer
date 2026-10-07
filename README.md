@@ -69,17 +69,17 @@ You need Python 3.12 or newer and `uv` (or `pipx`).
 
 Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
 platform with the engine inside; nothing else needs building. Install the one for your
-machine (for 0.8.0):
+machine (for 0.9.0):
 
 ```
 # Linux, x86-64 (most PCs)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.8.0/deli-0.8.0-cp312-abi3-manylinux_2_28_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-manylinux_2_28_x86_64.whl
 # Linux, ARM64 (Raspberry Pi 4/5 on a 64-bit OS, ARM servers)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.8.0/deli-0.8.0-cp312-abi3-manylinux_2_28_aarch64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-manylinux_2_28_aarch64.whl
 # macOS, Apple Silicon (M1 and later)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.8.0/deli-0.8.0-cp312-abi3-macosx_11_0_arm64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-macosx_11_0_arm64.whl
 # macOS, Intel
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.8.0/deli-0.8.0-cp312-abi3-macosx_10_15_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-macosx_10_15_x86_64.whl
 ```
 
 (`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
@@ -447,9 +447,11 @@ sliced, and deli knows the printer's address, Send and Print run `deli send` for
 plate shown (Print, which starts the printer, asks once more). Only the page at the
 address `deli view` printed can apply commands. To measure, press Measure (or M) and
 click two points on the parts or the print: the line follows the pointer from the first,
-and the page shows the distance between them and along each axis, in mm or inches as
-you choose, snapping to a corner of a part when you click near one. Esc clears; a
-right-click clears and puts the tool down.
+and the page shows the distance between them and along each axis, snapping to a corner
+of a part when you click near one. Esc clears; a right-click clears and puts the tool
+down. The mm / in switch, below the print's description, shows every length on the page (sizes,
+places, layer heights, measurements) in millimetres or inches; commands stay in
+millimetres. Supports, beside the tools, gives `deli supports on` or `off`.
 
 The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
@@ -547,8 +549,6 @@ Things that a user would notice, roughly in the order they matter:
   elsewhere, which is untested.
 - **One filament per print.** A change by hand at a `deli pause` is the only kind;
   filament-change G-code for multi-material printers is not converted.
-- **Parts you place yourself are not checked against each other**, only against the
-  bed, so two moved parts can overlap.
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
 - **Hosts:** PrusaLink, Duet and the others PrusaSlicer knows are not supported by
   `deli send`; the Centauri Carbon 2's newer protocol is not either.
