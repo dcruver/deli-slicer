@@ -5,6 +5,17 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+## 0.10.0 (2026-10-07)
+
+- `deli view` replaces a viewer still running from before deli was installed afresh, instead
+  of giving its address again: its page was gone, and the address showed only "not found".
+- `deli view` has a Rotate tool (or R): drag a part around to turn it on the bed, by 15°,
+  or by 1° with Shift. It gives the `deli rotate ... z` that turns it so, and a copy not yet
+  placed is first kept where it is, so nothing else moves.
+- `deli send` sends again a piece of an upload to an Elegoo printer that times out or loses
+  its connection, up to three more times, instead of failing the whole upload; the
+  Centauri's Wi-Fi drops one now and then.
+
 ## 0.9.0 (2026-10-07)
 
 - `deli view`'s mm / in switch is below the print's description and shows every length in the

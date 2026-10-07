@@ -46,6 +46,9 @@ from pathlib import Path
 from deli import _engine, project, send, settings
 
 PAGES = Path(__file__).parent / "viewer"
+# Which deli a viewer runs: one started before deli was installed afresh may serve from files
+# that are gone, and is replaced rather than found again.
+SOURCE = str(Path(__file__).resolve().parent)
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
@@ -281,8 +284,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.server.asked = time.monotonic()
         path = self.path.split("?")[0]
         try:
-            if path == "/directory":  # which print this viewer shows, for `running`
-                self._send(200, "text/plain; charset=utf-8", str(Path.cwd()).encode())
+            if path == "/directory":  # which print this viewer shows, and from which deli, for `running`
+                self._send(200, "text/plain; charset=utf-8", f"{Path.cwd()}\n{SOURCE}".encode())
             elif path == "/state":
                 described = state()
                 for job in ("slicing", "sending"):
@@ -380,18 +383,33 @@ def _record() -> Path:
     return runtime / f"view-{hashlib.sha256(str(Path.cwd()).encode()).hexdigest()[:16]}.json"
 
 
-def running() -> tuple[int, int, str | None] | None:
+def _viewer() -> tuple[int, int, str | None, bool] | None:
     """The process, port and token of the viewer running in the background for this
-    directory, if there is one. The viewer itself is asked, so a record left behind by one
-    that died, whose port something else may have taken since, does not count."""
+    directory, if there is one, and whether it runs this deli. The viewer itself is asked, so
+    a record left behind by one that died, whose port something else may have taken since,
+    does not count."""
     try:
         record = json.loads(_record().read_text())
         with urllib.request.urlopen(f"http://127.0.0.1:{record['port']}/directory", timeout=2) as response:
-            if response.read().decode() == str(Path.cwd()):
-                return record["pid"], record["port"], record.get("token")
+            directory, _, source = response.read().decode().partition("\n")
+            if directory == str(Path.cwd()):
+                return record["pid"], record["port"], record.get("token"), source == SOURCE
     except (OSError, ValueError, KeyError, http.client.HTTPException):
         pass
     return None
+
+
+def running() -> tuple[int, int, str | None] | None:
+    """The process, port and token of the viewer running this deli in the background for
+    this directory, if there is one. One running another deli (deli was installed afresh
+    since it started, perhaps taking its page's files away) is stopped."""
+    found = _viewer()
+    if found and not found[3]:
+        _record().unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            os.kill(found[0], signal.SIGTERM)
+        return None
+    return found[:3] if found else None
 
 
 def start(port: int = 0) -> tuple[int, str]:
@@ -419,7 +437,7 @@ def start(port: int = 0) -> tuple[int, str]:
 
 def stop() -> bool:
     """Stop the viewer running in the background for this directory; whether there was one."""
-    found = running()
+    found = _viewer()
     _record().unlink(missing_ok=True)
     if found:
         os.kill(found[0], signal.SIGTERM)

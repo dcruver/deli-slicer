@@ -253,6 +253,49 @@ def test_large_files_go_up_in_1_mib_chunks_with_one_upload_id(elegoo, job, capsy
     assert "1.0 of 2.6 MB" in capsys.readouterr().out
 
 
+class DroppingElegooHTTP(ElegooHTTP):
+    """An Elegoo printer whose Wi-Fi drops some pieces of an upload: the connection closes unanswered."""
+
+    drops = 0
+
+    def do_POST(self):
+        fields = form_fields(self)
+        if type(self).drops:
+            type(self).drops -= 1
+            self.close_connection = True
+            return
+        type(self).received.append((self.path, fields))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(json.dumps(self.reply).encode())
+
+
+@pytest.fixture
+def dropping(monkeypatch):
+    printer = FakePrinter(DroppingElegooHTTP)
+    monkeypatch.setenv("DELI_HOST", f"elegoo://{printer.url}")
+    monkeypatch.setattr(send, "RETRY_WAIT", 0)
+    yield DroppingElegooHTTP
+    printer.stop()
+
+
+def test_a_piece_the_printer_drops_is_sent_again(dropping, capsys):
+    dropping.drops = send.RETRIES
+
+    assert main(["send"]) == 0
+
+    (_, fields), = dropping.received
+    assert fields["File"] == b"G28\n" * 1000
+
+
+def test_a_piece_dropped_every_time_fails_the_send(dropping, capsys):
+    dropping.drops = send.RETRIES + 1
+
+    assert main(["send"]) == 1
+    assert f"(tried {send.RETRIES + 1} times)" in capsys.readouterr().err
+    assert not dropping.received
+
+
 def test_printer_that_is_not_an_elegoo_is_refused(monkeypatch, capsys):
     printer = FakePrinter(MoonrakerHTTP)
     monkeypatch.setenv("DELI_HOST", f"elegoo://{printer.url}")

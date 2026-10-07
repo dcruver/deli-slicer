@@ -10,7 +10,8 @@ A plain `http://` host is allowed when the chosen printer's `host_type` names on
 of these. `DELI_API_KEY` supplies the key hosts that need one ask for.
 
 The Elegoo protocol is reimplemented from OrcaSlicer's `ElegooLink.cpp` (AGPL-3.0,
-as deli is): the file goes up in 1 MiB multipart POSTs to `/uploadFile/upload`,
+as deli is): the file goes up in 1 MiB multipart POSTs to `/uploadFile/upload` (a piece
+that times out or loses its connection is sent again),
 and printing is started over a websocket on port 3030 with SDCP command 128.
 """
 
@@ -39,6 +40,10 @@ HOST_TYPES = {"octoprint": "octoprint", "moonraker": "moonraker"}
 CHUNK = 1024 * 1024  # what OrcaSlicer sends per request to an Elegoo printer
 SDCP_PORT = 3030  # the Elegoo printer's websocket
 TIMEOUT = 30
+# A piece of an upload that times out or loses its connection is sent again this many more
+# times, this many seconds apart: the Centauri's Wi-Fi drops one now and then.
+RETRIES = 3
+RETRY_WAIT = 2
 
 Progress = Callable[[int, int], None]  # bytes sent so far, bytes in all
 
@@ -152,7 +157,14 @@ def _elegoo_upload(host: Host, path: Path, progress: Progress) -> None:
         chunk = data[offset : offset + CHUNK]
         fields = {"Check": "1", "S-File-MD5": md5, "Offset": str(offset), "Uuid": upload_id, "TotalSize": str(total)}
         body, content_type = _multipart(fields, "File", path.name, chunk)
-        status, answer = _request("POST", host.url + "/uploadFile/upload", body, {"Content-Type": content_type})
+        for tries_left in range(RETRIES, -1, -1):  # the piece's offset and the upload's id make sending it again safe
+            try:
+                status, answer = _request("POST", host.url + "/uploadFile/upload", body, {"Content-Type": content_type})
+                break
+            except SendError as err:
+                if not tries_left:
+                    raise SendError(f"{err} (tried {RETRIES + 1} times)") from None
+                time.sleep(RETRY_WAIT)
         if status != 200:
             raise SendError(f"the printer refused the upload (HTTP {status}): {answer[:200].decode(errors='replace')}")
         try:

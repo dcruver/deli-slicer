@@ -69,17 +69,17 @@ You need Python 3.12 or newer and `uv` (or `pipx`).
 
 Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
 platform with the engine inside; nothing else needs building. Install the one for your
-machine (for 0.9.0):
+machine (for 0.10.0):
 
 ```
 # Linux, x86-64 (most PCs)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-manylinux_2_28_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-manylinux_2_28_x86_64.whl
 # Linux, ARM64 (Raspberry Pi 4/5 on a 64-bit OS, ARM servers)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-manylinux_2_28_aarch64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-manylinux_2_28_aarch64.whl
 # macOS, Apple Silicon (M1 and later)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-macosx_11_0_arm64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-macosx_11_0_arm64.whl
 # macOS, Intel
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.9.0/deli-0.9.0-cp312-abi3-macosx_10_15_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-macosx_10_15_x86_64.whl
 ```
 
 (`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
@@ -436,9 +436,11 @@ G-code viewer makes it, and can be a minute or two from the one `deli slice` rep
 Overhangs shows in red the faces supports would hold up (at the print's
 `support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
 
-Dragging and Lay flat change the print with deli's own commands: drag a part over the
-bed for its `deli move` (a copy is moved by itself, with `--copy`; a drag that would put
-it off the bed or on another part offers nothing), or with Lay flat click a face of one
+Dragging, Rotate and Lay flat change the print with deli's own commands: drag a part over
+the bed for its `deli move` (a copy is moved by itself, with `--copy`; a drag that would put
+it off the bed or on another part offers nothing); with Rotate (or R) drag a part around to
+turn it on the bed, by 15°, or 1° with Shift, for its `deli rotate ... z` (and, for one not
+yet placed, the `deli move` that keeps it where it is); or with Lay flat click a face of one
 for the `deli rotate` that lays that face on the bed (that copy's only); Arrange, once something has been
 moved, gives `deli arrange` (`--plate N` for the plate shown, on a print of several); Pause here, beside the layer slider, does the same for `deli pause` at that
 layer. The page shows the command, and Apply runs it (Copy, to run it yourself); either

@@ -41,6 +41,7 @@ let partExtras = [];  // drawn with the part: its inside, where a section cuts i
 let overhangMesh = null;
 let partRanges = [];
 let placed = null;
+let placedNormals = null;
 let overhang = null;  // from /state: the slope below which supports hold a face up
 let showOverhangs = false;
 let modelTop = 0;
@@ -65,7 +66,7 @@ const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clipping
 // that works on the model is in use, the model is shown by itself, the G-code hidden: the
 // G-code is where the parts were.
 let modelChoice = null;
-const modelAlone = () => Boolean(partMesh) && (moving || mode === 'flat' || showOverhangs);
+const modelAlone = () => Boolean(partMesh) && (moving || mode === 'flat' || mode === 'turn' || showOverhangs);
 const modelVisible = () => modelAlone() || (modelChoice ?? !paths);
 let moving = false;
 function showModel() {
@@ -156,6 +157,7 @@ async function drawPart(parts) {
   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
+  placedNormals = geometry.attributes.normal.array.slice();  // as placed, for a part turned and put back
   partMesh = new THREE.Mesh(geometry, material);
   overhangMesh = new THREE.Mesh(overhangs(geometry), overhangMaterial);
   overhangMesh.visible = showOverhangs;
@@ -501,6 +503,7 @@ info.addEventListener('change', event => {
 // and need a part.
 const TOOLS = {
   measure: { label: 'Measure', title: 'Measure between two points (M)' },
+  turn: { label: 'Rotate', title: 'Drag a part around to turn it on the bed, by 15°, or by 1° with Shift (R)', needsPart: true },
   flat: { label: 'Lay flat', title: 'Click the face of a part to lay on the bed', needsPart: true },
 };
 let mode = null;
@@ -599,6 +602,10 @@ function clearMeasurement() {
 
 function setMode(name) {
   if (mode === 'measure' && name !== 'measure') clearMeasurement();
+  if (mode === 'turn' && name !== 'turn') {  // a part turned and not applied goes back
+    putBack();
+    if (!commandRan) hideCommand();
+  }
   mode = name;
   renderer.domElement.style.cursor = { measure: 'crosshair', flat: 'pointer' }[name] ?? '';
   for (const button of info.querySelectorAll('[data-tool]')) button.setAttribute('aria-pressed', button.dataset.tool === name);
@@ -620,9 +627,9 @@ function setUnits(name) {
 let hovering = null;
 function followHover() {
   if (!hovering) return;
-  const over = !mode && partHit(...hovering);
+  const draggable = !mode || mode === 'turn', over = draggable && partHit(...hovering);
   hovering = null;
-  if (!mode && !dragging) renderer.domElement.style.cursor = over ? 'grab' : '';
+  if (draggable && !dragging) renderer.domElement.style.cursor = over ? 'grab' : '';
 }
 
 // Once a frame at most, since picking among a large print's extrusions takes a while.
@@ -639,7 +646,7 @@ function followPointer() {
 let pressedAt = null;
 renderer.domElement.addEventListener('pointerdown', event => {
   pressedAt = [event.clientX, event.clientY];
-  if (!mode && event.button === 0) startDrag(event);
+  if ((!mode || mode === 'turn') && event.button === 0) startDrag(event);
 }, { capture: true });  // before the view's controls, so that a drag on a part does not turn the view too
 renderer.domElement.addEventListener('pointerup', event => {
   if (dragging) return endDrag();
@@ -657,7 +664,7 @@ renderer.domElement.addEventListener('pointerup', event => {
 });
 renderer.domElement.addEventListener('pointermove', event => {
   if (dragging) return drag(event);
-  if (!mode && !event.buttons) hovering = [event.clientX, event.clientY];
+  if ((!mode || mode === 'turn') && !event.buttons) hovering = [event.clientX, event.clientY];
   if (mode === 'measure' && picks.length === 1 && !event.buttons) pointer = [event.clientX, event.clientY];
 });
 renderer.domElement.addEventListener('pointerleave', () => {
@@ -668,6 +675,7 @@ renderer.domElement.addEventListener('pointerleave', () => {
 addEventListener('keydown', event => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === 'm' || event.key === 'M') setMode(mode === 'measure' ? null : 'measure');
+  else if ((event.key === 'r' || event.key === 'R') && partMesh) setMode(mode === 'turn' ? null : 'turn');
   else if (event.key === 'Escape') {  // done: the tool put down, and whatever it wrote
     setMode(null);
     clearMeasurement();
@@ -723,7 +731,7 @@ document.getElementById('applyCommand').addEventListener('click', async event =>
   }
   event.target.disabled = false;
   putBack();  // the print, redrawn from deli.toml, shows where the part is now
-  if (!failed && mode === 'flat') setMode(null);  // the face is laid flat: the tool is done
+  if (!failed && (mode === 'flat' || mode === 'turn')) setMode(null);  // the tool is done
   showRan(printed, failed);
 });
 // The panel, once a command has run: what it printed. It stays up through redraws.
@@ -794,7 +802,7 @@ document.getElementById('copyCommand').addEventListener('click', async event => 
   }
 });
 document.getElementById('closeCommand').addEventListener('click', () => {
-  if (mode === 'flat') setMode(null);
+  if (mode === 'flat' || mode === 'turn') setMode(null);
   putBack();
   commandRan = false;
   hideCommand();
@@ -817,7 +825,11 @@ function partHit(x, y) {
 }
 
 // Move: a part dragged over the bed, level, shows where it would go and gives the
-// `deli move` that puts its middle there. The print itself changes only when that is run.
+// `deli move` that puts its middle there. Rotate: with that tool, a part dragged around its
+// middle turns about z, its middle staying where it is (as the engine keeps a placed copy's),
+// and gives the `deli rotate` that turns it so; a copy not yet placed is first given the place
+// it has, so that nothing else is arranged afresh around it. The print itself changes only
+// when that is run.
 let dragging = null;
 function startDrag(event) {
   const hit = partHit(event.clientX, event.clientY);
@@ -832,14 +844,18 @@ function startDrag(event) {
     minX = Math.min(minX, placed[v * 3]); maxX = Math.max(maxX, placed[v * 3]);
     minY = Math.min(minY, placed[v * 3 + 1]); maxY = Math.max(maxY, placed[v * 3 + 1]);
   }
+  const middle = [(minX + maxX) / 2, (minY + maxY) / 2];
   dragging = { range, plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -hit.point.z), from: hit.point.clone(),
-               middle: [(minX + maxX) / 2, (minY + maxY) / 2], box: [minX, minY, maxX, maxY], by: new THREE.Vector3() };
+               middle, box: [minX, minY, maxX, maxY], by: new THREE.Vector3(), turning: mode === 'turn',
+               startAngle: Math.atan2(hit.point.y - middle[1], hit.point.x - middle[0]), degrees: 0,
+               normals: partMesh.geometry.attributes.normal.array.slice(range.vertex * 3, (range.vertex + range.vertices) * 3) };
   putBack(range);  // another part moved before goes back where it is
 }
 function drag(event) {
   raycaster.setFromCamera(new THREE.Vector2(event.clientX / innerWidth * 2 - 1, 1 - event.clientY / innerHeight * 2), camera);
   const to = raycaster.ray.intersectPlane(dragging.plane, new THREE.Vector3());
   if (!to) return;
+  if (dragging.turning) return turn(event, to);
   dragging.by.subVectors(to, dragging.from).setZ(0);
   const { range, by } = dragging, position = partMesh.geometry.attributes.position;
   for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
@@ -859,6 +875,52 @@ function drag(event) {
   const steps = [...(plate > 1 && part.kept[copy - 1] !== plate ? [['plate', String(plate)]] : []), [number(x), number(y)]];
   showCommand(steps.map(step => `deli move ${partName(part)} ${[...which, ...step].join(' ')}`).join(' && '),
     `to move ${part.count > 1 ? `copy ${copy}` : 'it'} there`, steps.map(step => ['move', part.file, ...which, ...step]));
+}
+function turn(event, to) {
+  const { range, middle: [mx, my] } = dragging;
+  const step = event.shiftKey ? 1 : 15;
+  const radians = Math.atan2(to.y - my, to.x - mx) - dragging.startAngle;
+  const degrees = ((Math.round(radians * 180 / Math.PI / step) * step) % 360 + 360) % 360;
+  if (degrees === dragging.degrees && dragging.shown) return;
+  dragging.degrees = degrees;
+  dragging.shown = true;
+  // Turned about the middle, then shifted so that its middle (of its box) is where it was.
+  const cos = Math.cos(degrees * Math.PI / 180), sin = Math.sin(degrees * Math.PI / 180);
+  const geometry = partMesh.geometry, position = geometry.attributes.position, normal = geometry.attributes.normal;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let v = range.vertex, n = 0; v < range.vertex + range.vertices; v++, n += 3) {
+    const dx = placed[v * 3] - mx, dy = placed[v * 3 + 1] - my;
+    const x = mx + dx * cos - dy * sin, y = my + dx * sin + dy * cos;
+    position.array[v * 3] = x;
+    position.array[v * 3 + 1] = y;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    const [nx, ny] = [dragging.normals[n], dragging.normals[n + 1]];
+    normal.array[v * 3] = nx * cos - ny * sin;
+    normal.array[v * 3 + 1] = nx * sin + ny * cos;
+  }
+  const sx = mx - (minX + maxX) / 2, sy = my - (minY + maxY) / 2;
+  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
+    position.array[v * 3] += sx;
+    position.array[v * 3 + 1] += sy;
+  }
+  position.needsUpdate = normal.needsUpdate = true;
+  const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
+  const what = part.count > 1 ? `copy ${copy}` : 'it';
+  if (!degrees) return showCommand(null, `Drag around ${what} to turn it; Shift turns it by single degrees.`);
+  if (!onTheBed(minX + sx, minY + sy, maxX + sx, maxY + sy))
+    return showCommand(null, 'Off the bed: it would not be printed turned so.');
+  const turned = hull(position.array, range.vertex, range.vertices);
+  const hit = partRanges.find(other => other !== range && overlap(turned, other.hull));
+  if (hit) return showCommand(null, `Turned so, it is on ${hit.part.count > 1 ? `copy ${hit.copy} of ` : ''}${hit.part.file}.`);
+  const [rx, ry, rz] = part.turns?.[copy - 1] ?? part.rotate;  // the copy's own, or the part's
+  let z = Math.round((rz + degrees) * 100) / 100 % 360;
+  if (z > 180) z -= 360;
+  const pin = part.at?.[copy - 1] ? [] : [  // a copy only arranged is kept where it is
+    ...(plate > 1 && part.kept[copy - 1] !== plate ? [['move', part.file, ...which, 'plate', String(plate)]] : []),
+    ['move', part.file, ...which, number(mx), number(my)]];
+  const runs = [...pin, ['rotate', part.file, ...which, 'z', number(z)]];
+  showCommand(runs.map(([verb, , ...rest]) => `deli ${verb} ${[partName(part), ...rest].join(' ')}`).join(' && '),
+    `to turn ${what} ${degrees > 180 ? `${360 - degrees}° clockwise` : `${degrees}° anticlockwise`}`, runs);
 }
 // A copy's footprint: the convex hull of its vertices seen from above, as the engine checks
 // copies put by hand against each other.
@@ -909,7 +971,7 @@ function onTheBed(x0, y0, x1, y1) {
     && !bed.some(([x, y]) => x > x0 + e && x < x1 - e && y > y0 + e && y < y1 - e);
 }
 function endDrag() {
-  if (!dragging.by.lengthSq()) {  // a click, not a drag: nothing moved
+  if (!dragging.by.lengthSq() && !dragging.degrees) {  // a click, not a drag: nothing moved
     moving = false;
     showModel();
   }
@@ -930,8 +992,11 @@ function putBack(except) {
   for (const range of partRanges) {
     if (range === except) continue;
     position.array.set(placed.subarray(range.vertex * 3, (range.vertex + range.vertices) * 3), range.vertex * 3);
+    if (placedNormals) partMesh.geometry.attributes.normal.array.set(
+      placedNormals.subarray(range.vertex * 3, (range.vertex + range.vertices) * 3), range.vertex * 3);
   }
   position.needsUpdate = true;
+  if (placedNormals) partMesh.geometry.attributes.normal.needsUpdate = true;
   partMesh.geometry.computeBoundingSphere();
 }
 

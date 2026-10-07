@@ -464,7 +464,7 @@ def test_view_serves_in_the_background_and_returns(background, job, capsys):
     first, hint = capsys.readouterr().out.splitlines()
     address, token = first.removeprefix("Viewing the print in this directory at ").split("?t=")
     assert address.startswith("http://127.0.0.1:") and "deli view --stop" in hint
-    assert get(address + "directory")[2].decode() == str(job)
+    assert get(address + "directory")[2].decode() == f"{job}\n{view.SOURCE}"
     assert json.loads(get(address + "state")[2])["parts"] == []
     main(["add", "cube.stl"])
     assert post(address.rstrip("/"), ["move", "cube", "50", "60"], token=token)[0] == 200  # the page's address lets it run commands
@@ -478,6 +478,29 @@ def test_view_again_finds_the_viewer_already_running(background, capsys):
     assert main(["view", "--no-browser"]) == 0
 
     assert capsys.readouterr().out == f"Already viewing the print in this directory at {address}\n"
+
+
+def test_a_viewer_running_another_deli_is_replaced(background, capsys, monkeypatch):
+    """One started before deli was installed afresh, whose page's files may be gone."""
+    main(["view", "--no-browser"])
+    old = view.running()
+    capsys.readouterr()
+    with monkeypatch.context() as patched:
+        patched.setattr(view, "SOURCE", "/a/deli/installed/since")  # as if deli had been installed afresh
+
+        assert main(["view", "--no-browser"]) == 0
+
+    assert capsys.readouterr().out.startswith("Viewing the print in this directory at ")
+    assert view.running()[1] != old[1]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", old[1]), timeout=1).close()
+            time.sleep(0.05)
+        except OSError:
+            break
+    else:
+        pytest.fail("the old viewer is still answering")
 
 
 def test_view_stop_ends_the_viewer(background, capsys):
