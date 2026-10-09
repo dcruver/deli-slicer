@@ -86,6 +86,8 @@ def test_settings_and_their_short_names():
 
     main(["set", "infill", "20%"])
     assert complete("unset") == ["fill_density"]
+    assert complete("set", "infill", "20%") == found  # the next pair's name
+    assert complete("set", "infill") == []  # a value is yours to type
 
     main(["set", "--global", "walls", "3"])
     assert "infill" in complete("set", "--global")

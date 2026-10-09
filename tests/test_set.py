@@ -638,3 +638,58 @@ def test_a_value_written_by_hand_as_lines_is_read_as_the_engine_wants(project, t
     from deli import project as prj
 
     assert prj.settings(prj.read()) == {"start_gcode": "G28\\nG1 Z5\\n"}
+
+
+# ---------------------------------------------------------------- finding, several at once, unset's list
+
+
+def test_part_of_a_name_lists_the_settings_named_so(project, capsys):
+    main(["process", PROCESS])
+    capsys.readouterr()
+
+    assert main(["set", "solid layers"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith("No setting is named 'solid layers'; ")
+    assert f"  bottom_solid_layers (bottom_layers) = 4  (the process '{PROCESS}')\n" in out
+    assert f"  top_solid_layers (top_layers) = 5  (the process '{PROCESS}')\n" in out
+    assert out.endswith("Change one with: deli set <setting> <value>\n")
+    assert "settings" not in tomllib.loads(project.read_text())  # looking changes nothing
+
+    assert main(["set", "nothing_like_it"]) == 1
+    assert "there is no setting named 'nothing_like_it'" in capsys.readouterr().err
+
+
+def test_several_settings_at_once(project, capsys):
+    main(["process", PROCESS])
+    capsys.readouterr()
+
+    assert main(["set", "infill", "20%", "walls", "3"]) == 0
+
+    assert changed(project) == {"fill_density": "20%", "perimeters": 3}
+    assert capsys.readouterr().out == f"fill_density = 20%  (the process '{PROCESS}' has 15%)\nperimeters = 3  (the process '{PROCESS}' has 2)\n"
+    assert main(["set", "infill", "20%", "walls"]) == 1
+    assert "settings and values come in pairs" in capsys.readouterr().err
+    assert main(["set", "--global", "infill", "30%", "walls", "4"]) == 0
+    assert everywhere(tmp_path_of(project)) == {"fill_density": "30%", "perimeters": 4}
+
+
+def tmp_path_of(project):
+    return project.parents[1]
+
+
+def test_unset_lists_without_a_name_and_takes_several(project, capsys):
+    assert main(["unset"]) == 0
+    assert capsys.readouterr().out == "No setting is changed by this print\n"
+    main(["set", "infill", "20%", "walls", "3"])
+    main(["set", "--global", "layer", "0.3"])
+    capsys.readouterr()
+
+    assert main(["unset"]) == 0
+    assert capsys.readouterr().out == "fill_density = 20%\nperimeters = 3\nRemove one with: deli unset <setting>\n"
+    assert main(["unset", "--global"]) == 0
+    assert capsys.readouterr().out == "layer_height = 0.3\nRemove one with: deli unset --global <setting>\n"
+
+    assert main(["unset", "infill", "walls"]) == 0
+
+    assert "settings" not in tomllib.loads(project.read_text())

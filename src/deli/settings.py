@@ -85,6 +85,17 @@ def resolve(name: str) -> str:
     return key
 
 
+def search(text: str) -> list[str]:
+    """The settings with the text, or every word of it, in their name or a short name, for
+    finding a setting's name: "temp" is temperature, first_layer_temperature, ..."""
+    words = [word for word in text.lower().replace("-", "_").split() if word]
+    if not words:
+        return []
+    found = {name for name in kinds() if all(word in name for word in words)}
+    found |= {name for alias, name in ALIASES.items() if all(word in alias for word in words)}
+    return sorted(found)
+
+
 def for_engine(settings: dict[str, str], own=()) -> str:
     """The settings as INI text for the engine, with deli's own worked into PrusaSlicer's or
     left out: `print_flow_ratio` multiplies the filament's `extrusion_multiplier`, as Orca's

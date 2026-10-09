@@ -924,7 +924,40 @@ def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int
 
 
 def _set(args: argparse.Namespace) -> int:
+    """`deli set`: nothing lists, one word shows a setting (or finds those named like it),
+    and pairs of words change settings, as many as given."""
+    words = args.args
+    if len(words) > 2 and len(words) % 2:
+        raise CommandError("settings and values come in pairs: deli set <setting> <value> [<setting> <value> ...]")
+    pairs = [(words[i], words[i + 1]) for i in range(0, len(words), 2)] if len(words) > 1 else [(words[0] if words else None, None)]
+    for setting, value in pairs:
+        args.setting, args.value = setting, value
+        if (code := _set_one(args)) != 0:
+            return code
+    return 0
+
+
+def _search(doc, text: str) -> int:
+    """`deli set temp`: no setting is named so; list those that have it in their name."""
+    found = settings.search(text)
+    if not found:
+        settings.resolve(text)  # raises, with the closest names
+    print(f"No setting is named '{text}'; {len(found)} {'has' if len(found) == 1 else 'have'} it in their name:")
+    for key in found:
+        value, source = settings.effective(doc, key)
+        short = next((alias for alias, name in settings.ALIASES.items() if name == key), None)
+        print(f"  {key}{f' ({short})' if short else ''} = {_short(value)}  ({source})")
+    print("Change one with: deli set <setting> <value>")
+    return 0
+
+
+def _set_one(args: argparse.Namespace) -> int:
     doc = project.read()
+    if args.setting is not None and args.value is None:
+        try:
+            settings.resolve(args.setting)
+        except settings.SettingError:
+            return _search(doc, args.setting)
     if target := _target(args):
         return _set_in_config(args, doc, target)
     overrides = project.settings(doc)
@@ -1012,6 +1045,29 @@ def _supports(args: argparse.Namespace) -> int:
 
 
 def _unset(args: argparse.Namespace) -> int:
+    """`deli unset`: remove settings, as many as named; without a name, list what there is
+    to remove."""
+    if not args.settings:
+        doc = project.read()
+        target = _target(args)
+        overrides = target.settings if target else project.settings(doc)
+        where = target.where if target else "by this print"
+        option = f" {target.option}" if target else ""
+        if not overrides:
+            print(f"No setting is changed {where}")
+            return 0
+        for key, value in overrides.items():
+            print(f"{key} = {_short(value)}")
+        print(f"Remove one with: deli unset{option} <setting>")
+        return 0
+    for setting in args.settings:
+        args.setting = setting
+        if (code := _unset_one(args)) != 0:
+            return code
+    return 0
+
+
+def _unset_one(args: argparse.Namespace) -> int:
     doc = project.read()
     target = _target(args)
     overrides = target.settings if target else project.settings(doc)
@@ -1949,15 +2005,17 @@ def build_parser() -> argparse.ArgumentParser:
         "set",
         help="change a setting for this print, or list the changed settings",
         description="Change a setting for the print in this directory, leaving the printer, filament and process "
-        "in your library as they are. With only a setting, show it. With nothing, list the changed settings. "
+        "in your library as they are. With only a setting, show it, or find it by part of its name. With nothing, list the changed settings. "
         "With --global, do the same for every print instead, and with --printer, --filament or --process NAME "
         "for every print with that profile: the setting goes in your config and lies under every print's own, "
         "which still win. Each layer lies over the one before, global, printer, filament, process, and they "
         "survive a `deli import` of the profile: Orca's profile plus them is your own.",
         epilog=f"Settings go by PrusaSlicer's names. Short names: {short}.",
     )
-    set_.add_argument("setting", nargs="?", help="a setting's name, such as fill_density, or a short name, such as infill")
-    set_.add_argument("value", nargs="?", help="its new value, or @FILE to read it from a file, G-code say")
+    set_.add_argument("args", nargs="*", metavar="setting [value]",
+                      help="a setting's name, such as fill_density, or a short name, such as infill, and its new value, or @FILE to "
+                      "read the value from a file, G-code say; several pairs at once. A name alone shows the setting, or, when "
+                      "no setting is named so, lists those with it in their name")
     where = set_.add_mutually_exclusive_group()
     where.add_argument("--global", dest="everywhere", action="store_true", help="for every print, in your config, not this print")
     where.add_argument("--printer", dest="for_printer", metavar="NAME", help="for every print on that printer, in your config, not this print")
@@ -1987,7 +2045,7 @@ def build_parser() -> argparse.ArgumentParser:
         "with --global, --printer, --filament or --process NAME, one changed for every print, or every print "
         "with that profile, by `deli set` with the same option.",
     )
-    unset.add_argument("setting", help="a setting's name or short name")
+    unset.add_argument("settings", nargs="*", metavar="setting", help="a setting's name or short name; several at once. With none, list what there is to remove")
     where = unset.add_mutually_exclusive_group()
     where.add_argument("--global", dest="everywhere", action="store_true", help="the setting changed for every print, in your config")
     where.add_argument("--printer", dest="for_printer", metavar="NAME", help="the setting changed for every print on that printer")

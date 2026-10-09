@@ -362,7 +362,10 @@ $ deli set fuzzy_skin
 fuzzy_skin is not changed by this print; PrusaSlicer's default has none
 ```
 
-`deli unset layer_height` goes back to the profile's value.
+`deli unset layer_height` goes back to the profile's value. Several settings go in one
+command, `deli set infill 20% walls 3`, and `deli unset` alone lists what there is to
+remove. When you know roughly what a setting is called, give that: `deli set temp`
+lists every setting with `temp` in its name, each with its value and where it comes from.
 
 A value can come from a file, `@` in front of its name, which is how to give G-code:
 

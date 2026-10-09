@@ -144,10 +144,8 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
             return ["auto", "plate", "x", "y", "z"]
         return []
     if command == "set":
-        return sorted([*settings.ALIASES, *settings.kinds()]) if position == 0 else []
+        return sorted([*settings.ALIASES, *settings.kinds()]) if position % 2 == 0 else []
     if command == "unset":
-        if position != 0:
-            return []
         if any(option in before for option in ("--global", "--printer", "--filament", "--process")):
             return _quiet(lambda: _layer_keys(before), [])
         return _overridden()

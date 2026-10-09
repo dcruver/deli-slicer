@@ -5,6 +5,11 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- `deli set temp`, when no setting is named so, lists the settings with `temp` in their
+  name, each with its value and where it comes from: the way to find a setting's name.
+  `deli set` takes several settings at once (`deli set infill 20% walls 3`), `deli unset`
+  several, and `deli unset` alone lists what there is to remove.
+
 - `deli printer`, `deli filament` and `deli process` find a profile in your library by any
   words of its name in any order (`deli printer "voron 0.4"`), as they already found Orca's;
   `deli set --printer|--filament|--process` the same. `--name NAME` keeps a profile imported
