@@ -395,6 +395,28 @@ def test_choosing_a_printer_orca_has_imports_it_with_its_defaults(github, home, 
     assert project.selected(doc, "filament")["name"] == "elegoo-pla-ecc"
 
 
+def test_a_printer_can_be_imported_under_a_name_of_your_own(github, home, print_dir, capsys):
+    assert main(["printer", "centauri", "--name", "elegoo"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Imported printer 'elegoo' from Orca" in out
+    from deli import project
+
+    assert project.selected(project.read(), "printer")["name"] == "elegoo"
+    assert library.names("printer") == ["elegoo"]
+    assert main(["printer", "elegoo", "--name", "other"]) == 1
+    assert "already in your library as 'elegoo'; --name names one being imported" in capsys.readouterr().err
+
+
+def test_a_printer_is_found_by_words_in_any_order(github, home, print_dir, capsys):
+    main(["printer", "centauri"])
+    capsys.readouterr()
+
+    assert main(["printer", "carbon 0.6 elegoo"]) == 0
+
+    assert "Printer set to 'elegoo-centauri-carbon-0.6-nozzle'" in capsys.readouterr().out
+
+
 def test_a_filament_orca_has_is_converted_for_the_prints_printer(github, home, print_dir, capsys):
     assert main(["printer", "centauri", "--default"]) == 0
     library.path_of("filament", "elegoo-pla-ecc").unlink()

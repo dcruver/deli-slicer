@@ -5,6 +5,11 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- `deli printer`, `deli filament` and `deli process` find a profile in your library by any
+  words of its name in any order (`deli printer "voron 0.4"`), as they already found Orca's;
+  `deli set --printer|--filament|--process` the same. `--name NAME` keeps a profile imported
+  from Orca under a name of your own.
+
 - `deli set --global <setting> <value>` changes a setting for every print, in your config,
   where `deli set` changes it for the print in this directory alone. A print's own settings
   win over the global ones; `deli set` lists both and says which is which, `deli set

@@ -232,7 +232,7 @@ def _choose(args: argparse.Namespace) -> int:
     if args.name is None:
         return _list_kind(doc, kind)
 
-    name = _from_library_or_orca(doc, kind, args.name)
+    name = _from_library_or_orca(doc, kind, args.name, args.name_as and library.slug(args.name_as))
     path = library.find(kind, name)
     if args.default:
         return _make_default(doc, kind, name)
@@ -829,18 +829,21 @@ def _profiles_for(kind: str | None, name: str | None) -> dict[str, str]:
     return merged
 
 
+def _in_library(kind: str, wanted: str) -> str | None:
+    """The library's name for a profile given by its name, the text in it, or every typed
+    word in it ("voron 0.4"); None when the library has nothing like it, an error when it has
+    several."""
+    found = library.matching(kind, wanted)
+    if len(found) > 1:
+        raise CommandError(f"your library has {len(found)} {_PLURALS[kind]} matching '{wanted}'; which one?\n  " + "\n  ".join(found))
+    return found[0] if found else None
+
+
 def _named(kind: str, wanted: str) -> str:
-    """The library's name for the profile `--printer|--filament|--process` names: by its
-    name, or a part only one has."""
+    """The library's name for the profile `--printer|--filament|--process` names."""
+    if found := _in_library(kind, wanted):
+        return found
     names = library.names(kind)
-    slug = library.slug(wanted)
-    if slug in names:
-        return slug
-    partial = [name for name in names if slug and slug in name]
-    if len(partial) == 1:
-        return partial[0]
-    if len(partial) > 1:
-        raise CommandError(f"your library has {len(partial)} {_PLURALS[kind]} matching '{wanted}'; which one?\n  " + "\n  ".join(partial))
     mine = f" (it has: {', '.join(names)})" if names else ""
     raise CommandError(f"no {kind} '{wanted}' in your library{mine}; choose it for a print first with: deli {kind} {wanted}")
 
@@ -1292,14 +1295,14 @@ def _import(args: argparse.Namespace) -> int:
     return 0
 
 
-def _store_from_orca(presets: orca_install.Presets, kind: str, orca_name: str, orca_printer: str | None, printer: str | None) -> tuple[str, str | None]:
+def _store_from_orca(presets: orca_install.Presets, kind: str, orca_name: str, orca_printer: str | None, printer: str | None, name_as: str | None = None) -> tuple[str, str | None]:
     """Convert one of Orca's presets (a process or filament for `orca_printer`) into the
     library, unless the same is there already. One that differs from a library entry of the
     same name, converted for another printer, which prints may rely on, is stored under a
     name with this printer's (`printer`, its library name) instead. Returns the library
     name, and what was stored ("56 settings, 23 left out"), None if it was there already."""
     imported = presets.convert(kind, orca_name, orca_printer)
-    name = imported.orca_name
+    name = name_as or imported.orca_name
     existing = library.path_of(kind, name)
     if existing.exists():
         if library.read_settings(existing) == library.settings_in(kind, orca_install.ini(imported)):
@@ -1339,20 +1342,16 @@ def _for_this_printer(doc, kind: str, name: str) -> str:
     return converted
 
 
-def _from_library_or_orca(doc, kind: str, wanted: str) -> str:
+def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = None) -> str:
     """The library's name for what `deli printer|filament|process NAME` asks for: one in the
     library by its name or a part only it has; else one of Orca's presets (at the release
     `deli import` reads), imported now, a printer with its default process and filament,
     a process or filament converted for the print's printer."""
     names = library.names(kind)
-    slug = library.slug(wanted)
-    if slug in names:
-        return _for_this_printer(doc, kind, slug)
-    partial = [name for name in names if slug and slug in name]
-    if len(partial) == 1:
-        return _for_this_printer(doc, kind, partial[0])
-    if len(partial) > 1:
-        raise CommandError(f"your library has {len(partial)} {kind}s matching '{wanted}'; which one?\n  " + "\n  ".join(partial))
+    if found := _in_library(kind, wanted):
+        if name_as:
+            raise CommandError(f"'{wanted}' is already in your library as '{found}'; --name names one being imported from Orca")
+        return _for_this_printer(doc, kind, found)
 
     mine = f" (it has: {', '.join(names)})" if names else ""
     try:
@@ -1366,7 +1365,7 @@ def _from_library_or_orca(doc, kind: str, wanted: str) -> str:
     release = orca_install.ORCA_REF.lstrip("v")
     if kind == "printer":
         imported = presets.convert(kind, orca_name)
-        loaded = orca_install.into_library(imported)
+        loaded = orca_install.into_library(imported, name_as)
         left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
         print(f"Imported printer '{loaded.name}' from Orca {release}'s '{orca_name}' ({len(loaded.settings)} settings{left_out})")
         _import_defaults(presets, orca_name, loaded.name)
@@ -1375,7 +1374,7 @@ def _from_library_or_orca(doc, kind: str, wanted: str) -> str:
     # Converted for the print's printer, when Orca has it (a converted printer carries Orca's name).
     printer = project.selected(doc, "printer").get("name") or config.default_printer()
     orca_printer = _orca_printer(presets, printer) if printer else None
-    name, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer)
+    name, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer, name_as)
     if stored is not None:
         for_printer = f", for '{printer}'" if orca_printer else ""
         print(f"Imported {kind} '{name}' from Orca {release}'s '{orca_name}'{for_printer} ({stored})")
@@ -1911,6 +1910,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library, or Orca's name for one, or part of either")
         choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
+        choose.add_argument("--name", dest="name_as", metavar="NAME", help=f"the name to keep an imported {kind} under in your library, instead of Orca's")
         choose.set_defaults(run=_choose)
 
     vendor_ = commands.add_parser(

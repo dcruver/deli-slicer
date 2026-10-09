@@ -92,6 +92,18 @@ def names(kind: str) -> list[str]:
     return sorted(path.stem for path in (library_dir() / _FOLDERS[kind]).glob("*.ini"))
 
 
+def matching(kind: str, wanted: str) -> list[str]:
+    """The library's names of a kind that are what someone typed: the name itself, else those
+    with the typed text in them, or every typed word in them in any order ("voron 0.4" is
+    "voron-2.4-350-0.4-nozzle"). As `orca_install.matches` reads Orca's names."""
+    found = names(kind)
+    typed = slug(wanted)
+    if typed in found:
+        return [typed]
+    words = [word for word in (slug(word) for word in wanted.split()) if word]
+    return [name for name in found if (typed and typed in name) or (words and all(word in name for word in words))]
+
+
 def find(kind: str, name: str) -> Path:
     path = library_dir() / _FOLDERS[kind] / f"{name}.ini"
     if not path.exists():

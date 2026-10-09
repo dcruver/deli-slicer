@@ -333,7 +333,7 @@ In a new directory:
 
 ```
 deli add 3DBenchy.stl                 # STL, OBJ, 3MF or AMF; the print starts with your default printer, filament and process
-deli printer "bambu lab p1s 0.4"      # another printer for this print; its filament and process come with it
+deli printer "bambu p1s 0.4"          # another printer for this print, by any words of its name; its filament and process come with it
 deli filament "generic petg"          # another filament than its default, converted for this printer
 deli set infill 20%                   # or any PrusaSlicer setting by name
 deli supports organic                 # automatic supports, for a model that needs them: on, off, grid, snug, organic
@@ -555,7 +555,7 @@ check the file arrived and start it from the printer's own screen.
 | | |
 |---|---|
 | `deli setup` | tab completion, your printer and its address, asked for once |
-| `deli printer\|filament\|process [name]` | choose one for this print, from your library or else OrcaSlicer's (imported as it is chosen; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
+| `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |

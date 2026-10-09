@@ -331,6 +331,10 @@ def test_printer_is_named_by_a_part_only_it_has(project, tmp_path, mk3, capsys):
     assert main(["set", "--printer", "mk4", "walls", "4"]) == 1
     assert "no printer 'mk4' in your library" in capsys.readouterr().err
     assert on_printer(tmp_path) == {"perimeters": 3}
+    assert main(["set", "--printer", "prusa mk3", "walls", "4"]) == 0  # every word, in any order
+    assert on_printer(tmp_path) == {"perimeters": 4}
+    assert main(["set", "--printer", "MK3 Spare", "walls", "5"]) == 0
+    assert on_printer(tmp_path, "mk3-spare") == {"perimeters": 5}
 
 
 def test_the_printers_setting_lies_over_the_global_one_and_under_the_prints_own(project, tmp_path, mk3, capsys):
