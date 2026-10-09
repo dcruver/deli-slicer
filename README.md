@@ -363,7 +363,12 @@ deli pause 40                         # pause once layer 40 is done: change the 
 deli view                             # the Benchy on the bed in your browser, live; the shell stays free
 deli slice                            # how long it takes and how much filament; the view then shows it layer by layer
 deli send                             # uploads it, slicing first if needed; add --print to start printing
+deli status                           # the print at a glance: printer, filament, process, parts, where it sends, settings, G-code
 ```
+
+`deli printer`, `deli filament`, `deli process` and `deli nozzle` show the same block
+after a change, with a note under each row that changed: what it was, and why the
+filament or process followed the printer.
 
 `deli set` with nothing after it lists the settings this print changes, each with what
 its profile had, so the few things you changed are never lost among the hundreds you
@@ -577,6 +582,7 @@ check the file arrived and start it from the printer's own screen.
 |---|---|
 | `deli setup` | tab completion, your printer and its address, asked for once |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
+| `deli status` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code |
 | `deli nozzle [size]` | the nozzles of this print's printer, or put one in: its profile comes from Orca if need be, and the print moves to it |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |

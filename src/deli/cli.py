@@ -76,26 +76,27 @@ def _load(args: argparse.Namespace) -> int:
     return 0
 
 
-def _config_fills(doc, starting: bool) -> list[str]:
+def _config_fills(doc, starting: bool) -> list[tuple[str, str | None, str]]:
     """Choose for the print what it has not chosen and the config has a default for: your
     default printer when the print is only now being started, and the filament and process
-    of the print's printer, for the nozzle it is on. Returns a line saying so for each."""
-    lines = []
+    of the print's printer, for the nozzle it is on. Returns, for each, the kind, the name
+    chosen (None when it could not be) and why, as a note."""
+    lines: list[tuple[str, str | None, str]] = []  # (kind, the name chosen or None, why, or what went wrong)
 
     def choose(kind: str, name: str, missing: str, why: str, machine: str | None = None) -> None:
         try:
             path = library.find(kind, name)
         except library.LibraryError:
-            lines.append(f"your config names the {kind} '{name}' {missing}, but it is not in your library")
+            lines.append((kind, None, f"your config names the {kind} '{name}' {missing}, but it is not in your library"))
             return
         project.select(doc, kind, name, library.fingerprint(path), machine)
-        lines.append(f"{kind.capitalize()} set to '{name}', {why}")
+        lines.append((kind, name, why))
 
     if starting and not project.selected(doc, "printer").get("name") and (default := config.default_printer()):
         if profile := config.machine(default).profile:
-            choose("printer", profile, "as your default", f"your default" if profile == default else f"your default printer '{default}'", default)
+            choose("printer", profile, "as your default", "your default" if profile == default else f"your default printer '{default}'", default)
         else:
-            lines.append(f"your config's default printer '{default}' does not say which nozzle is in it; say with: deli nozzle <size>")
+            lines.append(("printer", None, f"your config's default printer '{default}' does not say which nozzle is in it; say with: deli nozzle <size>"))
     if (profile := project.selected(doc, "printer").get("name")) and (machine := project.machine(doc)):
         nozzle = config.machine(machine).for_profile(profile)
         for other in ("filament", "process"):
@@ -105,13 +106,13 @@ def _config_fills(doc, starting: bool) -> list[str]:
     return lines
 
 
-def _follow_printer(doc, machine: str, profile: str) -> list[str]:
+def _follow_printer(doc, machine: str, profile: str) -> dict[str, str]:
     """When a print changes printer, or nozzle, its filament and process change with it, to
     the config's defaults for that printer and nozzle: a process is made for a nozzle and a
     filament converted for a bed, so the old ones would not fit. What was chosen before is
     named, so that a deliberate choice can be made again. Without defaults the old ones
-    stay, and the lines say so."""
-    lines = []
+    stay, and the notes say so. Returns a note per kind changed or kept, for the block."""
+    notes = {}
     nozzle = config.machine(machine).for_profile(profile)
     for kind in ("filament", "process"):
         before = project.selected(doc, kind).get("name")
@@ -120,18 +121,72 @@ def _follow_printer(doc, machine: str, profile: str) -> list[str]:
             continue
         if default and default in library.names(kind):
             project.select(doc, kind, default, library.fingerprint(library.find(kind, default)))
-            lines.append(f"{kind.capitalize()} set to '{default}', the default for this printer (was '{before}'; choose it again with: deli {kind} {before})")
+            notes[kind] = f"the default for this printer; was '{before}' (choose it again with: deli {kind} {before})"
         else:
-            lines.append(f"{kind.capitalize()} '{before}' kept from the previous printer, which may not suit this one; see those for it with: deli {kind}")
-    return lines
+            notes[kind] = f"kept from the previous printer, which may not suit this one; see those for it with: deli {kind}"
+    return notes
 
 
 def _start(doc) -> None:
     """Called before a print is written by a command that may be the first in its directory:
     a print that is only now being started takes the config's defaults."""
     if not project.FILE.exists():
-        for line in _config_fills(doc, starting=True):
-            print(line)
+        for kind, name, why in _config_fills(doc, starting=True):
+            print(f"{kind.capitalize()} set to '{name}', {why}" if name else why)
+
+
+def _block(doc, notes: dict[str, str] | None = None) -> None:
+    """What this print is, the same shape after every choice and from `deli status`: its
+    printer, filament and process, each with a summary and, under it, a note on what just
+    happened to it; its parts; where `deli send` would send; how many settings are changed
+    and where; and whether its G-code is current."""
+    notes = notes or {}
+    rows: list[tuple[str, str, str | None]] = []
+    machine = project.machine(doc)
+    for kind in library.KINDS:
+        chosen = project.selected(doc, kind).get("name")
+        if not chosen:
+            rows.append((kind.capitalize(), f"none; choose one with: deli {kind} <name>", notes.get(kind)))
+            continue
+        shown = f"{machine} ({chosen})" if kind == "printer" and machine != chosen else chosen
+        path = library.path_of(kind, chosen)
+        summary = _SUMMARIES[kind](library.read_settings(path)) if path.exists() else "not in your library"
+        rows.append((kind.capitalize(), f"{shown}  {summary}" if summary else shown, notes.get(kind)))
+    parts = project.parts(doc)
+    rows.append(("Parts", ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts) if parts else "none yet; add one with: deli add <file>", None))
+    if machine:
+        printer = project.chosen_profile(doc, "printer")
+        try:
+            host = send.host_for(machine, printer[1].get("host_type", "") if printer else "")
+            rows.append(("Sends to", f"the {host.kind} host at {host.url}", None))
+        except send.SendError:
+            rows.append(("Sends to", f"nowhere yet; set with: deli config printers.{machine}.host <moonraker://...|elegoo://...|octoprint://...>", None))
+    counts = [(len(project.settings(doc)), "by this print")]
+    counts += [(len(found.settings), f"for this {found.kind}" if found.kind else "for every print") for found in reversed(settings.config_layers(doc))]
+    said = ", ".join(f"{n} {where}" for n, where in counts if n)
+    rows.append(("Settings", f"{said}  (deli set lists them)" if said else "none changed", None))
+    if parts:
+        if project.fresh_gcode(doc):
+            state = "current"
+        elif project.sliced(doc):
+            state = "out of date: the print has changed since it was sliced"
+        else:
+            state = "not sliced yet"
+        rows.append(("G-code", state, None))
+    for label, text, note in rows:
+        print(f"{label:<9} {text}")
+        if note:
+            print(f"{'':9} {note}")
+
+
+def _status(args: argparse.Namespace) -> int:
+    """`deli status`: the print in this directory, as the block shows it."""
+    if not project.FILE.exists():
+        default = config.default_printer()
+        print("No print in this directory yet; start one with: deli add <file>" + (f". It would start on '{default}'." if default else ""))
+        return 0
+    _block(project.read())
+    return 0
 
 
 def _make_default(doc, kind: str, name: str) -> int:
@@ -277,17 +332,17 @@ def _choose(args: argparse.Namespace) -> int:
     previous = project.selected(doc, kind).get("name")
     previous_machine = project.machine(doc)
     project.select(doc, kind, name, library.fingerprint(path), machine)
-    print(f"{kind.capitalize()} set to '{machine}'" + (f" ({name})" if machine != name else "") if kind == "printer" else f"{kind.capitalize()} set to '{name}'")
-    if summary := _SUMMARIES[kind](library.read_settings(path)):
-        print(f"  {summary}")
+    notes: dict[str, str] = {}
+    if previous and (previous != name or (kind == "printer" and previous_machine != machine)):
+        notes[kind] = f"was '{previous}'" if kind != "printer" or previous_machine in (None, previous) else f"was '{previous_machine}' ({previous})"
     if kind == "printer" and previous and (previous != name or previous_machine != machine):
-        for line in _follow_printer(doc, machine, name):
-            print(f"  {line}")
+        notes |= _follow_printer(doc, machine, name)
     if kind == "printer" or starting:
         # The config's defaults fill in what the print has not chosen yet.
-        for line in _config_fills(doc, starting):
-            print(f"  {line}")
+        for other, chosen, why in _config_fills(doc, starting):
+            notes[other] = why if chosen else why
     project.write(doc)
+    _block(doc, notes)
     return 0
 
 
@@ -857,12 +912,12 @@ def _nozzle(args: argparse.Namespace) -> int:
         print(f"  (the printer is named after its old profile; give it a name of its own with: deli printer {new} --name <name>)")
     if project.selected(doc, "printer") and profile != new:
         project.select(doc, "printer", new, library.fingerprint(library.find("printer", new)), machine)
-        print(f"This print is on it: printer '{machine}' ({new})")
-        for line in _follow_printer(doc, machine, new):
-            print(f"  {line}")
-        for line in _config_fills(doc, False):
-            print(f"  {line}")
+        notes = {"printer": f"was '{profile}'"} | _follow_printer(doc, machine, new)
+        for other, chosen, why in _config_fills(doc, False):
+            notes[other] = why
         project.write(doc)
+        print("This print is on it:")
+        _block(doc, notes)
     return 0
 
 
@@ -2208,6 +2263,15 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("part", help="the part's file, or its name without the extension")
     remove.add_argument("--count", type=int, metavar="N", help="remove only N copies")
     remove.set_defaults(run=_remove)
+
+    status = commands.add_parser(
+        "status",
+        help="what this print is: printer, filament, process, parts, where it sends, settings, G-code",
+        description="The print in this directory at a glance: its printer, filament and process, its parts, where "
+        "`deli send` would send it, how many settings it changes and where, and whether its G-code is current. "
+        "`deli printer`, `deli filament`, `deli process` and `deli nozzle` show the same after a change.",
+    )
+    status.set_defaults(run=_status)
 
     nozzle = commands.add_parser(
         "nozzle",

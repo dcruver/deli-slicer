@@ -403,7 +403,7 @@ def test_a_printer_can_be_named_as_your_own(github, home, print_dir, capsys):
 
     out = capsys.readouterr().out
     assert "Your printer 'elegoo' is 'elegoo-centauri-carbon-0.6-nozzle', with a 0.6 nozzle" in out
-    assert "Printer set to 'elegoo' (elegoo-centauri-carbon-0.6-nozzle)" in out
+    assert "Printer   elegoo (elegoo-centauri-carbon-0.6-nozzle)" in out
     assert project.selected(project.read(), "printer")["name"] == "elegoo-centauri-carbon-0.6-nozzle"
     assert project.machine(project.read()) == "elegoo"
     assert library.names("printer") == ["elegoo-centauri-carbon-0.6-nozzle"]
@@ -413,7 +413,7 @@ def test_a_printer_can_be_named_as_your_own(github, home, print_dir, capsys):
     assert config.default_printer() == "elegoo"
 
     assert main(["printer", "elegoo"]) == 0  # by its name
-    assert "Printer set to 'elegoo' (elegoo-centauri-carbon-0.6-nozzle)" in capsys.readouterr().out
+    assert "Printer   elegoo (elegoo-centauri-carbon-0.6-nozzle)" in capsys.readouterr().out
     assert main(["printer", "centauri", "--name", "other"]) == 0  # a second printer of the same kind
     assert config.machines() == ["elegoo", "other"]
     capsys.readouterr()
@@ -427,7 +427,7 @@ def test_a_printer_is_found_by_words_in_any_order(github, home, print_dir, capsy
 
     assert main(["printer", "carbon 0.6 elegoo"]) == 0
 
-    assert "Printer set to 'elegoo-centauri-carbon-0.6-nozzle'" in capsys.readouterr().out
+    assert "Printer   elegoo-centauri-carbon-0.6-nozzle" in capsys.readouterr().out
 
 
 def test_a_filament_orca_has_is_converted_for_the_prints_printer(github, home, print_dir, capsys):

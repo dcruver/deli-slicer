@@ -32,7 +32,7 @@ def test_choosing_a_filament_records_its_name_and_hash(project, capsys):
     assert filament["name"] == "generic-abs"
     assert re.fullmatch(r"[0-9a-f]{64}", filament["sha256"])
     out = capsys.readouterr().out
-    assert "Filament set to 'generic-abs'" in out
+    assert "Filament  generic-abs" in out
     assert "ABS, nozzle 255 °C, bed 110 °C" in out
 
 
@@ -43,7 +43,7 @@ def test_choosing_a_process_records_its_name_and_hash(project, capsys):
     assert process["name"] == "0.20mm-quality-mk3"
     assert re.fullmatch(r"[0-9a-f]{64}", process["sha256"])
     out = capsys.readouterr().out
-    assert "Process set to '0.20mm-quality-mk3'" in out
+    assert "Process   0.20mm-quality-mk3" in out
     assert "layers 0.2 mm, infill 15% gyroid, perimeters 2" in out
 
 

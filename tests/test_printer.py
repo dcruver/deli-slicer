@@ -29,7 +29,7 @@ def test_choosing_a_printer_records_its_name_and_hash(project, capsys):
     assert printer["name"] == MK3
     assert re.fullmatch(r"[0-9a-f]{64}", printer["sha256"])
     out = capsys.readouterr().out
-    assert f"Printer set to '{MK3}'" in out
+    assert f"Printer   {MK3}" in out
     assert "bed 250 x 210 mm" in out
 
 

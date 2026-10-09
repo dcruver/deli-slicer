@@ -113,8 +113,8 @@ def test_choosing_a_printer_applies_its_defaults(home, capsys):
     assert main(["printer", MK3]) == 0
 
     out = capsys.readouterr().out
-    assert "Filament set to 'spare-pla', from your config for this printer" in out
-    assert f"Process set to '{QUALITY}', from your config for this printer" in out
+    assert "Filament  spare-pla" in out and "from your config for this printer" in out
+    assert f"Process   {QUALITY}" in out
     data = tomllib.loads(Path("deli.toml").read_text())
     assert data["filament"]["name"] == "spare-pla" and data["process"]["name"] == QUALITY
 
@@ -297,7 +297,8 @@ def test_choosing_a_filament_first_starts_the_print_with_the_default_printer(hom
 
     main(["filament", ABS])
 
-    assert f"  Printer set to '{MK3}', your default" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"Printer   {MK3}" in out and "\n          your default\n" in out
     assert chosen() == {"printer": MK3, "filament": ABS}
 
 
@@ -343,7 +344,7 @@ def test_changing_printer_brings_its_filament_and_process(home, capsys):
     assert project.selected(doc, "filament")["name"] == "spare-pla"
     assert project.selected(doc, "process")["name"] == "other-quality"
     out = capsys.readouterr().out
-    assert f"Filament set to 'spare-pla', the default for this printer (was '{ABS}'; choose it again with: deli filament {ABS})" in out
+    assert f"Filament  spare-pla" in out and f"the default for this printer; was '{ABS}' (choose it again with: deli filament {ABS})" in out
 
 
 def test_changing_to_a_printer_without_defaults_keeps_them_and_says_so(home, capsys):
@@ -357,7 +358,8 @@ def test_changing_to_a_printer_without_defaults_keeps_them_and_says_so(home, cap
     from deli import project
 
     assert project.selected(project.read(), "filament")["name"] == ABS
-    assert f"Filament '{ABS}' kept from the previous printer" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"Filament  {ABS}" in out and "kept from the previous printer, which may not suit this one" in out
 
 
 def test_global_settings_are_listed_by_config_but_changed_by_set(home, capsys):
@@ -442,7 +444,7 @@ def test_a_printer_named_with_name_keeps_its_nozzles_defaults_and_address(home, 
     nozzles, the defaults are that nozzle's, the address and settings are the printer's."""
     library.load("printer", str(EXPORT), name="mk3-0.6")
     assert main(["printer", MK3, "--name", "prusa"]) == 0
-    assert capsys.readouterr().out.startswith(f"Your printer 'prusa' is '{MK3}', with a 0.4 nozzle\nPrinter set to 'prusa' ({MK3})\n")
+    assert capsys.readouterr().out.startswith(f"Your printer 'prusa' is '{MK3}', with a 0.4 nozzle\nPrinter   prusa ({MK3})  ")
     data = tomllib.loads((home / "config.toml").read_text())
     assert data["printers"]["prusa"] == {"nozzle": "0.4", "nozzles": {"0.4": {"profile": MK3}}}
     assert tomllib.loads(Path("deli.toml").read_text())["printer"]["machine"] == "prusa"
@@ -484,8 +486,9 @@ def test_nozzle_lists_and_switches_a_printers_nozzles(home, capsys):
     assert main(["nozzle", "0.6"]) == 0
 
     out = capsys.readouterr().out
-    assert out.startswith("'prusa' now has its 0.6 nozzle in: new prints on it start with 'mk3-0.6'\nThis print is on it: printer 'prusa' (mk3-0.6)\n")
-    assert "Process set to 'quality-0.6', the default for this printer (was '0.20mm-quality-mk3'" in out
+    assert out.startswith("'prusa' now has its 0.6 nozzle in: new prints on it start with 'mk3-0.6'\nThis print is on it:\nPrinter   prusa (mk3-0.6)  ")
+    assert "\n          was 'original-prusa-i3-mk3'\n" in out
+    assert "Process   quality-0.6" in out and "the default for this printer; was '0.20mm-quality-mk3'" in out
     assert config.machine("prusa").nozzle == "0.6"
     chosen = tomllib.loads(Path("deli.toml").read_text())
     assert chosen["printer"]["name"] == "mk3-0.6" and chosen["printer"]["machine"] == "prusa"

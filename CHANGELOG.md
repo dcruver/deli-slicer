@@ -5,6 +5,12 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- `deli status` shows the print at a glance: printer, filament, process, parts, where
+  `deli send` would send, how many settings are changed and where, and whether the G-code
+  is current. **Changed:** `deli printer`, `deli filament`, `deli process` and `deli nozzle`
+  show that same block after a change, with a note under each row that changed, instead
+  of a line each in their own words.
+
 - A printer of yours can have a name: `deli printer "voron 2.4 350 0.8" --name voron`. Its
   address, its settings (`deli set --printer voron`) and `deli send` go by that name, and
   its nozzles are kept under it, each with its profile and the filament and process a new
