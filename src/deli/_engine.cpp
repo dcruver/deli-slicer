@@ -938,6 +938,16 @@ std::string setting_default(const std::string &key)
     return full.opt_serialize(key);
 }
 
+// Whether a setting holds one string per extruder, which PrusaSlicer writes as a list with
+// ; between the extruders' values, each quoted when it holds ; or a line break.
+bool setting_is_strings(const std::string &key)
+{
+    const ConfigOptionDef *def = print_config_def.get(key);
+    if (def == nullptr)
+        throw std::invalid_argument("no setting named " + key);
+    return def->type == coStrings;
+}
+
 // Every setting PrusaSlicer keeps in a printer, a process and a filament preset.
 std::map<std::string, std::vector<std::string>> setting_names()
 {
@@ -1017,6 +1027,9 @@ NB_MODULE(_engine, m)
           "this version of PrusaSlicer does not know. Bad values raise ValueError.");
 
     m.def("setting_default", &setting_default, "key"_a, "PrusaSlicer's default for a setting, as it writes it.");
+
+    m.def("setting_is_strings", &setting_is_strings, "key"_a,
+          "Whether a setting is one string per extruder, written as a ;-separated list of quoted strings.");
 
     m.def("setting_names", &setting_names,
           "The names of the settings PrusaSlicer keeps in a 'printer', a 'process' and a 'filament'.");

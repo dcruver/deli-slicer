@@ -5,6 +5,28 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- `deli set --global <setting> <value>` changes a setting for every print, in your config,
+  where `deli set` changes it for the print in this directory alone. A print's own settings
+  win over the global ones; `deli set` lists both and says which is which, `deli set
+  --global` lists the global ones, and `deli unset --global` removes one. `deli config`
+  shows them as `settings.<name>`. G-code sliced before a global setting changed counts as
+  out of date, so `deli send` slices again first.
+- `deli set --printer|--filament|--process <name> <setting> <value>` changes a setting for
+  every print with that profile, kept in your config beside Orca's profile
+  (`printers|filaments|processes.<name>.settings`), so a modified printer's differences, a
+  spool's tuning or a process's usual adjustment survive `deli import`: Orca's base plus
+  your changes is the custom profile. The layers each win over the one before: global,
+  printer, filament, process, then the print's own; `deli unset` with the same option
+  removes one, and `deli set` with only the option lists that layer.
+- `deli set <setting> @FILE` reads a value from a file: the way to give start, end, layer or
+  filament G-code. deli keeps the text, written as lines in `deli.toml` or the config (a
+  TOML multi-line string), and `deli set <setting>` shows such a value as lines.
+- A filament's start or end G-code given to `deli set` is one extruder's, as typed, `;`
+  comments included; PrusaSlicer reads an unquoted `;` as the next extruder's value, so deli
+  quotes it for the engine.
+- fish completion works after an option (`deli send --print <Tab>`, `deli unset --global
+  <Tab>`); it used to answer nothing there.
+
 ## 0.10.0 (2026-10-07)
 
 - `deli view` replaces a viewer still running from before deli was installed afresh, instead

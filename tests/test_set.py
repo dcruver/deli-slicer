@@ -187,3 +187,450 @@ def test_settings_that_is_not_a_table_is_an_error(project, capsys):
     assert main(["set", "infill", "20%"]) == 1
 
     assert "'settings' should be a table" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- for every print
+
+
+def everywhere(tmp_path) -> dict:
+    """The config's `[settings]` table."""
+    return tomllib.loads((tmp_path / "config" / "deli" / "config.toml").read_text()).get("settings", {})
+
+
+def test_global_setting_goes_in_the_config_and_starts_no_print(project, tmp_path, capsys):
+    assert main(["set", "--global", "infill", "20%"]) == 0
+
+    assert everywhere(tmp_path) == {"fill_density": "20%"}
+    assert not project.exists()
+    assert capsys.readouterr().out == "fill_density = 20% for every print\n"
+
+
+def test_global_numbers_are_written_as_numbers(project, tmp_path):
+    main(["set", "--global", "walls", "3"])
+
+    assert everywhere(tmp_path) == {"perimeters": 3}
+
+
+def test_global_setting_lies_under_the_print_and_the_prints_own_wins(project, tmp_path, capsys):
+    main(["process", PROCESS])
+    main(["set", "--global", "infill", "20%"])
+    capsys.readouterr()
+
+    assert main(["set", "infill"]) == 0
+    assert capsys.readouterr().out == "fill_density is not changed by this print; your config for every print has 20%\n"
+
+    assert main(["set", "infill", "30%"]) == 0
+    assert capsys.readouterr().out == f"fill_density = 30%  (your config has 20% for every print; the process '{PROCESS}' has 15%)\n"
+    assert changed(project) == {"fill_density": "30%"}
+    assert everywhere(tmp_path) == {"fill_density": "20%"}
+
+
+def test_listing_shows_global_settings_the_print_does_not_change(project, tmp_path, capsys):
+    main(["process", PROCESS])
+    main(["set", "--global", "infill", "20%"])
+    main(["set", "--global", "walls", "3"])
+    main(["set", "walls", "4"])
+    capsys.readouterr()
+
+    assert main(["set"]) == 0
+
+    assert capsys.readouterr().out == (
+        f"perimeters = 4  (your config has 3 for every print; the process '{PROCESS}' has 2)\n"
+        f"fill_density = 20%  (for every print, from your config; the process '{PROCESS}' has 15%)\n"
+    )
+
+
+def test_global_listing(project, tmp_path, capsys):
+    assert main(["set", "--global"]) == 0
+    assert capsys.readouterr().out == "No setting is changed for every print. Change one with: deli set --global <setting> <value>\n"
+
+    main(["process", PROCESS])
+    main(["set", "--global", "infill", "20%"])
+    main(["set", "infill", "30%"])
+    capsys.readouterr()
+
+    assert main(["set", "--global"]) == 0
+    assert capsys.readouterr().out == f"fill_density = 20%  (over it: this print has 30%; under it: the process '{PROCESS}' has 15%)\n"
+    assert main(["set", "--global", "infill"]) == 0
+    assert capsys.readouterr().out == "fill_density = 20% for every print\n"
+    assert main(["set", "--global", "walls"]) == 0
+    assert capsys.readouterr().out == "perimeters is not changed for every print\n"
+
+
+def test_global_value_is_checked_like_any_other(project, tmp_path, capsys):
+    assert main(["set", "--global", "infill", "lots"]) == 1
+
+    assert "cannot set fill_density to 'lots'" in capsys.readouterr().err
+    assert not (tmp_path / "config" / "deli" / "config.toml").exists()
+
+
+def test_unset_global_removes_it_from_the_config(project, tmp_path, capsys):
+    main(["process", PROCESS])
+    main(["set", "--global", "infill", "20%"])
+    main(["set", "--global", "walls", "3"])
+    capsys.readouterr()
+
+    assert main(["unset", "--global", "infill"]) == 0
+    assert capsys.readouterr().out == f"fill_density is no longer changed for every print; the process '{PROCESS}' has 15%\n"
+    assert everywhere(tmp_path) == {"perimeters": 3}
+
+    assert main(["unset", "--global", "walls"]) == 0
+    assert "settings" not in tomllib.loads((tmp_path / "config" / "deli" / "config.toml").read_text())
+    assert main(["unset", "--global", "walls"]) == 0
+    assert capsys.readouterr().out.endswith("perimeters is not changed for every print\n")
+    assert "settings" not in tomllib.loads(project.read_text())  # the print was never touched
+
+
+def test_unset_global_leaves_the_prints_own_setting(project, tmp_path, capsys):
+    main(["set", "--global", "infill", "20%"])
+    main(["set", "infill", "30%"])
+    capsys.readouterr()
+
+    assert main(["unset", "--global", "infill"]) == 0
+
+    assert capsys.readouterr().out == "fill_density is no longer changed for every print; this print has 30%\n"
+    assert changed(project) == {"fill_density": "30%"}
+
+
+# ---------------------------------------------------------------- for every print on a printer
+
+# `EXPORT` also holds the Original Prusa i3 MK3, whose max_print_height is 210.
+MK3 = "original-prusa-i3-mk3"
+
+
+def on_printer(tmp_path, name: str = MK3) -> dict:
+    """The config's `printers.<name>.settings` table; empty when there is no config yet."""
+    file = tmp_path / "config" / "deli" / "config.toml"
+    if not file.exists():
+        return {}
+    return tomllib.loads(file.read_text()).get("printers", {}).get(name, {}).get("settings", {})
+
+
+@pytest.fixture
+def mk3():
+    library.load("printer", str(EXPORT))
+    return MK3
+
+
+def test_printer_setting_goes_in_the_config_under_the_printer_and_starts_no_print(project, tmp_path, mk3, capsys):
+    assert main(["set", "--printer", mk3, "max_print_height", "200"]) == 0
+
+    assert on_printer(tmp_path) == {"max_print_height": 200}
+    assert not project.exists()
+    assert capsys.readouterr().out == f"max_print_height = 200 for every print on '{mk3}'  (the printer '{mk3}' has 210)\n"
+
+
+def test_printer_is_named_by_a_part_only_it_has(project, tmp_path, mk3, capsys):
+    assert main(["set", "--printer", "mk3", "walls", "3"]) == 0
+
+    assert on_printer(tmp_path) == {"perimeters": 3}
+
+    library.load("printer", str(EXPORT), name="mk3-spare")
+    assert main(["set", "--printer", "mk3", "walls", "4"]) == 1
+    assert "2 printers matching 'mk3'" in capsys.readouterr().err
+    assert main(["set", "--printer", "mk4", "walls", "4"]) == 1
+    assert "no printer 'mk4' in your library" in capsys.readouterr().err
+    assert on_printer(tmp_path) == {"perimeters": 3}
+
+
+def test_the_printers_setting_lies_over_the_global_one_and_under_the_prints_own(project, tmp_path, mk3, capsys):
+    main(["printer", mk3])
+    main(["process", PROCESS])
+    main(["set", "--global", "walls", "3"])
+    main(["set", "--printer", mk3, "walls", "4"])
+    capsys.readouterr()
+
+    assert main(["set", "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters is not changed by this print; your config for the printer '{mk3}' has 4\n"
+
+    assert main(["set", "walls", "5"]) == 0
+    assert capsys.readouterr().out == (
+        f"perimeters = 5  (your config has 4 for every print on '{mk3}'; your config has 3 for every print; the process '{PROCESS}' has 2)\n"
+    )
+    assert changed(project) == {"perimeters": 5}
+    assert on_printer(tmp_path) == {"perimeters": 4}
+    assert everywhere(tmp_path) == {"perimeters": 3}
+
+
+def test_a_print_on_another_printer_does_not_see_it(project, tmp_path, mk3, capsys):
+    library.load("printer", str(EXPORT), name="other")
+    main(["printer", "other"])
+    main(["set", "--printer", mk3, "walls", "4"])
+    capsys.readouterr()
+
+    assert main(["set"]) == 0
+    assert capsys.readouterr().out == "This print changes no settings. Change one with: deli set <setting> <value>\n"
+    assert main(["set", "walls"]) == 0
+    assert capsys.readouterr().out == "perimeters is not changed by this print; PrusaSlicer's default has 3\n"
+
+
+def test_listing_shows_the_printers_settings_then_the_global_ones(project, tmp_path, mk3, capsys):
+    main(["printer", mk3])
+    main(["process", PROCESS])
+    main(["set", "--global", "walls", "3"])
+    main(["set", "--global", "infill", "20%"])
+    main(["set", "--printer", mk3, "walls", "4"])
+    main(["set", "--printer", mk3, "max_print_height", "200"])
+    main(["set", "infill", "30%"])
+    capsys.readouterr()
+
+    assert main(["set"]) == 0
+
+    assert capsys.readouterr().out == (
+        f"fill_density = 30%  (your config has 20% for every print; the process '{PROCESS}' has 15%)\n"
+        f"perimeters = 4  (for every print on '{mk3}', from your config; your config has 3 for every print; the process '{PROCESS}' has 2)\n"
+        f"max_print_height = 200  (for every print on '{mk3}', from your config; the printer '{mk3}' has 210)\n"
+    )
+
+
+def test_printer_listing(project, tmp_path, mk3, capsys):
+    assert main(["set", "--printer", mk3]) == 0
+    assert capsys.readouterr().out == f"No setting is changed for every print on '{mk3}'. Change one with: deli set --printer {mk3} <setting> <value>\n"
+
+    main(["printer", mk3])
+    main(["set", "--global", "walls", "3"])
+    main(["set", "--printer", mk3, "walls", "4"])
+    main(["set", "walls", "5"])
+    capsys.readouterr()
+
+    assert main(["set", "--printer", mk3]) == 0
+    assert capsys.readouterr().out == "perimeters = 4  (over it: this print has 5; under it: your config has 3 for every print)\n"
+    assert main(["set", "--printer", mk3, "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters = 4 for every print on '{mk3}'\n"
+    assert main(["set", "--printer", mk3, "infill"]) == 0
+    assert capsys.readouterr().out == f"fill_density is not changed for every print on '{mk3}'\n"
+    assert main(["set", "--global"]) == 0
+    assert capsys.readouterr().out == f"perimeters = 3  (over it: this print has 5; your config has 4 for every print on '{mk3}')\n"
+
+
+def test_global_setting_notes_a_printers_that_wins(project, tmp_path, mk3, capsys):
+    main(["printer", mk3])
+    main(["set", "--printer", mk3, "walls", "4"])
+    capsys.readouterr()
+
+    assert main(["set", "--global", "walls", "3"]) == 0
+
+    assert capsys.readouterr().out == f"perimeters = 3 for every print  (over it: your config has 4 for every print on '{mk3}')\n"
+
+
+def test_printer_value_is_checked_against_that_printer(project, tmp_path, mk3, capsys):
+    assert main(["set", "--printer", mk3, "max_print_height", "tall"]) == 1
+
+    assert "cannot set max_print_height to 'tall'" in capsys.readouterr().err
+    assert on_printer(tmp_path) == {}
+
+
+def test_unset_printer_setting(project, tmp_path, mk3, capsys):
+    main(["printer", mk3])
+    main(["set", "--printer", mk3, "walls", "4"])
+    main(["set", "--printer", mk3, "max_print_height", "200"])
+    main(["set", "walls", "5"])
+    capsys.readouterr()
+
+    assert main(["unset", "--printer", mk3, "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters is no longer changed for every print on '{mk3}'; this print has 5\n"
+    assert on_printer(tmp_path) == {"max_print_height": 200}
+
+    assert main(["unset", "--printer", mk3, "max_print_height"]) == 0
+    assert capsys.readouterr().out == f"max_print_height is no longer changed for every print on '{mk3}'; the printer '{mk3}' has 210\n"
+    assert "settings" not in tomllib.loads((tmp_path / "config" / "deli" / "config.toml").read_text()).get("printers", {}).get(mk3, {})
+    assert main(["unset", "--printer", mk3, "max_print_height"]) == 0
+    assert capsys.readouterr().out == f"max_print_height is not changed for every print on '{mk3}'\n"
+    assert changed(project) == {"perimeters": 5}
+
+
+def test_global_and_printer_together_are_refused(project, mk3):
+    with pytest.raises(SystemExit):
+        main(["set", "--global", "--printer", mk3, "walls", "3"])
+
+
+# ---------------------------------------------------------------- for every print with a filament or process
+
+FILAMENT = "generic-abs"  # in EXPORT too; its temperature is 255
+
+
+def layer_of(tmp_path, table: str, name: str) -> dict:
+    file = tmp_path / "config" / "deli" / "config.toml"
+    if not file.exists():
+        return {}
+    return tomllib.loads(file.read_text()).get(table, {}).get(name, {}).get("settings", {})
+
+
+@pytest.fixture
+def trio(mk3):
+    library.load("filament", str(EXPORT))
+    main(["printer", mk3])
+    main(["filament", FILAMENT])
+    main(["process", PROCESS])
+    return mk3
+
+
+def test_filament_and_process_settings_go_in_their_own_tables(project, tmp_path, mk3, capsys):
+    library.load("filament", str(EXPORT))
+    assert main(["set", "--filament", "abs", "temperature", "250"]) == 0
+    assert main(["set", "--process", "quality", "walls", "3"]) == 0
+
+    assert layer_of(tmp_path, "filaments", FILAMENT) == {"temperature": 250}
+    assert layer_of(tmp_path, "processes", PROCESS) == {"perimeters": 3}
+    assert not project.exists()
+    assert capsys.readouterr().out == (
+        f"temperature = 250 for every print with the filament '{FILAMENT}'  (the filament '{FILAMENT}' has 255)\n"
+        f"perimeters = 3 for every print with the process '{PROCESS}'  (the process '{PROCESS}' has 2)\n"
+    )
+
+
+def test_the_layers_lie_global_printer_filament_process_print(project, tmp_path, trio, capsys):
+    main(["set", "--global", "walls", "2"])
+    main(["set", "--printer", trio, "walls", "3"])
+    main(["set", "--filament", FILAMENT, "walls", "4"])
+    capsys.readouterr()
+
+    assert main(["set", "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters is not changed by this print; your config for the filament '{FILAMENT}' has 4\n"
+
+    main(["set", "--process", PROCESS, "walls", "5"])
+    capsys.readouterr()
+    assert main(["set", "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters is not changed by this print; your config for the process '{PROCESS}' has 5\n"
+
+    assert main(["set", "walls", "6"]) == 0
+    assert capsys.readouterr().out == (
+        f"perimeters = 6  (your config has 5 for every print with the process '{PROCESS}'; "
+        f"your config has 4 for every print with the filament '{FILAMENT}'; "
+        f"your config has 3 for every print on '{trio}'; your config has 2 for every print; the process '{PROCESS}' has 2)\n"
+    )
+
+    assert main(["set", "--filament", FILAMENT]) == 0
+    assert capsys.readouterr().out == (
+        f"perimeters = 4  (over it: this print has 6; your config has 5 for every print with the process '{PROCESS}'; "
+        f"under it: your config has 3 for every print on '{trio}'; your config has 2 for every print; the process '{PROCESS}' has 2)\n"
+    )
+
+
+def test_listing_shows_each_layers_settings_highest_first_leaving_out_what_is_overridden(project, tmp_path, trio, capsys):
+    main(["set", "--global", "walls", "2"])
+    main(["set", "--global", "infill", "20%"])
+    main(["set", "--printer", trio, "walls", "3"])
+    main(["set", "--filament", FILAMENT, "temperature", "250"])
+    main(["set", "--process", PROCESS, "walls", "4"])
+    main(["set", "--process", PROCESS, "layer", "0.3"])
+    capsys.readouterr()
+
+    assert main(["set"]) == 0
+
+    assert capsys.readouterr().out == (
+        f"perimeters = 4  (for every print with the process '{PROCESS}', from your config; your config has 3 for every print on '{trio}'; your config has 2 for every print; the process '{PROCESS}' has 2)\n"
+        f"layer_height = 0.3  (for every print with the process '{PROCESS}', from your config; the process '{PROCESS}' has 0.2)\n"
+        f"temperature = 250  (for every print with the filament '{FILAMENT}', from your config; the filament '{FILAMENT}' has 255)\n"
+        f"fill_density = 20%  (for every print, from your config; the process '{PROCESS}' has 15%)\n"
+    )
+
+
+def test_a_print_with_another_filament_does_not_see_it(project, tmp_path, trio, capsys):
+    library.load("filament", str(EXPORT), name="other-abs")
+    main(["set", "--filament", FILAMENT, "temperature", "250"])
+    main(["filament", "other-abs"])
+    capsys.readouterr()
+
+    assert main(["set", "temperature"]) == 0
+
+    assert capsys.readouterr().out == "temperature is not changed by this print; the filament 'other-abs' has 255\n"
+
+
+def test_unset_filament_and_process_settings(project, tmp_path, trio, capsys):
+    main(["set", "--filament", FILAMENT, "temperature", "250"])
+    main(["set", "--process", PROCESS, "walls", "4"])
+    capsys.readouterr()
+
+    assert main(["unset", "--filament", "abs", "temperature"]) == 0
+    assert capsys.readouterr().out == f"temperature is no longer changed for every print with the filament '{FILAMENT}'; the filament '{FILAMENT}' has 255\n"
+    assert main(["unset", "--process", PROCESS, "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters is no longer changed for every print with the process '{PROCESS}'; the process '{PROCESS}' has 2\n"
+    data = tomllib.loads((tmp_path / "config" / "deli" / "config.toml").read_text())
+    assert "filaments" not in data and "processes" not in data
+    assert main(["unset", "--process", PROCESS, "walls"]) == 0
+    assert capsys.readouterr().out == f"perimeters is not changed for every print with the process '{PROCESS}'\n"
+
+
+def test_only_one_layer_option_at_a_time(project, mk3):
+    with pytest.raises(SystemExit):
+        main(["set", "--filament", "x", "--process", "y", "walls", "3"])
+
+
+# ---------------------------------------------------------------- G-code: files, lines, one extruder
+
+
+def test_a_value_can_come_from_a_file_and_is_kept_as_lines(project, tmp_path, mk3, capsys):
+    (tmp_path / "job" / "start.gcode").write_text("G28\nPRINT_START EXTRUDER=[first_layer_temperature] ; heat\n")
+    main(["printer", mk3])
+    capsys.readouterr()
+
+    assert main(["set", "start_gcode", "@start.gcode"]) == 0
+
+    assert capsys.readouterr().out == f"start_gcode = 2 lines  (the printer '{mk3}' has 30 lines)\n"
+    assert changed(project) == {"start_gcode": "G28\nPRINT_START EXTRUDER=[first_layer_temperature] ; heat\n"}
+    assert "start_gcode = '''\nG28\nPRINT_START EXTRUDER=[first_layer_temperature] ; heat\n'''" in project.read_text()
+    assert main(["set", "start_gcode"]) == 0
+    assert capsys.readouterr().out == (
+        f"start_gcode = 2 lines  (the printer '{mk3}' has 30 lines)\n  G28\n  PRINT_START EXTRUDER=[first_layer_temperature] ; heat\n"
+    )
+
+
+def test_a_missing_file_is_an_error(project, capsys):
+    assert main(["set", "start_gcode", "@nowhere.gcode"]) == 1
+
+    assert "no such file: nowhere.gcode" in capsys.readouterr().err
+    assert not project.exists()
+
+
+def test_a_file_for_a_config_layer_and_what_a_profile_has_shown_as_lines(project, tmp_path, mk3, capsys):
+    (tmp_path / "job" / "layer.gcode").write_text(";AFTER_LAYER_CHANGE\nSET_PRINT_STATS_INFO CURRENT_LAYER={layer_num+1}\n")
+    main(["printer", mk3])
+    capsys.readouterr()
+
+    assert main(["set", "--printer", mk3, "layer_gcode", "@layer.gcode"]) == 0
+    assert capsys.readouterr().out == f"layer_gcode = 2 lines for every print on '{mk3}'  (the printer '{mk3}' has 2 lines)\n"
+    text = (tmp_path / "config" / "deli" / "config.toml").read_text()
+    assert "layer_gcode = '''\n;AFTER_LAYER_CHANGE\nSET_PRINT_STATS_INFO CURRENT_LAYER={layer_num+1}\n'''" in text
+
+    assert main(["set", "layer_gcode"]) == 0
+    assert capsys.readouterr().out == (
+        f"layer_gcode is not changed by this print; your config for the printer '{mk3}' has 2 lines:\n"
+        "  ;AFTER_LAYER_CHANGE\n  SET_PRINT_STATS_INFO CURRENT_LAYER={layer_num+1}\n"
+    )
+    assert main(["set", "--printer", mk3, "layer_gcode"]) == 0
+    assert capsys.readouterr().out == (
+        f"layer_gcode = 2 lines for every print on '{mk3}'\n  ;AFTER_LAYER_CHANGE\n  SET_PRINT_STATS_INFO CURRENT_LAYER={{layer_num+1}}\n"
+    )
+
+
+def test_a_per_extruder_string_with_a_semicolon_is_one_extruders(project, tmp_path, mk3):
+    """`start_filament_gcode` is a list, `;` between extruders: a value typed or read from a
+    file is one extruder's, quoted for the engine and kept as typed."""
+    from deli import _engine, settings
+
+    library.load("filament", str(EXPORT))
+    main(["filament", "generic-abs"])
+    (tmp_path / "job" / "fil.gcode").write_text("; Filament gcode\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\n")
+
+    assert main(["set", "start_filament_gcode", "@fil.gcode"]) == 0
+
+    assert changed(project) == {"start_filament_gcode": "; Filament gcode\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\n"}
+    ini = settings.for_engine({"start_filament_gcode": "; Filament gcode\\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\\n"}, {"start_filament_gcode"})
+    assert settings.for_engine({"gcode_substitutions": ""}, {"gcode_substitutions"}) == "gcode_substitutions = \n"  # nothing stays nothing
+    assert ini == 'start_filament_gcode = "; Filament gcode\\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\\n"\n'
+    groups, _ = _engine.split_config(ini)
+    assert groups["filament"]["start_filament_gcode"] == '"; Filament gcode\\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\\n"'  # one extruder
+    assert main(["set", "start_filament_gcode", "; a ; b"]) == 0  # typed, the same
+    assert changed(project) == {"start_filament_gcode": "; a ; b"}
+    assert main(["set", "start_filament_gcode", '"a";"b"']) == 0  # two extruders, written as PrusaSlicer does
+    assert changed(project) == {"start_filament_gcode": '"a";"b"'}
+
+
+def test_a_value_written_by_hand_as_lines_is_read_as_the_engine_wants(project, tmp_path, mk3):
+    main(["printer", mk3])
+    project.write_text(project.read_text() + "\n[settings]\nstart_gcode = '''\nG28\nG1 Z5\n'''\n")
+
+    from deli import project as prj
+
+    assert prj.settings(prj.read()) == {"start_gcode": "G28\\nG1 Z5\\n"}

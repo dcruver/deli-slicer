@@ -23,6 +23,26 @@ This is also the answer to the settings problem in big slicers' windows: you nev
 through hundreds of options for the one you changed, because the changed ones are the
 only ones in the file.
 
+It also means a print, or a profile's overrides in your config, never point at another
+file. G-code is given from a file (`deli set start_gcode @start.gcode`) but kept as text,
+written as lines, so the file to read or edit is the one deli already keeps, and a
+`deli.toml` copied or shared is whole by itself.
+
+A setting changed for every print (`deli set --global`) is the one thing a print's result
+depends on that is not in its file: it is in your config, a layer under every print's own
+settings, which win. That is what the user asked for, a change made once rather than in
+every directory, and it is theirs to make; a print's file still holds only what that print
+changes, and `deli set` says which of its settings come from where. G-code sliced before a
+global setting changed is out of date, as it would be after any other change.
+
+A profile's own differences from Orca's, a printer's upgrades and modifications, a spool's
+tuning, a process's usual adjustment, are kept the same way, under the profile's name in
+the config (`deli set --printer|--filament|--process`), each layer over the one before,
+global, printer, filament, process, and all under a print's own. They are kept beside
+Orca's profile rather than written into it, so re-importing the profile keeps them, and
+there is no second profile to keep in step with the first: Orca's base plus the profile's
+settings is what a custom profile is in deli.
+
 ## Defaults save typing; they never get in the way
 
 Your config names a default printer, and a filament and process for each printer, so

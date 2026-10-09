@@ -96,6 +96,80 @@ def test_changed_settings_are_applied(job):
     assert ";TYPE:Internal infill" not in (sliced()).read_text()
 
 
+def test_global_settings_are_applied_under_the_prints_own(job):
+    main(["set", "--global", "infill", "0%"])
+    main(["set", "--global", "walls", "4"])
+    main(["set", "walls", "3"])
+
+    main(["slice"])
+
+    gcode = sliced().read_text()
+    assert ";TYPE:Internal infill" not in gcode
+    assert "; perimeters = 3\n" in gcode
+
+
+def test_gcode_goes_out_of_date_when_a_global_setting_changes(job):
+    main(["slice"])
+    assert project.fresh_gcode(project.read())
+
+    main(["set", "--global", "infill", "0%"])
+    assert not project.fresh_gcode(project.read())
+
+    main(["unset", "--global", "infill"])
+    assert project.fresh_gcode(project.read())
+
+
+def test_the_configs_layers_are_applied_global_printer_filament_process_then_the_prints_own(job):
+    main(["set", "--global", "walls", "5"])
+    main(["set", "--global", "layer", "0.25"])
+    main(["set", "--global", "temperature", "240"])
+    main(["set", "--global", "infill", "5%"])
+    main(["set", "--printer", NAMES["printer"], "walls", "4"])
+    main(["set", "--printer", NAMES["printer"], "layer", "0.3"])
+    main(["set", "--printer", NAMES["printer"], "temperature", "245"])
+    main(["set", "--printer", NAMES["printer"], "max_print_height", "150"])
+    main(["set", "--filament", NAMES["filament"], "layer", "0.15"])
+    main(["set", "--filament", NAMES["filament"], "temperature", "250"])
+    main(["set", "--process", NAMES["process"], "temperature", "235"])
+    main(["set", "--process", NAMES["process"], "infill", "0%"])
+    main(["set", "infill", "10%"])
+
+    main(["slice"])
+
+    gcode = sliced().read_text()
+    assert "; perimeters = 4\n" in gcode  # the printer's, over the global
+    assert "; layer_height = 0.15\n" in gcode  # the filament's, over the printer's
+    assert "; temperature = 235\n" in gcode  # the process's, over the filament's
+    assert "; fill_density = 10%\n" in gcode  # the print's own, over the process's
+    assert "; max_print_height = 150\n" in gcode
+
+
+def test_gcode_from_files_is_sliced_in_and_a_semicolon_stays_one_extruders(job):
+    (job / "start.gcode").write_text("G28\nPRINT_START EXTRUDER=[first_layer_temperature] ; heat\n")
+    (job / "fil.gcode").write_text("; Filament gcode\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\n")
+    main(["set", "--printer", NAMES["printer"], "start_gcode", "@start.gcode"])
+    main(["set", "--filament", NAMES["filament"], "start_filament_gcode", "@fil.gcode"])
+
+    main(["slice"])
+
+    gcode = sliced().read_text()
+    assert "\nPRINT_START EXTRUDER=255 ; heat\n" in gcode
+    assert "\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\n" in gcode
+    assert '; start_filament_gcode = "; Filament gcode\\nSET_PRESSURE_ADVANCE ADVANCE=0.04 ; PETG\\n"\n' in gcode
+
+
+@pytest.mark.parametrize("kind", ["printer", "filament", "process"])
+def test_gcode_goes_out_of_date_when_a_profiles_settings_change(kind, job):
+    main(["slice"])
+    assert project.fresh_gcode(project.read())
+
+    main(["set", f"--{kind}", NAMES[kind], "walls", "4"])
+    assert not project.fresh_gcode(project.read())
+
+    main(["unset", f"--{kind}", NAMES[kind], "walls"])
+    assert project.fresh_gcode(project.read())
+
+
 @pytest.mark.parametrize("kind", list(NAMES))
 def test_each_profile_must_be_chosen(kind, job, capsys):
     text = (job / "deli.toml").read_text()

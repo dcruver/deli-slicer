@@ -358,3 +358,77 @@ def test_changing_to_a_printer_without_defaults_keeps_them_and_says_so(home, cap
 
     assert project.selected(project.read(), "filament")["name"] == ABS
     assert f"Filament '{ABS}' kept from the previous printer" in capsys.readouterr().out
+
+
+def test_global_settings_are_listed_by_config_but_changed_by_set(home, capsys):
+    main(["set", "--global", "infill", "20%"])
+    capsys.readouterr()
+
+    assert main(["config"]) == 0
+    assert capsys.readouterr().out == "settings.fill_density = 20%\n"
+    assert main(["config", "settings.fill_density"]) == 0
+    assert capsys.readouterr().out == "20%\n"
+
+    assert main(["config", "settings.fill_density", "30%"]) == 1
+    assert "deli set --global fill_density <value>" in capsys.readouterr().err
+    assert main(["config", "--unset", "settings.fill_density"]) == 1
+    assert "deli unset --global fill_density" in capsys.readouterr().err
+    assert config.settings() == {"fill_density": "20%"}
+
+
+def test_global_settings_table_must_hold_plain_values(home, capsys):
+    (home / "config.toml").write_text("[settings]\nfill_density = [1, 2]\n")
+
+    assert main(["set", "infill"]) == 1
+
+    assert "'settings' should be a table of setting = value lines" in capsys.readouterr().err
+
+
+def test_a_printers_settings_are_listed_by_config_but_changed_by_set(home, capsys):
+    main(["config", HOST, "elegoo://mk3.local"])
+    main(["set", "--printer", MK3, "max_print_height", "200"])
+    capsys.readouterr()
+
+    assert main(["config"]) == 0
+    assert capsys.readouterr().out == f"{HOST} = elegoo://mk3.local\nprinters.{MK3}.settings.max_print_height = 200\n"
+    key = f"printers.{MK3}.settings.max_print_height"
+    assert main(["config", key]) == 0
+    assert capsys.readouterr().out == "200\n"
+
+    assert main(["config", key, "150"]) == 1
+    assert f"deli set --printer {MK3} max_print_height <value>" in capsys.readouterr().err
+    assert main(["config", "--unset", key]) == 1
+    assert f"deli unset --printer {MK3} max_print_height" in capsys.readouterr().err
+    assert config.profile_settings("printer", MK3) == {"max_print_height": "200"}
+    assert config.printer(MK3) == {"host": "elegoo://mk3.local"}  # the table is not one of the printer's keys
+
+
+def test_a_printers_settings_table_must_hold_plain_values(home, capsys):
+    (home / "config.toml").write_text(f"[printers.{MK3}.settings]\nfill_density = [1, 2]\n")
+
+    assert main(["config"]) == 1
+
+    assert f"'printers.{MK3}.settings' should be a table of setting = value lines" in capsys.readouterr().err
+
+
+def test_a_filaments_and_a_processs_settings_are_listed_by_config_but_changed_by_set(home, capsys):
+    main(["set", "--filament", ABS, "temperature", "250"])
+    main(["set", "--process", QUALITY, "walls", "3"])
+    capsys.readouterr()
+
+    assert main(["config"]) == 0
+    assert capsys.readouterr().out == f"filaments.{ABS}.settings.temperature = 250\nprocesses.{QUALITY}.settings.perimeters = 3\n"
+    assert main(["config", f"processes.{QUALITY}.settings.perimeters"]) == 0
+    assert capsys.readouterr().out == "3\n"
+    assert main(["config", f"filaments.{ABS}.settings.temperature", "240"]) == 1
+    assert f"deli set --filament {ABS} temperature <value>" in capsys.readouterr().err
+    assert main(["config", "--unset", f"processes.{QUALITY}.settings.perimeters"]) == 1
+    assert f"deli unset --process {QUALITY} perimeters" in capsys.readouterr().err
+
+
+def test_a_filaments_table_holds_only_settings(home, capsys):
+    (home / "config.toml").write_text(f"[filaments.{ABS}]\nhost = \"x\"\n")
+
+    assert main(["config"]) == 1
+
+    assert f"'filaments.{ABS}.host' is not a setting deli knows" in capsys.readouterr().err

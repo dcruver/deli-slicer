@@ -829,6 +829,24 @@ Open items, each a real behaviour difference from Orca:
 - **Brim.** Orca's default `auto_brim` is converted to no brim.
 - **Fans.** Auxiliary and exhaust fan settings are dropped. The chamber-fan commands
   inside the start G-code are kept.
+- **Setup's edits to the printer.** To do. `deli setup`'s `_fit_to` writes the Z travel,
+  `MATERIAL=` and the layer-count macros into the library's printer INI, which a `deli import`
+  overwrites; now that `deli set --printer` keeps a printer's settings in the config beside
+  the profile, `_fit_to` should write them there instead.
+- **Per-extruder strings in `deli set`.** Done (2026-10-09): `start_filament_gcode` and the
+  other `coStrings` settings are quoted for the engine by `settings.for_engine` when given
+  unquoted, so a `;` comment is not read as the next extruder's value; several extruders'
+  values are given quoted, as the INI has them.
+- **A library's differences as overrides.** To do, maybe: what that script did, the library's
+  differences from a fresh conversion moved into `printers|filaments|processes.<name>.settings`
+  and the base re-imported, as a `deli import` option, so an edited library can be brought
+  back onto Orca's base at any time.
+- **Overhang fan.** To do. Orca's `overhang_fan_speed` becomes only `bridge_fan_speed`;
+  `enable_overhang_bridge_fan` and `overhang_fan_threshold` (50% in Elegoo's PLA) are
+  dropped, so overhangs get no extra fan. PrusaSlicer 2.9 has the same idea as
+  `enable_dynamic_fan_speeds` with `overhang_fan_speed_0..3` by remaining overlap: map
+  the threshold to the overlap steps the way `overhang_N_4_speed` already is. Found on the
+  Onami phone stand (2026-10-07), whose 35–40° leg undersides printed unsupported.
 - **Pressure advance.** The PA block is removed from the printer start G-code and
   re-emitted in the filament start G-code only when the filament enables it. The PLA
   profile sets 0.024 but does not enable it, so nothing is emitted.

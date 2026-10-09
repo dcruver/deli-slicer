@@ -10,7 +10,7 @@ from pathlib import Path
 import tomlkit
 from tomlkit.exceptions import TOMLKitError
 
-from deli import library
+from deli import config, library
 
 FILE = Path("deli.toml")
 
@@ -151,11 +151,17 @@ def keep_gcode(paths: dict[int, Path], sources: str) -> None:
 
 def made_from(doc: tomlkit.TOMLDocument) -> str:
     """What the print's G-code is made from, as it is now: `deli.toml` by its contents, each
-    part's file by its size and modification time. `slice` notes it beside the G-code."""
+    part's file by its size and modification time, and the settings the config changes for
+    every print and for its printer, filament and process, when there are any. `slice` notes
+    it beside the G-code."""
     lines = [hashlib.sha256(FILE.read_bytes()).hexdigest()]
     for part in parts(doc):
         stat = Path(part["file"]).stat()
         lines.append(f"{stat.st_size} {stat.st_mtime_ns} {Path(part['file']).resolve()}")
+    lines += [f"{key} = {value}" for key, value in config.settings().items()]
+    for kind in config.LAYERS:
+        if name := selected(doc, kind).get("name"):
+            lines += [f"{config.TABLES[kind]}.{name}.settings.{key} = {value}" for key, value in config.profile_settings(kind, name).items()]
     return "\n".join(lines) + "\n"
 
 
@@ -193,22 +199,12 @@ def settings(doc: tomlkit.TOMLDocument) -> dict[str, str]:
     table = doc.get("settings", {})
     if not isinstance(table, dict) or any(isinstance(value, (dict, list)) for value in table.values()):
         raise ProjectError(f"{FILE}: 'settings' should be a table of setting = value lines")
-    # TOML's true and false are the engine's 1 and 0.
-    return {key: str(int(value)) if isinstance(value, bool) else str(value) for key, value in table.items()}
+    return {key: config.plain_value(value) for key, value in table.items()}
 
 
 def set_setting(doc: tomlkit.TOMLDocument, key: str, value: str) -> None:
     settings(doc)
-    # A number is written as a number, so the file reads as it would if written by hand.
-    written: int | float | str = value
-    for number in (int, float):
-        try:
-            if str(number(value)) == value:
-                written = number(value)
-                break
-        except ValueError:
-            pass
-    doc.setdefault("settings", tomlkit.table())[key] = written
+    doc.setdefault("settings", tomlkit.table())[key] = config.toml_value(value)
 
 
 def unset_setting(doc: tomlkit.TOMLDocument, key: str) -> None:

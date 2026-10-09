@@ -364,6 +364,62 @@ fuzzy_skin is not changed by this print; PrusaSlicer's default has none
 
 `deli unset layer_height` goes back to the profile's value.
 
+A value can come from a file, `@` in front of its name, which is how to give G-code:
+
+```
+deli set --printer voron-2.4-350-0.4-nozzle start_gcode @start.gcode
+deli set start_gcode                                    # shows it as lines
+```
+
+deli keeps the text, not the file's name, written as lines in `deli.toml` or your config,
+so it reads and edits like G-code there:
+
+```toml
+[printers."voron-2.4-350-0.4-nozzle".settings]
+start_gcode = '''
+M190 S{first_layer_bed_temperature[initial_extruder]}
+M109 S[first_layer_temperature]
+PRINT_START EXTRUDER=[first_layer_temperature] BED={first_layer_bed_temperature[initial_extruder]} MATERIAL=[filament_type]
+'''
+```
+
+On the command line a line break is `\n`, as PrusaSlicer writes it. A filament's start and
+end G-code are one value per extruder in PrusaSlicer, `;` between them; a value you give is
+one extruder's, comments and all, and several extruders' are written quoted as PrusaSlicer
+does (`"..." ; "..."`).
+
+A setting you want on every print, whichever printer, goes in your config instead of
+the print, with `--global`:
+
+```
+deli set --global infill 20%          # for every print, in ~/.config/deli/config.toml
+deli set --global                     # list those
+deli unset --global infill            # back to each print's profile
+```
+
+It lies under every print's own settings, which still win, so `deli set infill 30%` in
+one directory changes that print alone, and the listing says which is which. A global
+setting changes a print's G-code like any other change: `deli send` slices again first.
+
+A printer that is not quite Orca's any more, after upgrades and modifications, keeps its
+differences the same way, under its name; so does a spool that prints best a little off
+its profile, or a process you always adjust:
+
+```
+deli set --printer voron-2.4-350-0.4-nozzle max_print_height 310
+deli set --printer voron-2.4-350-0.4-nozzle start_gcode "..."
+deli set --filament generic-pla-system temperature 215
+deli set --process "0.20mm Standard @Voron" walls 3
+deli set --printer voron-2.4-350-0.4-nozzle       # list a profile's
+```
+
+They go in your config beside Orca's profile, not into it, so every print with that
+profile has them, and a `deli import` of a newer Orca profile keeps them. This is deli's
+custom profile: Orca's base plus your changes. The layers, each winning over the one
+before: the chosen profiles; your global settings; the printer's; the filament's; the
+process's; the print's own. A name can be any part of it that only one profile in your
+library has.
+
 A print can hold several models, each added the same way, and copies of one:
 `deli add 3DBenchy.stl --count 4` prints four, arranged on the bed for you. With more
 than one model, `scale`, `rotate` and `move` take the model's name first
@@ -505,7 +561,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
 | `deli add <file> [--count N]` | add a model, or more copies of it |
 | `deli remove <part> [--count N]` | take a part, or some copies, out |
-| `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings |
+| `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
@@ -515,7 +571,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli slice [-o FILE\|DIR]` | slice, and say how long it takes and how much filament; `-o` writes a copy of the G-code. Parts that do not fit go on further plates, a file each |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
 | `deli send [FILE] [--print] [--plate N]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N` |
-| `deli config [key] [value]` | your default printer, and your printers' addresses and default filament and process |
+| `deli config [key] [value]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile |
 | `deli completion bash\|zsh\|fish` | shell completion |
 
 `deli <command> --help` has the details.

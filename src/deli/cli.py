@@ -711,45 +711,259 @@ def _pause(args: argparse.Namespace) -> int:
     return 0
 
 
+def _short(value: str) -> str:
+    """A value as it fits on a line: G-code, or anything with line breaks, by its length."""
+    if "\\n" not in value:
+        return value
+    count = value.count("\\n") + (0 if value.endswith("\\n") else 1)
+    return f"{count} line{'' if count == 1 else 's'}"
+
+
+def _lines(value: str) -> None:
+    """Print a value with line breaks as lines, indented."""
+    for line in value.removesuffix("\\n").split("\\n"):
+        print(f"  {line}")
+
+
+def _show(head: str, value: str, note: str = "") -> None:
+    """`key = value  (note)`, or, for a value with line breaks, the lines under it."""
+    print(f"{head} = {_short(value)}" + (f"  ({note})" if note else ""))
+    if "\\n" in value:
+        _lines(value)
+
+
+def _value(args: argparse.Namespace) -> str:
+    """The value given, or the contents of the file named after @, its line breaks written
+    as \\n, as PrusaSlicer has them."""
+    if not args.value.startswith("@"):
+        return args.value
+    path = Path(args.value[1:]).expanduser()
+    if not path.is_file():
+        raise CommandError(f"no such file: {args.value[1:]}")
+    return path.read_text().replace("\r\n", "\n").replace("\n", "\\n")
+
+
 def _profile_note(doc, key: str) -> str:
     """What the chosen profile has for a setting, to print under the print's own value."""
     kind = settings.kinds()[key]
     profile = project.chosen_profile(doc, kind)
     if not profile or key not in profile[1]:
         return ""
-    return f"the {kind} '{profile[0]}' has {profile[1][key]}"
+    return f"the {kind} '{profile[0]}' has {_short(settings.shown(key, profile[1][key]))}"
+
+
+def _profile_note_for(kind: str, name: str, key: str) -> str:
+    """What a profile in the library has for a setting, or, for a printer, what its default
+    filament or process from the config has: `_profile_note` for a profile no print here uses."""
+    wanted = settings.kinds()[key]
+    if wanted != kind:
+        if kind != "printer":
+            return ""
+        name = config.printer(name).get(wanted, "")
+    if not name or name not in library.names(wanted):
+        return ""
+    profile = library.read_settings(library.find(wanted, name))
+    return f"the {wanted} '{name}' has {_short(settings.shown(key, profile[key]))}" if key in profile else ""
+
+
+def _beneath(doc) -> dict[str, str]:
+    """Every setting a print's own lie over: the chosen profiles', then the config's layers,
+    as `deli slice` lays them."""
+    chosen = [profile[1] for kind in library.KINDS if (profile := project.chosen_profile(doc, kind))]
+    merged = {name: value for part in chosen for name, value in part.items()}
+    for found in settings.config_layers(doc):
+        merged |= found.settings
+    return merged
+
+
+def _stack(doc, key: str, layers: list[settings.Layer]) -> str:
+    """Where a setting is changed for this print, highest first: the print's own, the
+    config's layers, the chosen profile."""
+    notes = [f"this print has {_short(overrides[key])}"] if key in (overrides := project.settings(doc)) else []
+    return "; ".join([*notes, _under(doc, key, layers)]).strip("; ")
+
+
+def _under(doc, key: str, layers: list[settings.Layer] | None = None) -> str:
+    """What lies under the print's own value for a setting: the config's layers and the
+    chosen profile's."""
+    layers = settings.config_layers(doc) if layers is None else layers
+    notes = [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers) if key in found.settings]
+    if key in settings.kinds() and (note := _profile_note(doc, key)):
+        notes.append(note)
+    return "; ".join(notes)
+
+
+def _own(doc, *more: dict[str, str]) -> set[str]:
+    """The settings deli stored from what was typed, for this print: its own and the config's
+    layers' (and `more` dicts'), as against a profile's; see `settings.for_engine`."""
+    keys = set(project.settings(doc))
+    for found in settings.config_layers(doc):
+        keys |= set(found.settings)
+    for other in more:
+        keys |= set(other)
+    return keys
+
+
+def _profiles_of(printer: str | None) -> dict[str, str]:
+    """The settings of a printer and its default filament and process from the config, as far
+    as they are in the library."""
+    if not printer:
+        return {}
+    about = config.printer(printer)
+    merged: dict[str, str] = {}
+    for kind, name in (("printer", printer), ("filament", about.get("filament")), ("process", about.get("process"))):
+        if name and name in library.names(kind):
+            merged |= library.read_settings(library.find(kind, name))
+    return merged
+
+
+def _profiles_for(kind: str | None, name: str | None) -> dict[str, str]:
+    """What a setting in the config is checked against when there is no print here to check
+    it with: a printer with its defaults, else the default printer's trio with the profile
+    named laid over it."""
+    if kind == "printer":
+        return _profiles_of(name)
+    merged = _profiles_of(config.default_printer())
+    if kind and name:
+        merged |= library.read_settings(library.find(kind, name))
+    return merged
+
+
+def _named(kind: str, wanted: str) -> str:
+    """The library's name for the profile `--printer|--filament|--process` names: by its
+    name, or a part only one has."""
+    names = library.names(kind)
+    slug = library.slug(wanted)
+    if slug in names:
+        return slug
+    partial = [name for name in names if slug and slug in name]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        raise CommandError(f"your library has {len(partial)} {_PLURALS[kind]} matching '{wanted}'; which one?\n  " + "\n  ".join(partial))
+    mine = f" (it has: {', '.join(names)})" if names else ""
+    raise CommandError(f"no {kind} '{wanted}' in your library{mine}; choose it for a print first with: deli {kind} {wanted}")
+
+
+def _target(args: argparse.Namespace) -> settings.Layer | None:
+    """The config's layer `--global`, `--printer`, `--filament` or `--process` names; None
+    for the print's own settings."""
+    if args.everywhere:
+        return settings.layer(None)
+    for kind in config.LAYERS:
+        if wanted := getattr(args, f"for_{kind}"):
+            return settings.layer(kind, _named(kind, wanted))
+    return None
+
+
+def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int:
+    """`deli set --global|--printer|--filament|--process`: a setting for every print, or
+    every print with one profile, kept in the config; the print here, if there is one, is
+    left alone, and its own settings still win."""
+    layers = settings.config_layers(doc)
+    # Whether the print here is under that layer; its own layer object stands in for the target then.
+    mine = next((found for found in layers if (found.kind, found.name) == (target.kind, target.name)), None)
+    overrides = project.settings(doc)
+
+    def profile_note(key: str) -> str:
+        return _profile_note(doc, key) if mine or not target.kind else _profile_note_for(target.kind, target.name, key)
+
+    def around(key: str) -> str:
+        """What is over and under the target for the print here, or for the profile alone."""
+        if mine:
+            over = [f"this print has {_short(overrides[key])}"] if key in overrides else []
+            over += [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers[layers.index(mine) + 1 :]) if key in found.settings]
+            under = [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers[: layers.index(mine)]) if key in found.settings]
+        else:
+            over = []
+            everywhere = layers[0].settings
+            under = [f"your config has {_short(everywhere[key])} for every print"] if target.kind and key in everywhere else []
+        if key in settings.kinds():
+            if note := profile_note(key):
+                under.append(note)
+        else:
+            under.append("not a setting the engine knows")
+        if over:
+            return f"over it: {'; '.join(over)}" + (f"; under it: {'; '.join(under)}" if under else "")
+        return "; ".join(under)
+
+    if args.setting is None:
+        if not target.settings:
+            print(f"No setting is changed {target.where}. Change one with: deli set {target.option} <setting> <value>")
+        for key, value in target.settings.items():
+            note = around(key)
+            print(f"{key} = {_short(value)}" + (f"  ({note})" if note else ""))
+        return 0
+
+    key = settings.resolve(args.setting)
+    if args.value is None:
+        if key in target.settings:
+            print(f"{key} = {_short(target.settings[key])} {target.where}")
+            if "\\n" in target.settings[key]:
+                _lines(target.settings[key])
+        else:
+            print(f"{key} is not changed {target.where}")
+        return 0
+
+    if mine and project.FILE.exists():
+        beneath, own = _beneath(doc), _own(doc)
+    else:
+        beneath, own = _profiles_for(target.kind, target.name) | layers[0].settings | target.settings, _own(doc, target.settings)
+    value = settings.check(key, _value(args), beneath, own)
+    if target.kind:
+        config.set_profile_setting(target.kind, target.name, key, value)
+    else:
+        config.set_setting(key, value)
+    target.settings[key] = value
+    note = around(key)
+    print(f"{key} = {_short(value)} {target.where}" + (f"  ({note})" if note else ""))
+    return 0
 
 
 def _set(args: argparse.Namespace) -> int:
     doc = project.read()
+    if target := _target(args):
+        return _set_in_config(args, doc, target)
     overrides = project.settings(doc)
+    layers = settings.config_layers(doc)
 
     if args.setting is None:
         # Like `deli printer`: without arguments, list what there is.
-        if not overrides:
+        if not overrides and not any(found.settings for found in layers):
             print("This print changes no settings. Change one with: deli set <setting> <value>")
         for key, value in overrides.items():
-            note = _profile_note(doc, key) if key in settings.kinds() else "not a setting the engine knows"
-            print(f"{key} = {value}" + (f"  ({note})" if note else ""))
+            note = _under(doc, key, layers) if key in settings.kinds() else "not a setting the engine knows"
+            print(f"{key} = {_short(value)}" + (f"  ({note})" if note else ""))
+        # Then each layer's, highest first, leaving out what something over it changes.
+        for at, found in reversed(list(enumerate(layers))):
+            for key, value in found.settings.items():
+                if key in overrides or any(key in over.settings for over in layers[at + 1 :]):
+                    continue
+                note = f"{found.where}, from your config"
+                if key in settings.kinds():
+                    note += f"; {under}" if (under := _under(doc, key, layers[:at])) else ""
+                else:
+                    note += "; not a setting the engine knows"
+                print(f"{key} = {_short(value)}  ({note})")
         return 0
 
     key = settings.resolve(args.setting)
-    note = _profile_note(doc, key)
+    note = _under(doc, key, layers)
     if args.value is None:
         if key in overrides:
-            print(f"{key} = {overrides[key]}" + (f"  ({note})" if note else ""))
+            _show(key, overrides[key], note)
         else:
             value, source = settings.effective(doc, key)
-            print(f"{key} is not changed by this print; {source} has {value}")
+            print(f"{key} is not changed by this print; {source} has {_short(value)}" + (":" if "\\n" in value else ""))
+            if "\\n" in value:
+                _lines(value)
         return 0
 
-    chosen = [profile[1] for kind in library.KINDS if (profile := project.chosen_profile(doc, kind))]
-    others = {name: value for part in chosen for name, value in part.items()} | overrides
-    value = settings.check(key, args.value, others)
+    value = settings.check(key, _value(args), _beneath(doc) | overrides, _own(doc))
     project.set_setting(doc, key, value)
     _start(doc)
     project.write(doc)
-    print(f"{key} = {value}" + (f"  ({note})" if note else ""))
+    print(f"{key} = {_short(value)}" + (f"  ({note})" if note else ""))
     return 0
 
 
@@ -773,10 +987,9 @@ def _supports(args: argparse.Namespace) -> int:
         wanted["support_material_buildplate_only"] = "1" if args.buildplate_only else "0"
 
     if wanted:
-        chosen = [profile[1] for kind in library.KINDS if (profile := project.chosen_profile(doc, kind))]
-        others = {name: value for part in chosen for name, value in part.items()} | project.settings(doc)
+        others = _beneath(doc) | project.settings(doc)
         for key, value in wanted.items():
-            others[key] = settings.check(key, value, others)
+            others[key] = settings.check(key, value, others, _own(doc))
             project.set_setting(doc, key, others[key])
         _start(doc)
         project.write(doc)
@@ -797,16 +1010,24 @@ def _supports(args: argparse.Namespace) -> int:
 
 def _unset(args: argparse.Namespace) -> int:
     doc = project.read()
-    overrides = project.settings(doc)
-    # A name written by hand in deli.toml can be removed even if it is not a real setting.
+    target = _target(args)
+    overrides = target.settings if target else project.settings(doc)
+    where = target.where if target else "by this print"
+    # A name written by hand can be removed even if it is not a real setting.
     key = args.setting if args.setting in overrides else settings.resolve(args.setting)
     if key not in overrides:
-        print(f"{key} is not changed by this print")
+        print(f"{key} is not changed {where}")
         return 0
-    note = _profile_note(doc, key) if key in settings.kinds() else ""
-    project.unset_setting(doc, key)
-    project.write(doc)
-    print(f"{key} is no longer changed by this print" + (f"; {note}" if note else ""))
+    if target and target.kind:
+        config.unset_profile_setting(target.kind, target.name, key)
+    elif target:
+        config.unset_setting(key)
+    else:
+        project.unset_setting(doc, key)
+        project.write(doc)
+    # What the setting is now for a print here: its own, or what lies under.
+    note = _stack(doc, key, settings.config_layers(doc)) if key in settings.kinds() or target else ""
+    print(f"{key} is no longer changed {where}" + (f"; {note}" if note else ""))
     return 0
 
 
@@ -860,11 +1081,13 @@ def _slice_print(doc, copy_to: Path | None = None) -> dict[int, Path]:
     and `deli view` find it, and with `copy_to` (a file, or a directory to put them in) a
     copy there too."""
     parts = _parts_of(doc)
-    config: dict[str, str] = {}
+    merged: dict[str, str] = {}
     for kind in library.KINDS:
-        config |= _accepted_profile(doc, kind)
-    config |= project.settings(doc)
-    ini = settings.for_engine(config)
+        merged |= _accepted_profile(doc, kind)
+    for found in settings.config_layers(doc):
+        merged |= found.settings
+    merged |= project.settings(doc)
+    ini = settings.for_engine(merged, _own(doc))
     what = ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts)
     engine_parts = project.engine_parts(doc)
 
@@ -896,7 +1119,7 @@ def _slice_print(doc, copy_to: Path | None = None) -> dict[int, Path]:
             results[plate] = _engine.slice(engine_parts, ini, str(output), pauses=project.pauses(doc, plate), plate=plate)
         except (ValueError, RuntimeError) as err:
             raise failed(err if count == 1 else RuntimeError(f"plate {plate}: {err}")) from None
-        if footer := config.get("gcode_footer"):
+        if footer := merged.get("gcode_footer"):
             _write_footer(output, footer, results[plate].layers)
         outputs[plate] = output
     project.keep_gcode(outputs, sources)
@@ -1255,6 +1478,7 @@ def _config(args: argparse.Namespace) -> int:
         return ", ".join(value) if isinstance(value, list) else str(value)
 
     if args.unset:
+        config.refuse_setting(args.unset, "unset")
         if not config.unset(args.unset):
             print(f"{args.unset} is not set")
         return 0
@@ -1273,6 +1497,7 @@ def _config(args: argparse.Namespace) -> int:
         library.find("printer", library.slug(args.value))  # must be in the library
         config.set_value(args.key, library.slug(args.value))
         return 0
+    config.refuse_setting(args.key, "set")
     name, field = config.split_key(args.key)
     if field in ("filament", "process"):
         library.find(field, library.slug(args.value))  # must be in the library
@@ -1724,11 +1949,20 @@ def build_parser() -> argparse.ArgumentParser:
         "set",
         help="change a setting for this print, or list the changed settings",
         description="Change a setting for the print in this directory, leaving the printer, filament and process "
-        "in your library as they are. With only a setting, show it. With nothing, list the changed settings.",
+        "in your library as they are. With only a setting, show it. With nothing, list the changed settings. "
+        "With --global, do the same for every print instead, and with --printer, --filament or --process NAME "
+        "for every print with that profile: the setting goes in your config and lies under every print's own, "
+        "which still win. Each layer lies over the one before, global, printer, filament, process, and they "
+        "survive a `deli import` of the profile: Orca's profile plus them is your own.",
         epilog=f"Settings go by PrusaSlicer's names. Short names: {short}.",
     )
     set_.add_argument("setting", nargs="?", help="a setting's name, such as fill_density, or a short name, such as infill")
-    set_.add_argument("value", nargs="?", help="its new value")
+    set_.add_argument("value", nargs="?", help="its new value, or @FILE to read it from a file, G-code say")
+    where = set_.add_mutually_exclusive_group()
+    where.add_argument("--global", dest="everywhere", action="store_true", help="for every print, in your config, not this print")
+    where.add_argument("--printer", dest="for_printer", metavar="NAME", help="for every print on that printer, in your config, not this print")
+    where.add_argument("--filament", dest="for_filament", metavar="NAME", help="for every print with that filament, in your config")
+    where.add_argument("--process", dest="for_process", metavar="NAME", help="for every print with that process, in your config")
     set_.set_defaults(run=_set)
 
     supports = commands.add_parser(
@@ -1749,9 +1983,16 @@ def build_parser() -> argparse.ArgumentParser:
     unset = commands.add_parser(
         "unset",
         help="stop changing a setting for this print",
-        description="Remove a setting changed with `deli set`, so the print uses the chosen profile's value again.",
+        description="Remove a setting changed with `deli set`, so the print uses the chosen profile's value again; "
+        "with --global, --printer, --filament or --process NAME, one changed for every print, or every print "
+        "with that profile, by `deli set` with the same option.",
     )
     unset.add_argument("setting", help="a setting's name or short name")
+    where = unset.add_mutually_exclusive_group()
+    where.add_argument("--global", dest="everywhere", action="store_true", help="the setting changed for every print, in your config")
+    where.add_argument("--printer", dest="for_printer", metavar="NAME", help="the setting changed for every print on that printer")
+    where.add_argument("--filament", dest="for_filament", metavar="NAME", help="the setting changed for every print with that filament")
+    where.add_argument("--process", dest="for_process", metavar="NAME", help="the setting changed for every print with that process")
     unset.set_defaults(run=_unset)
 
     scale = commands.add_parser(

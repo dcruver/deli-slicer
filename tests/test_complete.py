@@ -87,6 +87,27 @@ def test_settings_and_their_short_names():
     main(["set", "infill", "20%"])
     assert complete("unset") == ["fill_density"]
 
+    main(["set", "--global", "walls", "3"])
+    assert "infill" in complete("set", "--global")
+    assert complete("unset", "--global") == ["perimeters"]
+    assert complete("unset") == ["fill_density"]
+    assert complete("config", "--unset") == []  # a global setting is `deli unset --global`'s to remove
+
+    assert complete("set", "--printer") == ["original-prusa-i3-mk3"]
+    assert complete("set", "--filament") == ["generic-abs"]
+    main(["set", "--printer", "mk3", "layer", "0.3"])
+    main(["set", "--filament", "abs", "temperature", "250"])
+    assert complete("unset", "--printer", "mk3") == ["layer_height"]
+    assert complete("unset", "--filament", "generic-abs") == ["temperature"]
+    assert complete("unset") == ["fill_density"]
+    assert complete("config", "--unset") == []
+    # `deli config` reads a settings key, so it is offered, and no printer is made of it
+    assert [key for key in complete("config") if "settings" in key] == [
+        "filaments.generic-abs.settings.temperature",
+        "printers.original-prusa-i3-mk3.settings.layer_height",
+        "settings.perimeters",
+    ]
+
 
 def test_options_after_a_dash():
     assert complete("add", "-", new_word=False) == ["--count", "--help", "-h"]
@@ -122,6 +143,12 @@ def test_scripts_call_the_hidden_command(capsys):
 
     assert main(["__complete", "1", "deli", "pr"]) == 0
     assert capsys.readouterr().out.splitlines() == ["printer", "process"]
+
+    # fish hands the words over after --, so an option among them is not deli's own
+    main(["completion", "fish"])
+    assert "deli __complete (count $words) -- $words $current" in capsys.readouterr().out
+    assert main(["__complete", "3", "--", "deli", "send", "--print", ""]) == 0
+    assert capsys.readouterr().out.splitlines() == ["__files__"]
 
 
 # ------------------------------------------- names with spaces and @, as Orca's have

@@ -56,11 +56,27 @@ def _overridden() -> list[str]:
     return _quiet(lambda: list(project.settings(project.read())), [])
 
 
+def _layer_keys(before: list[str]) -> list[str]:
+    """The settings of the config's layer `--global|--printer|--filament|--process` names."""
+    from deli.cli import _named
+
+    if "--global" in before:
+        return list(config.settings())
+    for kind in config.LAYERS:
+        if f"--{kind}" in before[:-1]:
+            return list(config.profile_settings(kind, _named(kind, before[before.index(f"--{kind}") + 1])))
+    return []
+
+
 def _config_keys() -> list[str]:
+    """What `deli config` reads or writes: the default printer, each library or configured
+    printer's keys, and the settings the config holds (read here, written by `deli set`)."""
     names = _quiet(lambda: library.names("printer"), [])
+    entries = [key for key, _ in _quiet(config.entries, [])]
+    settings = [key for key in entries if key.startswith(config.SETTINGS + ".") or f".{config.SETTINGS}." in key]
     # The printers the config has keys for (not its default `printer`); a name can hold dots, as in "0.6-nozzle".
-    names += [key.removeprefix("printers.").rsplit(".", 1)[0] for key, _ in _quiet(config.entries, []) if key.startswith("printers.")]
-    return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS)})
+    names += [key.removeprefix("printers.").rsplit(".", 1)[0] for key in entries if key.startswith("printers.") and key not in settings]
+    return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS), *settings})
 
 
 def _orca_presets(before: list[str]):
@@ -130,7 +146,11 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command == "set":
         return sorted([*settings.ALIASES, *settings.kinds()]) if position == 0 else []
     if command == "unset":
-        return _overridden() if position == 0 else []
+        if position != 0:
+            return []
+        if any(option in before for option in ("--global", "--printer", "--filament", "--process")):
+            return _quiet(lambda: _layer_keys(before), [])
+        return _overridden()
     if command == "config":
         if position == 0:
             return _config_keys()
@@ -148,8 +168,10 @@ def _option_value(command: str, option: str) -> list[str]:
     """Candidates for the value of an option that takes one."""
     if command == "import" and option == "--printer":
         return _quiet(lambda: _orca_presets([])().names("printer"), [])
+    if command in ("set", "unset") and option in ("--printer", "--filament", "--process"):
+        return _quiet(lambda: library.names(option[2:]), [])
     if command == "config" and option == "--unset":
-        return [key for key, _ in _quiet(config.entries, [])]
+        return [key for key, _ in _quiet(config.entries, []) if not key.startswith(config.SETTINGS + ".") and f".{config.SETTINGS}." not in key]
     if command == "slice" and option in ("-o", "--output"):
         return [FILES]
     if command == "import" and option == "--orca":
@@ -292,7 +314,7 @@ FISH = r'''# fish completion for deli; deli completion fish > ~/.config/fish/com
 function __deli_complete
     set -l words (commandline -opc)
     set -l current (commandline -ct)
-    set -l found (deli __complete (count $words) $words $current 2>/dev/null)
+    set -l found (deli __complete (count $words) -- $words $current 2>/dev/null)
     if test "$found" = "__files__"
         __fish_complete_path "$current"
     else
