@@ -15,7 +15,7 @@ Set CursorBlink false
 # cached in work/home/.cache between recordings. BROWSER=true keeps deli view from
 # opening a tab.
 Hide
-Type "export PS1='$ ' BROWSER=true HOME=$PWD/work/home; unset XDG_CONFIG_HOME XDG_CACHE_HOME; rm -rf work/print && mkdir -p work/home work/print && cd work/print && cp ../../../vendor/PrusaSlicer/resources/shapes/3DBenchy.stl . && clear" Enter
+Type "export PS1='$ ' BROWSER=true HOME=$PWD/work/home; unset XDG_CONFIG_HOME XDG_CACHE_HOME; rm -rf work/print work/home/.cache/deli/gcode && mkdir -p work/home work/print && cd work/print && cp ../../../vendor/PrusaSlicer/resources/shapes/3DBenchy.stl . && clear" Enter
 Sleep 1s
 Show
 

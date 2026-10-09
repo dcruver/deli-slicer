@@ -1,5 +1,5 @@
-# The README's clip, part 1 of 3: deli setup, then the sliced Benchy, ending with deli
-# view. record-readme.sh runs it, records the viewer, then send.tape, and joins them.
+# The README's clip, part 1 of 3: deli setup, then a Benchy added, deli status, the
+# Benchy sliced, ending with deli view. record-readme.sh runs it, records the viewer, then send.tape, and joins them.
 Output work/part1.mp4
 
 Set Shell "bash"
@@ -15,7 +15,7 @@ Set CursorBlink false
 # cached in work/home/.cache between recordings. BROWSER=true keeps deli view from
 # opening a tab: record-readme.sh records the page itself.
 Hide
-Type "export PS1='$ ' BROWSER=true HOME=$PWD/work/home; unset XDG_CONFIG_HOME XDG_CACHE_HOME; rm -rf work/print work/home/.config && mkdir -p work/home work/print && cd work/print && cp ../../../vendor/PrusaSlicer/resources/shapes/3DBenchy.stl . && clear" Enter
+Type "export PS1='$ ' BROWSER=true HOME=$PWD/work/home; unset XDG_CONFIG_HOME XDG_CACHE_HOME; rm -rf work/print work/home/.config work/home/.cache/deli/gcode && mkdir -p work/home work/print && cd work/print && cp ../../../vendor/PrusaSlicer/resources/shapes/3DBenchy.stl . && clear" Enter
 Sleep 1s
 Show
 
@@ -25,6 +25,7 @@ Type "1" Sleep 600ms Enter Sleep 6s
 Hide
 Type "clear" Enter Sleep 300ms
 Show
-Type "deli add 3DBenchy.stl" Sleep 300ms Enter Sleep 2.5s
+Type "deli add 3DBenchy.stl" Sleep 300ms Enter Sleep 2s
+Type "deli status" Sleep 300ms Enter Sleep 3.5s
 Type "deli slice" Sleep 300ms Enter Sleep 9s
 Type "deli view" Sleep 300ms Enter Sleep 2.5s

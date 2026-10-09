@@ -598,6 +598,21 @@ def test_setup_from_a_klipper_address_matches_and_fits_the_printer(github, home,
     assert "layer count" not in out  # the Centauri's G-code already tells Klipper its layers
 
 
+def test_setup_names_the_printer_as_klipper_names_itself(github, home, print_dir, monkeypatch, capsys):
+    """At an IP address, the name is Moonraker's hostname; at a name, that name's first label
+    (or Moonraker's, when it says one)."""
+    from deli import config, probe
+
+    klipper = probe.Printer("moonraker", "moonraker://192.168.1.20", nozzle=0.6, bed=(256.0, 256.0), height=200.0, structure="corexy", hint="troodon")
+    monkeypatch.setattr(probe, "probe", lambda address: klipper)
+
+    assert main(["setup", "--host", "192.168.1.20", "--no-completion"]) == 0
+
+    assert config.default_printer() == "troodon"
+    assert config.machine("troodon").host == "moonraker://192.168.1.20"
+    assert ", as 'troodon'" in capsys.readouterr().out
+
+
 def test_klipper_is_told_the_layers_once():
     from deli.cli import LAYER_INFO, _layer_info
 

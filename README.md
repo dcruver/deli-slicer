@@ -13,7 +13,7 @@ updates `deli.toml` as it goes. Come back months later, `cd` into the folder, an
 `deli send --print` prints the same parts, placed the same way, with the same profiles
 and settings.
 
-![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy and slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
+![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy, deli status, slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
 
 ```
 deli setup                # once: tab completion, your printer, and how to reach it
@@ -133,11 +133,13 @@ It sets up tab completion for your shell, then asks for your printer's hostname 
 address and asks the printer what it is: a Klipper printer says its nozzle, bed and
 height, and setup lists OrcaSlicer's printers that fit; an Elegoo printer says its model,
 and setup asks only the nozzle size. The printer is imported with Orca's process and
-filament for it, fitted to what it reported (no taller prints than its Z travel, the
-material passed to a `PRINT_START` that reads it), and its address kept for `deli send`.
-A printer deli cannot reach is found by any part of its name instead. A Bambu Lab
-printer is recognised, but deli cannot send to one yet. Run it again to add or change a printer. Everything it does can also be done step by
-step, as the next sections show.
+filament for it, named as the printer names itself (a Klipper printer's hostname, or
+the address's first label), given the settings that fit what it reported (no taller
+prints than its Z travel, the material passed to a `PRINT_START` that reads it), and its
+address kept for `deli send`. A printer deli cannot reach is found by any words of its
+name instead. A Bambu Lab printer is recognised, but deli cannot send to one yet. Run it
+again to add or change a printer. Everything it does can also be done step by step, as
+the next sections show.
 
 ### From source
 
@@ -158,9 +160,9 @@ a wheel in `dist/` to give to someone else.
 
 ### Shell completion
 
-Completion covers commands, options, printers, filaments and processes (yours and
-OrcaSlicer's), the parts of the current print, setting names and their short names, and
-config keys. `deli setup` sets it up; by hand, it is one of:
+Completion covers commands, options, your printers and their nozzles, printers,
+filaments and processes (yours and OrcaSlicer's), the parts of the current print,
+setting names and their short names, and config keys. `deli setup` sets it up; by hand, it is one of:
 
 ```
 eval "$(deli completion bash)"      # in ~/.bashrc
@@ -200,23 +202,30 @@ list shows what a vendor's printers are called when it differs.
 deli printer "Voron 2.4 350 0.4 nozzle"
 ```
 
-Any part of the name that is enough to tell it apart will do (`"voron 2.4 350 0.4"`),
-in any case. A printer that is not in your library yet is imported from Orca as it is
-chosen, with the process and filament OrcaSlicer starts it with, and all three become
-the defaults for new prints:
+Any words of the name that are enough to tell it apart will do (`"voron 350 0.4"`), in
+any order and any case. A printer that is not in your library yet is imported from Orca
+as it is chosen, with the process and filament OrcaSlicer starts it with, and all three
+become the defaults for new prints. Every choice ends with the same block, what the
+print is now, with a note under anything that changed:
 
 ```
 Imported printer 'voron-2.4-350-0.4-nozzle' from Orca 2.4.2's 'Voron 2.4 350 0.4 nozzle' (51 settings, 7 left out)
-Imported process '0.20mm-standard-voron', Orca's default for this printer (93 settings, 16 left out)
+Imported process '0.20mm-standard-voron', Orca's default for this printer (94 settings, 16 left out)
   and made it the default process for new prints on 'voron-2.4-350-0.4-nozzle'
 Imported filament 'generic-pla-system', Orca's default for this printer (27 settings, 20 left out)
   and made it the default filament for new prints on 'voron-2.4-350-0.4-nozzle'
 Made 'voron-2.4-350-0.4-nozzle' your default printer for new prints
-Printer set to 'voron-2.4-350-0.4-nozzle'
-  bed 350 x 350 mm, height 325 mm, nozzle 0.4 mm, firmware klipper
-  Filament set to 'generic-pla-system', from your config for this printer
-  Process set to '0.20mm-standard-voron', from your config for this printer
+Printer   voron-2.4-350-0.4-nozzle  bed 350 x 350 mm, height 325 mm, nozzle 0.4 mm, firmware klipper
+Filament  generic-pla-system  PLA, nozzle 220 °C, bed 55 °C
+          from your config for this printer
+Process   0.20mm-standard-voron  layers 0.2 mm, infill 15% cubic, perimeters 3
+          from your config for this printer
+Parts     none yet; add one with: deli add <file>
+Sends to  nowhere yet; set with: deli config printers.voron-2.4-350-0.4-nozzle.host <moonraker://...|elegoo://...|octoprint://...>
+Settings  none changed
 ```
+
+`deli status` shows the block at any time.
 
 You can slice now. The settings "left out" are ones PrusaSlicer's engine has no
 equivalent for; they need nothing from you. [PRINTERS.md](PRINTERS.md) says which of
@@ -239,10 +248,10 @@ deli process "0.15mm optimal"              # choose one
 
 `deli filament` lists the filaments made for the print's printer (or your default one),
 with any you have used or loaded yourself, and marks the one in use and the default.
-`deli process` does the same for processes, and `deli printer` lists your printer's
-vendor's printers. It makes no difference whether one has been used before: choose any
-of them by name, or a part of it, and deli fetches and converts it as needed, for your
-printer. Orca's Generic filaments (`Generic PETG @System` and so on) fit any printer; the
+`deli process` does the same for processes, and `deli printer` lists your printers
+first, each with its nozzles, then your printer's vendor's. It makes no difference
+whether one has been used before: choose any of them by name, or words of it, and deli
+fetches and converts it as needed, for your printer. Orca's Generic filaments (`Generic PETG @System` and so on) fit any printer; the
 list counts them. `--default` makes a choice what new prints start with instead of
 choosing it for this one.
 
@@ -393,7 +402,7 @@ lists every setting with `temp` in its name, each with its value and where it co
 A value can come from a file, `@` in front of its name, which is how to give G-code:
 
 ```
-deli set --printer voron-2.4-350-0.4-nozzle start_gcode @start.gcode
+deli set --printer voron start_gcode @start.gcode
 deli set start_gcode                                    # shows it as lines
 ```
 
@@ -401,7 +410,7 @@ deli keeps the text, not the file's name, written as lines in `deli.toml` or you
 so it reads and edits like G-code there:
 
 ```toml
-[printers."voron-2.4-350-0.4-nozzle".settings]
+[printers.voron.settings]
 start_gcode = '''
 M190 S{first_layer_bed_temperature[initial_extruder]}
 M109 S[first_layer_temperature]
@@ -608,13 +617,17 @@ check the file arrived and start it from the printer's own screen.
 
 Things that a user would notice, roughly in the order they matter:
 
-- **One printer has printed deli's G-code so far**: an Elegoo Centauri Carbon, with
-  its profile converted from Orca's and the files sent with `deli send --print`. A cube
+- **Two printers have printed deli's G-code so far**: an Elegoo Centauri Carbon and a
+  Voron 2.4 running Klipper, both with profiles converted from Orca's and the files sent
+  with `deli send --print` (to the Centauri, and to Moonraker). On the Centauri, a cube
   in PLA printed well; a Benchy in PETG-CF stopped at its `deli pause`, parked the head,
   carried on when resumed and ran to the end, but came out stringy, from a spool that
-  was probably damp. Nothing with supports has been printed, and `deli send` to
-  Moonraker and OctoPrint hosts has only been tested against fakes. If you print with
-  another printer, please say how it went (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+  was probably damp. On the Voron, a Benchy in PLA and a two-part desiccant canister in
+  PETG with a 0.8 mm nozzle printed cleanly (the canister's thread, designed for a 0.4,
+  did not survive the nozzle, which is no slicer's fault). Nothing with supports has
+  been printed, and `deli send` to OctoPrint has only been tested against a fake. If you
+  print with another printer, please say how it went (see
+  [CONTRIBUTING.md](CONTRIBUTING.md)).
 - **Converted profiles differ from Orca in small ways.** The first layer's layer-change
   G-code is skipped; one bridge speed instead of two; no brim where Orca would add one
   automatically. `PLAN.md` has the full list with measurements.

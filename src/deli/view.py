@@ -163,7 +163,8 @@ def _plate(path: str) -> int:
         return 1
 
 def _bed(doc) -> tuple[list[list[float]], float, str | None]:
-    """The chosen printer's bed outline, height and name; a plain bed when there is none."""
+    """The chosen printer's bed outline, height and name (yours for it, with the profile's
+    when they differ); a plain bed when there is none."""
     printer = project.chosen_profile(doc, "printer")
     if not printer:
         return DEFAULT_BED, 0.0, None
@@ -171,7 +172,8 @@ def _bed(doc) -> tuple[list[list[float]], float, str | None]:
     bed = DEFAULT_BED
     if "bed_shape" in settings:
         bed = [[float(n) for n in point.split("x")] for point in settings["bed_shape"].split(",")]
-    return bed, float(settings.get("max_print_height", 0)), name
+    machine = project.machine(doc)
+    return bed, float(settings.get("max_print_height", 0)), f"{machine} ({name})" if machine and machine != name else name
 
 
 def _config(doc) -> str:

@@ -16,9 +16,11 @@ a command that works differently, are marked **Changed**.
   its nozzles are kept under it, each with its profile and the filament and process a new
   print starts with. `deli nozzle` lists them; `deli nozzle 0.4` puts one in, importing
   Orca's profile for it when the config has none, and moves this print to it. `deli printer`
-  lists your printers first. `deli setup` names the printer after its host name, and
-  keeps what it changed to fit the printer (Z travel, Klipper's layer count) as the
-  printer's settings, where `deli import` leaves them, instead of editing the profile.
+  lists your printers first. `deli setup` names the printer as it names itself (a Klipper
+  printer's hostname, else the address's first label), and keeps what it changed to fit
+  the printer (Z travel, Klipper's layer count) as the printer's settings, where
+  `deli import` leaves them, instead of editing the profile. `deli view` shows your name
+  for the printer with the profile's.
   **Changed:** `deli.toml` records the printer's name as `machine` beside the profile when
   they differ; a printer never named is one named after its profile, as before.
 

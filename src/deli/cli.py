@@ -81,7 +81,7 @@ def _config_fills(doc, starting: bool) -> list[tuple[str, str | None, str]]:
     default printer when the print is only now being started, and the filament and process
     of the print's printer, for the nozzle it is on. Returns, for each, the kind, the name
     chosen (None when it could not be) and why, as a note."""
-    lines: list[tuple[str, str | None, str]] = []  # (kind, the name chosen or None, why, or what went wrong)
+    lines: list[tuple[str, str | None, str]] = []  # (kind, the choice as shown or None, why, or what went wrong)
 
     def choose(kind: str, name: str, missing: str, why: str, machine: str | None = None) -> None:
         try:
@@ -90,11 +90,11 @@ def _config_fills(doc, starting: bool) -> list[tuple[str, str | None, str]]:
             lines.append((kind, None, f"your config names the {kind} '{name}' {missing}, but it is not in your library"))
             return
         project.select(doc, kind, name, library.fingerprint(path), machine)
-        lines.append((kind, name, why))
+        lines.append((kind, f"{machine} ({name})" if machine and machine != name else name, why))
 
     if starting and not project.selected(doc, "printer").get("name") and (default := config.default_printer()):
         if profile := config.machine(default).profile:
-            choose("printer", profile, "as your default", "your default" if profile == default else f"your default printer '{default}'", default)
+            choose("printer", profile, "as your default", "your default", default)
         else:
             lines.append(("printer", None, f"your config's default printer '{default}' does not say which nozzle is in it; say with: deli nozzle <size>"))
     if (profile := project.selected(doc, "printer").get("name")) and (machine := project.machine(doc)):
@@ -2046,16 +2046,16 @@ def _layer_info(current: dict[str, str]) -> dict[str, str]:
 
 
 def _machine_for_setup(found) -> str | None:
-    """The name `deli setup` gives the printer at an address: the first label of its host
-    name ("troodon" for troodon.local), unless the config has a printer there already."""
-    hostname = send.parse_host(found.host).hostname if found.host else ""
-    name = library.slug(hostname.split(".")[0]) if hostname else ""
-    if not name or name[0].isdigit():  # an IP address names nothing
-        return None
+    """The name `deli setup` gives the printer at an address: what a Klipper printer calls
+    itself (Moonraker's hostname), else the first label of the address ("troodon" for
+    troodon.local), unless the config has a printer at that address already. An IP
+    address alone names nothing."""
     for other in config.machines():
         if config.machine(other).host == found.host:
             return other
-    return name
+    hostname = (found.hint if found.kind == "moonraker" else "") or (send.parse_host(found.host).hostname if found.host else "")
+    name = library.slug(hostname.split(".")[0]) if hostname else ""
+    return name if name and not name[0].isdigit() else None
 
 
 def _fit_to(machine: str, printer: str, found) -> list[str]:

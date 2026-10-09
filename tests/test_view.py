@@ -74,6 +74,8 @@ def test_state_has_the_part_and_the_printers_bed(url):
     assert state["printer"] == "original-prusa-i3-mk3"
     assert state["bed"] == [[0, 0], [250, 0], [250, 210], [0, 210]]
     assert state["height"] == 210
+    main(["printer", "original-prusa-i3-mk3", "--name", "prusa"])
+    assert json.loads(get(url + "/state")[2])["printer"] == "prusa (original-prusa-i3-mk3)"  # your name for it, with the profile
     (part,) = state["parts"]
     assert part["file"] == "cube.stl"
     assert part["scale"] == [1, 1, 2]

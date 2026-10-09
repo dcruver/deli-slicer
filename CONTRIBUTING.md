@@ -54,6 +54,16 @@ build and of how the engine is bound.
   uv run python ci/sweep.py --orca orca/resources/profiles --label "OrcaSlicer 2.4.2" --ref v2.4.2 --out PRINTERS.md
   ```
 
+## The README's clip
+
+`images/demo.gif` is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`
+against `demo/fake_moonraker.py` (a stand-in Klipper printer), adds and slices a Benchy
+(`demo/readme.tape`), records the viewer frame by frame (`demo/viewer.py`), sends the
+print (`demo/send.tape`) and joins the three. It needs [VHS](https://github.com/charmbracelet/vhs)
+with `ttyd`, `ffmpeg`, and Python with Playwright and its Chromium, and `deli` on the
+PATH (`make install`). Re-record it when a command in the clip changes what it prints.
+`demo/terminal.tape` records a second clip of a print's commands on its own.
+
 ## Licence
 
 deli is licensed AGPL-3.0-only, because it links PrusaSlicer's engine. By contributing,
