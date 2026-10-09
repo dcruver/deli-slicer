@@ -41,12 +41,31 @@ def selected(doc: tomlkit.TOMLDocument, kind: str) -> dict[str, str]:
     return {key: str(value) for key, value in table.items()}
 
 
-def select(doc: tomlkit.TOMLDocument, kind: str, name: str, sha256: str) -> None:
-    """Record the choice, keeping whatever else the file holds."""
+def select(doc: tomlkit.TOMLDocument, kind: str, name: str, sha256: str, machine: str | None = None) -> None:
+    """Record the choice, keeping whatever else the file holds. A printer is a library
+    profile, and `machine` the config's printer it is on when that has another name."""
     selected(doc, kind)
     table = doc.setdefault(kind, tomlkit.table())
     table["name"] = name
+    if kind == "printer":
+        if machine and machine != name:
+            table["machine"] = machine
+        else:
+            table.pop("machine", None)
     table["sha256"] = sha256
+
+
+def machine(doc: tomlkit.TOMLDocument) -> str | None:
+    """The config's printer this print is on: the one recorded, else the one named after
+    the print's printer profile; None when no printer is chosen."""
+    chosen = selected(doc, "printer")
+    if chosen.get("machine"):
+        return chosen["machine"]
+    if not chosen.get("name"):
+        return None
+    # A print that names only its profile is on the config's printer that runs it: the one
+    # named after it, or the one it was moved under when that printer was given a name.
+    return config.machine_of(chosen["name"]) or chosen["name"]
 
 
 def parts(doc: tomlkit.TOMLDocument) -> list[dict]:
@@ -160,7 +179,8 @@ def made_from(doc: tomlkit.TOMLDocument) -> str:
         lines.append(f"{stat.st_size} {stat.st_mtime_ns} {Path(part['file']).resolve()}")
     lines += [f"{key} = {value}" for key, value in config.settings().items()]
     for kind in config.LAYERS:
-        if name := selected(doc, kind).get("name"):
+        name = machine(doc) if kind == "printer" else selected(doc, kind).get("name")
+        if name:
             lines += [f"{config.TABLES[kind]}.{name}.settings.{key} = {value}" for key, value in config.profile_settings(kind, name).items()]
     return "\n".join(lines) + "\n"
 

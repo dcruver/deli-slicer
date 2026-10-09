@@ -395,17 +395,30 @@ def test_choosing_a_printer_orca_has_imports_it_with_its_defaults(github, home, 
     assert project.selected(doc, "filament")["name"] == "elegoo-pla-ecc"
 
 
-def test_a_printer_can_be_imported_under_a_name_of_your_own(github, home, print_dir, capsys):
+def test_a_printer_can_be_named_as_your_own(github, home, print_dir, capsys):
+    """--name names the printer you have, in the config; the library keeps Orca's name."""
+    from deli import config, project
+
     assert main(["printer", "centauri", "--name", "elegoo"]) == 0
 
     out = capsys.readouterr().out
-    assert "Imported printer 'elegoo' from Orca" in out
-    from deli import project
+    assert "Your printer 'elegoo' is 'elegoo-centauri-carbon-0.6-nozzle', with a 0.6 nozzle" in out
+    assert "Printer set to 'elegoo' (elegoo-centauri-carbon-0.6-nozzle)" in out
+    assert project.selected(project.read(), "printer")["name"] == "elegoo-centauri-carbon-0.6-nozzle"
+    assert project.machine(project.read()) == "elegoo"
+    assert library.names("printer") == ["elegoo-centauri-carbon-0.6-nozzle"]
+    machine = config.machine("elegoo")
+    assert machine.nozzle == "0.6" and machine.profile == "elegoo-centauri-carbon-0.6-nozzle"
+    assert machine.current.process == "0.30mm-standard-elegoo-cc-0.6-nozzle"  # Orca's defaults, for that nozzle
+    assert config.default_printer() == "elegoo"
 
-    assert project.selected(project.read(), "printer")["name"] == "elegoo"
-    assert library.names("printer") == ["elegoo"]
-    assert main(["printer", "elegoo", "--name", "other"]) == 1
-    assert "already in your library as 'elegoo'; --name names one being imported" in capsys.readouterr().err
+    assert main(["printer", "elegoo"]) == 0  # by its name
+    assert "Printer set to 'elegoo' (elegoo-centauri-carbon-0.6-nozzle)" in capsys.readouterr().out
+    assert main(["printer", "centauri", "--name", "other"]) == 0  # a second printer of the same kind
+    assert config.machines() == ["elegoo", "other"]
+    capsys.readouterr()
+    assert main(["printer"]) == 0
+    assert capsys.readouterr().out.startswith("Your printers:\n  elegoo  (0.6 nozzle: elegoo-centauri-carbon-0.6-nozzle; your default)\n* other  (0.6 nozzle: elegoo-centauri-carbon-0.6-nozzle)\n")
 
 
 def test_a_printer_is_found_by_words_in_any_order(github, home, print_dir, capsys):
@@ -559,8 +572,9 @@ def test_setup_from_an_address_finds_the_printer_and_keeps_the_address(github, h
 
     assert main(["setup", "--host", "centauri.local", "--no-completion"]) == 0
 
-    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"  # Orca has it with one nozzle only, so nothing is asked
-    assert config.printer("elegoo-centauri-carbon-0.6-nozzle")["host"] == "elegoo://centauri.local"
+    assert config.default_printer() == "centauri"  # Orca has it with one nozzle only, so nothing is asked; named after its host
+    assert config.machine("centauri").host == "elegoo://centauri.local"
+    assert config.machine("centauri").profile == "elegoo-centauri-carbon-0.6-nozzle"
     out = capsys.readouterr().out
     assert "✓ Elegoo Centauri Carbon (firmware V1.4.49)" in out
     assert "process   0.30mm Standard @Elegoo CC 0.6 nozzle" in out
@@ -569,7 +583,7 @@ def test_setup_from_an_address_finds_the_printer_and_keeps_the_address(github, h
 
 
 def test_setup_from_a_klipper_address_matches_and_fits_the_printer(github, home, print_dir, monkeypatch, capsys):
-    from deli import probe
+    from deli import config, probe
 
     klipper = probe.Printer("moonraker", "moonraker://voron.local", nozzle=0.6, bed=(256.0, 256.0), height=200.0, structure="corexy", hint="voron")
     monkeypatch.setattr(probe, "probe", lambda address: klipper)
@@ -577,7 +591,8 @@ def test_setup_from_a_klipper_address_matches_and_fits_the_printer(github, home,
     assert main(["setup", "--host", "voron.local", "--no-completion"]) == 0  # one of Orca's fits, so nothing is asked
 
     stored = library.read_settings(library.find("printer", "elegoo-centauri-carbon-0.6-nozzle"))
-    assert stored["max_print_height"] == "200"  # no taller than the machine's Z travel
+    assert stored.get("max_print_height") != "200"  # the library's profile is Orca's, untouched
+    assert config.profile_settings("printer", "voron")["max_print_height"] == "200"  # no taller than the machine's Z travel, as its own setting
     out = capsys.readouterr().out
     assert "print height lowered to 200 mm" in out
     assert "layer count" not in out  # the Centauri's G-code already tells Klipper its layers
@@ -633,7 +648,7 @@ def test_setup_asks_at_a_terminal(github, home, print_dir, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "Asking centauri.local what it is" in out and "\033[" not in out  # NO_COLOR is respected
-    assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
+    assert config.default_printer() == "centauri"  # named after its host
 
 
 def test_setup_without_an_address_finds_the_printer_by_name(github, home, print_dir, monkeypatch, capsys):

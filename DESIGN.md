@@ -53,6 +53,17 @@ record of what is on your shelf: that would only ever be out of date. (An early 
 out: defaults exist so you need not re-enter things, not to make you keep two names in
 step.)
 
+## Your printer is the unit, not Orca's profile
+
+OrcaSlicer has no notion of a machine, only of a printer-plus-nozzle, so its profiles are
+one per nozzle with long names, and a nozzle change is another profile with its own name.
+deli lets you name the printer you have and keeps everything that belongs to the machine
+under that name: its address, your modifications to it, and its nozzles, each with the
+profile and defaults for it. `deli nozzle 0.4` is then what you do when you change a
+nozzle. A print still records the exact profile and its hash, so nothing changes under it.
+(Added in 0.11, when a nozzle change on the user's Voron meant a new printer name, a new
+address and the overrides set again.)
+
 ## You should not need to know where things live
 
 Finding a printer goes **vendor, then printer, then a filament and a process for that

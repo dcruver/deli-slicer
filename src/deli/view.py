@@ -95,7 +95,7 @@ def send_args(body: dict) -> list[str]:
 def _host(doc) -> dict | None:
     """Where `deli send` would send the print, if it knows."""
     printer = project.chosen_profile(doc, "printer")
-    name = project.selected(doc, "printer").get("name")
+    name = project.machine(doc)
     try:
         host = send.host_for(name, printer[1].get("host_type", "") if printer else "")
     except send.SendError:

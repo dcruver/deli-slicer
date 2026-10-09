@@ -71,12 +71,12 @@ def _layer_keys(before: list[str]) -> list[str]:
 def _config_keys() -> list[str]:
     """What `deli config` reads or writes: the default printer, each library or configured
     printer's keys, and the settings the config holds (read here, written by `deli set`)."""
-    names = _quiet(lambda: library.names("printer"), [])
+    names = _quiet(lambda: library.names("printer"), []) + _quiet(config.machines, [])
     entries = [key for key, _ in _quiet(config.entries, [])]
-    settings = [key for key in entries if key.startswith(config.SETTINGS + ".") or f".{config.SETTINGS}." in key]
-    # The printers the config has keys for (not its default `printer`); a name can hold dots, as in "0.6-nozzle".
-    names += [key.removeprefix("printers.").rsplit(".", 1)[0] for key in entries if key.startswith("printers.") and key not in settings]
-    return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in config.PRINTER_KEYS), *settings})
+    # What the config holds already (its printers' nozzles and settings among them), and the
+    # keys any printer, from the library or the config, may be given.
+    plain = ("host", "api_key", "filament", "process")
+    return sorted({config.DEFAULT_PRINTER, *(f"printers.{name}.{field}" for name in names for field in plain), *entries})
 
 
 def _orca_presets(before: list[str]):
@@ -121,8 +121,18 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command in library.KINDS:
         if position != 0:
             return []
-        # The library's, and Orca's, which `deli printer` and the rest import as they choose.
-        return _quiet(lambda: library.names(command), []) + _quiet(lambda: _orca_presets([])().names(command), [])
+        # Your printers, the library's, and Orca's, which `deli printer` and the rest import as they choose.
+        yours = _quiet(config.machines, []) if command == "printer" else []
+        return yours + _quiet(lambda: library.names(command), []) + _quiet(lambda: _orca_presets([])().names(command), [])
+    if command == "nozzle":
+        if position != 0:
+            return []
+
+        def sizes():
+            machine = project.machine(project.read()) or config.default_printer()
+            return sorted(config.machine(machine).nozzles) if machine else []
+
+        return _quiet(sizes, [])
     if command in ("add", "send"):
         return [FILES] if position == 0 else []
     if command == "remove":
@@ -167,7 +177,8 @@ def _option_value(command: str, option: str) -> list[str]:
     if command == "import" and option == "--printer":
         return _quiet(lambda: _orca_presets([])().names("printer"), [])
     if command in ("set", "unset") and option in ("--printer", "--filament", "--process"):
-        return _quiet(lambda: library.names(option[2:]), [])
+        yours = _quiet(config.machines, []) if option == "--printer" else []
+        return yours + [name for name in _quiet(lambda: library.names(option[2:]), []) if name not in yours]
     if command == "config" and option == "--unset":
         return [key for key, _ in _quiet(config.entries, []) if not key.startswith(config.SETTINGS + ".") and f".{config.SETTINGS}." not in key]
     if command == "slice" and option in ("-o", "--output"):

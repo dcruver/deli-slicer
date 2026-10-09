@@ -432,3 +432,117 @@ def test_a_filaments_table_holds_only_settings(home, capsys):
     assert main(["config"]) == 1
 
     assert f"'filaments.{ABS}.host' is not a setting deli knows" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- a printer you have: a machine with nozzles
+
+
+def test_a_printer_named_with_name_keeps_its_nozzles_defaults_and_address(home, capsys):
+    """`deli printer X --name voron` describes a printer of yours: the profile is one of its
+    nozzles, the defaults are that nozzle's, the address and settings are the printer's."""
+    library.load("printer", str(EXPORT), name="mk3-0.6")
+    assert main(["printer", MK3, "--name", "prusa"]) == 0
+    assert capsys.readouterr().out.startswith(f"Your printer 'prusa' is '{MK3}', with a 0.4 nozzle\nPrinter set to 'prusa' ({MK3})\n")
+    data = tomllib.loads((home / "config.toml").read_text())
+    assert data["printers"]["prusa"] == {"nozzle": "0.4", "nozzles": {"0.4": {"profile": MK3}}}
+    assert tomllib.loads(Path("deli.toml").read_text())["printer"]["machine"] == "prusa"
+
+    main(["filament", ABS, "--default"])
+    main(["config", "printers.prusa.host", "elegoo://prusa.local"])
+    main(["set", "--printer", "prusa", "max_print_height", "200"])
+    data = tomllib.loads((home / "config.toml").read_text())
+    assert data["printers"]["prusa"]["nozzles"]["0.4"] == {"profile": MK3, "filament": ABS}
+    assert data["printers"]["prusa"]["host"] == "elegoo://prusa.local"
+    assert data["printers"]["prusa"]["settings"] == {"max_print_height": 200}
+
+    assert main(["printer", "mk3-0.6", "--name", "prusa"]) == 0  # the same printer with another nozzle
+    assert "'prusa' now has a 0.4 nozzle too" in capsys.readouterr().out  # EXPORT's nozzle is 0.4 whatever the name says
+    assert list(config.machine("prusa").nozzles) == ["0.4"]  # the same size replaces, it does not add
+
+
+def test_nozzle_lists_and_switches_a_printers_nozzles(home, capsys):
+    changed = EXPORT.read_text().replace("nozzle_diameter = 0.4", "nozzle_diameter = 0.6")
+    (home.parent / "mk3-06.ini").write_text(changed)
+    library.load("printer", str(home.parent / "mk3-06.ini"), name="mk3-0.6")
+    library.load("process", str(EXPORT), name="quality-0.6")
+    main(["printer", MK3, "--name", "prusa"])
+    main(["add", "cube.stl"])
+    main(["printer", "mk3-0.6", "--name", "prusa"])  # adds the 0.6 nozzle, and the print moves to it
+    main(["process", "quality-0.6", "--default"])  # the 0.6 nozzle's default process
+    main(["nozzle", "0.4"])
+    main(["process", QUALITY])  # this print's, with the 0.4 nozzle
+    capsys.readouterr()
+
+    assert main(["nozzle"]) == 0
+    assert capsys.readouterr().out == (
+        "Nozzles of 'prusa':\n"
+        f"* 0.4 mm  ({MK3}; in it now)\n"
+        "  0.6 mm  (mk3-0.6)\n"
+        "\nPut one in with: deli nozzle <size>\n"
+    )
+
+    assert main(["nozzle", "0.6"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith("'prusa' now has its 0.6 nozzle in: new prints on it start with 'mk3-0.6'\nThis print is on it: printer 'prusa' (mk3-0.6)\n")
+    assert "Process set to 'quality-0.6', the default for this printer (was '0.20mm-quality-mk3'" in out
+    assert config.machine("prusa").nozzle == "0.6"
+    chosen = tomllib.loads(Path("deli.toml").read_text())
+    assert chosen["printer"]["name"] == "mk3-0.6" and chosen["printer"]["machine"] == "prusa"
+    assert chosen["process"]["name"] == "quality-0.6"
+    assert main(["nozzle", "0.8"]) == 1
+    assert "no 0.8 nozzle for 'prusa'" in capsys.readouterr().err
+    assert main(["nozzle", "big"]) == 1
+
+
+def test_send_and_the_printers_settings_go_by_the_printer_not_the_profile(home, monkeypatch, capsys):
+    from deli import send, settings
+
+    main(["printer", MK3, "--name", "prusa"])
+    main(["config", "printers.prusa.host", "elegoo://prusa.local"])
+    main(["set", "--printer", "prusa", "walls", "4"])
+    capsys.readouterr()
+    doc = __import__("deli.project", fromlist=["x"]).read()
+
+    assert send.host_for(__import__("deli.project", fromlist=["x"]).machine(doc)).url == "http://prusa.local"
+    assert settings.effective(doc, "perimeters") == ("4", "your config for the printer 'prusa'")
+    assert main(["set", "walls"]) == 0
+    assert capsys.readouterr().out == "perimeters is not changed by this print; your config for the printer 'prusa' has 4\n"
+
+
+def test_a_printer_written_the_short_way_is_a_machine_with_one_nozzle(home):
+    main(["config", HOST, "elegoo://mk3.local"])
+    main(["config", f"printers.{MK3}.filament", "spare-pla"])
+
+    machine = config.machine(MK3)
+
+    assert machine.nozzle == "0.4" and machine.profile == MK3 and machine.current.filament == "spare-pla"
+    assert config.machine_of(MK3) == MK3
+    assert "nozzles" not in tomllib.loads((home / "config.toml").read_text())["printers"][MK3]  # left as written
+
+
+def test_naming_a_printer_moves_what_the_config_said_about_its_profile(home, capsys):
+    """A printer that was named after its profile keeps its address, settings and defaults
+    under its new name, and prints that name only the profile are on it."""
+    main(["config", HOST, "elegoo://mk3.local"])
+    main(["config", f"printers.{MK3}.filament", "spare-pla"])
+    main(["set", "--printer", MK3, "max_print_height", "200"])
+    main(["printer", MK3, "--default"])
+    main(["add", "cube.stl"])  # a print on the profile, before the naming
+    capsys.readouterr()
+
+    assert main(["printer", MK3, "--name", "prusa"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"what your config said about '{MK3}' (its address, settings and defaults) is now 'prusa''s" in out
+    data = tomllib.loads((home / "config.toml").read_text())
+    assert MK3 not in data["printers"]
+    assert data["printers"]["prusa"]["host"] == "elegoo://mk3.local"
+    assert data["printers"]["prusa"]["settings"] == {"max_print_height": 200}
+    assert data["printers"]["prusa"]["nozzles"]["0.4"] == {"profile": MK3, "filament": "spare-pla"}
+    assert config.default_printer() == "prusa"
+    from deli import project
+
+    assert project.machine(project.read()) == "prusa"
+    Path("deli.toml").write_text(f'[printer]\nname = "{MK3}"\nsha256 = "x"\n')  # an older print, naming the profile alone
+    assert project.machine(project.read()) == "prusa"  # follows the name, for its address and settings

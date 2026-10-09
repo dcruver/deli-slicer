@@ -829,10 +829,8 @@ Open items, each a real behaviour difference from Orca:
 - **Brim.** Orca's default `auto_brim` is converted to no brim.
 - **Fans.** Auxiliary and exhaust fan settings are dropped. The chamber-fan commands
   inside the start G-code are kept.
-- **Setup's edits to the printer.** To do. `deli setup`'s `_fit_to` writes the Z travel,
-  `MATERIAL=` and the layer-count macros into the library's printer INI, which a `deli import`
-  overwrites; now that `deli set --printer` keeps a printer's settings in the config beside
-  the profile, `_fit_to` should write them there instead.
+- **Setup's edits to the printer.** Done (2026-10-09): `_fit_to` writes to the machine's
+  settings in the config (`printers.<name>.settings`), not the library INI.
 - **Per-extruder strings in `deli set`.** Done (2026-10-09): `start_filament_gcode` and the
   other `coStrings` settings are quoted for the engine by `settings.for_engine` when given
   unquoted, so a `;` comment is not read as the next extruder's value; several extruders'

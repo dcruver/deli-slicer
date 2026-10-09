@@ -294,37 +294,55 @@ Anyone can host a printer this way: a PrusaSlicer INI file at any `https://` add
 Imported or loaded, a file never carries a printer's network address or API key; those
 go in your config (below).
 
+### Name your printer
+
+Orca has a profile per nozzle, so its names are long and a nozzle change is another
+profile. deli lets you name the printer you have, and keep its nozzles under that name:
+
+```
+deli printer "voron 2.4 350 0.8" --name voron    # your Voron, with its 0.8 nozzle in
+deli nozzle 0.4                                   # you changed the nozzle: Orca's 0.4 profile comes in
+deli nozzle                                       # its nozzles, and which is in it
+deli printer voron                                # this print goes on it, with whatever nozzle it has
+```
+
+The address, the settings you give it with `deli set --printer voron`, and `deli send`
+all go by the printer's name, whatever nozzle is in. Each nozzle keeps its own profile
+and the filament and process a new print starts with. `deli setup` names a printer after
+its host name. A printer you never named is one named after its profile, as before.
+
 ### Tell deli where your printer is
 
 To send prints to it, deli needs its address:
 
 ```
-deli config printers.voron-2.4-350-0.4-nozzle.host moonraker://voron.local
+deli config printers.voron.host moonraker://voron.local
 ```
 
 And to change what new prints start with:
 
 ```
-deli printer voron-2.4-350-0.4-nozzle --default   # the printer new prints start with
-deli filament "Generic PETG @System" --default     # the filament new prints on it start with
-deli process "0.15mm Optimal @Voron" --default     # its usual process
+deli printer voron --default                      # the printer new prints start with
+deli filament "Generic PETG @System" --default     # the filament new prints on it start with, with this nozzle
+deli process "0.15mm Optimal @Voron" --default     # its usual process, with this nozzle
 ```
 
 This writes `~/.config/deli/config.toml`, which you can also edit by hand. `host` is
 where `deli send` sends; its scheme says what kind of host the printer is:
 `moonraker://` (Klipper), `octoprint://` or `elegoo://` (Elegoo's Centauri Carbon)
 (`api_key` alongside, if the host needs one). `filament` and `process` are what a new
-print on that printer starts with, so you do not choose them again for every print.
-They are defaults and nothing more: a print that chooses another filament is sliced
-and sent like any other.
+print on that printer starts with, kept per nozzle, so you do not choose them again for
+every print. They are defaults and nothing more: a print that chooses another filament
+is sliced and sent like any other.
 
 The three `--default` lines write the config's `printer` key (`deli config printer
-<name>` sets the same one), and that printer's `filament` and `process` (the keys
-`deli config printers.<printer>.filament` and `.process` set). A print started in a
-new directory, with `deli add` say, takes all three, written into its `deli.toml` like
-any other choice. A print that wants something else chooses it with `deli printer`,
-`deli filament` or `deli process` as usual, and changing a default later leaves the
-prints you already have alone. `deli printer` marks your default in its list, and
+<name>` sets the same one), and the `filament` and `process` of the nozzle the print is
+on (`printers.<printer>.nozzles.<size>.filament`, or `printers.<printer>.filament` for
+a printer named after its one profile). A print started in a new directory, with
+`deli add` say, takes all three, written into its `deli.toml` like any other choice. A
+print that wants something else chooses it with `deli printer`, `deli filament` or
+`deli process` as usual, and changing a default later leaves the prints you already have
+alone. `deli printer` lists your printers first and marks your default, and
 `deli config` shows everything that is set.
 
 ## Print something
@@ -559,6 +577,7 @@ check the file arrived and start it from the printer's own screen.
 |---|---|
 | `deli setup` | tab completion, your printer and its address, asked for once |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
+| `deli nozzle [size]` | the nozzles of this print's printer, or put one in: its profile comes from Orca if need be, and the print moves to it |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |

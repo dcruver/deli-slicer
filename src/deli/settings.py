@@ -194,7 +194,8 @@ def config_layers(doc) -> list[Layer]:
 
     layers = [layer(None)]
     for kind in config.LAYERS:
-        if name := project.selected(doc, kind).get("name"):
+        name = project.machine(doc) if kind == "printer" else project.selected(doc, kind).get("name")
+        if name:
             layers.append(layer(kind, name))
     return layers
 

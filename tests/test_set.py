@@ -321,20 +321,19 @@ def test_printer_setting_goes_in_the_config_under_the_printer_and_starts_no_prin
 
 
 def test_printer_is_named_by_a_part_only_it_has(project, tmp_path, mk3, capsys):
-    assert main(["set", "--printer", "mk3", "walls", "3"]) == 0
-
-    assert on_printer(tmp_path) == {"perimeters": 3}
-
     library.load("printer", str(EXPORT), name="mk3-spare")
     assert main(["set", "--printer", "mk3", "walls", "4"]) == 1
     assert "2 printers matching 'mk3'" in capsys.readouterr().err
     assert main(["set", "--printer", "mk4", "walls", "4"]) == 1
     assert "no printer 'mk4' in your library" in capsys.readouterr().err
-    assert on_printer(tmp_path) == {"perimeters": 3}
+    assert on_printer(tmp_path) == {}
+
     assert main(["set", "--printer", "prusa mk3", "walls", "4"]) == 0  # every word, in any order
     assert on_printer(tmp_path) == {"perimeters": 4}
     assert main(["set", "--printer", "MK3 Spare", "walls", "5"]) == 0
     assert on_printer(tmp_path, "mk3-spare") == {"perimeters": 5}
+    assert main(["set", "--printer", "mk3", "walls", "6"]) == 1  # both are in the config now, still two
+    assert "2 printers matching 'mk3'" in capsys.readouterr().err
 
 
 def test_the_printers_setting_lies_over_the_global_one_and_under_the_prints_own(project, tmp_path, mk3, capsys):

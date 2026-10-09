@@ -5,6 +5,17 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- A printer of yours can have a name: `deli printer "voron 2.4 350 0.8" --name voron`. Its
+  address, its settings (`deli set --printer voron`) and `deli send` go by that name, and
+  its nozzles are kept under it, each with its profile and the filament and process a new
+  print starts with. `deli nozzle` lists them; `deli nozzle 0.4` puts one in, importing
+  Orca's profile for it when the config has none, and moves this print to it. `deli printer`
+  lists your printers first. `deli setup` names the printer after its host name, and
+  keeps what it changed to fit the printer (Z travel, Klipper's layer count) as the
+  printer's settings, where `deli import` leaves them, instead of editing the profile.
+  **Changed:** `deli.toml` records the printer's name as `machine` beside the profile when
+  they differ; a printer never named is one named after its profile, as before.
+
 - `deli set temp`, when no setting is named so, lists the settings with `temp` in their
   name, each with its value and where it comes from: the way to find a setting's name.
   `deli set` takes several settings at once (`deli set infill 20% walls 3`), `deli unset`

@@ -79,40 +79,43 @@ def _load(args: argparse.Namespace) -> int:
 def _config_fills(doc, starting: bool) -> list[str]:
     """Choose for the print what it has not chosen and the config has a default for: your
     default printer when the print is only now being started, and the filament and process
-    of the print's printer. Returns a line saying so for each."""
+    of the print's printer, for the nozzle it is on. Returns a line saying so for each."""
     lines = []
 
-    def choose(kind: str, name: str, missing: str, why: str) -> None:
+    def choose(kind: str, name: str, missing: str, why: str, machine: str | None = None) -> None:
         try:
             path = library.find(kind, name)
         except library.LibraryError:
             lines.append(f"your config names the {kind} '{name}' {missing}, but it is not in your library")
             return
-        project.select(doc, kind, name, library.fingerprint(path))
+        project.select(doc, kind, name, library.fingerprint(path), machine)
         lines.append(f"{kind.capitalize()} set to '{name}', {why}")
 
     if starting and not project.selected(doc, "printer").get("name") and (default := config.default_printer()):
-        choose("printer", default, "as your default", "your default")
-    if printer := project.selected(doc, "printer").get("name"):
-        about = config.printer(printer)
+        if profile := config.machine(default).profile:
+            choose("printer", profile, "as your default", f"your default" if profile == default else f"your default printer '{default}'", default)
+        else:
+            lines.append(f"your config's default printer '{default}' does not say which nozzle is in it; say with: deli nozzle <size>")
+    if (profile := project.selected(doc, "printer").get("name")) and (machine := project.machine(doc)):
+        nozzle = config.machine(machine).for_profile(profile)
         for other in ("filament", "process"):
-            default = about.get(other)
+            default = getattr(nozzle, other, None)
             if default and not project.selected(doc, other).get("name"):
                 choose(other, default, "for this printer", "from your config for this printer")
     return lines
 
 
-def _follow_printer(doc, printer: str) -> list[str]:
-    """When a print changes printer, its filament and process change with it, to the new
-    printer's defaults: a process is made for a printer's nozzle and a filament converted
-    for its bed, so the old printer's would not fit. What was chosen before is named, so
-    that a deliberate choice can be made again. Without defaults for the new printer the
-    old ones stay, and the lines say so."""
+def _follow_printer(doc, machine: str, profile: str) -> list[str]:
+    """When a print changes printer, or nozzle, its filament and process change with it, to
+    the config's defaults for that printer and nozzle: a process is made for a nozzle and a
+    filament converted for a bed, so the old ones would not fit. What was chosen before is
+    named, so that a deliberate choice can be made again. Without defaults the old ones
+    stay, and the lines say so."""
     lines = []
-    about = config.printer(printer)
+    nozzle = config.machine(machine).for_profile(profile)
     for kind in ("filament", "process"):
         before = project.selected(doc, kind).get("name")
-        default = about.get(kind)
+        default = getattr(nozzle, kind, None)
         if not before or before == default:
             continue
         if default and default in library.names(kind):
@@ -134,21 +137,46 @@ def _start(doc) -> None:
 def _make_default(doc, kind: str, name: str) -> int:
     """`deli printer|filament|process NAME --default`: record it in the config, not in the print."""
     if kind == "printer":
-        config.set_value(config.DEFAULT_PRINTER, name)
-        print(f"Your default printer is now '{name}': new prints start with it")
+        machine, profile = name
+        config.set_value(config.DEFAULT_PRINTER, machine)
+        print(f"Your default printer is now '{machine}': new prints start with it")
         return 0
-    printer = project.selected(doc, "printer").get("name") or config.default_printer()
-    if not printer:
+    machine = project.machine(doc) or config.default_printer()
+    if not machine:
         raise CommandError(
             f"a default {kind} belongs to a printer, and neither this print nor your config names one; "
             "set your default printer first with: deli printer <name> --default"
         )
-    config.set_value(f"printers.{printer}.{kind}", name)
-    print(f"The default {kind} for '{printer}' is now '{name}': new prints on that printer start with it")
+    profile = project.selected(doc, "printer").get("name") or config.machine(machine).profile
+    if not profile:
+        raise CommandError(f"'{machine}' does not say which nozzle is in it; say with: deli nozzle <size>")
+    config.set_default(machine, profile, kind, name)
+    nozzle = config.machine(machine).for_profile(profile)
+    which = f" with its {nozzle.size} nozzle" if nozzle and len(config.machine(machine).nozzles) > 1 else ""
+    print(f"The default {kind} for '{machine}'{which} is now '{name}': new prints on that printer start with it")
     return 0
 
 
 _PLURALS = {"printer": "printers", "filament": "filaments", "process": "processes"}
+
+
+def _list_machines(names: list[str], chosen: str | None) -> None:
+    """`deli printer`'s first part: the printers your config describes, the one this print
+    is on marked, each with its nozzles and the profile for the one in it now."""
+    print("Your printers:")
+    default = config.default_printer()
+    for name in names:
+        found = config.machine(name)
+        notes = []
+        if found.current:
+            others = [size for size in found.nozzles if size != found.current.size]
+            notes.append(f"{found.current.size} nozzle: {found.current.profile}" + (f"; also {', '.join(others)}" if others else ""))
+        else:
+            notes.append("nozzles " + ", ".join(found.nozzles) + "; which is in it? deli nozzle <size>")
+        if name == default:
+            notes.append("your default")
+        print(f"{'*' if name == chosen else ' '} {name}  ({'; '.join(notes)})")
+    print("\nOthers, from your library and OrcaSlicer:")
 
 
 def _list_kind(doc, kind: str) -> int:
@@ -158,9 +186,13 @@ def _list_kind(doc, kind: str) -> int:
     those in your library. Where a choice lives, the library or Orca, is not shown: either
     is chosen the same way. Orca's names are shown for Orca's."""
     current = project.selected(doc, kind)
-    printer = project.selected(doc, "printer").get("name") or config.default_printer()
-    about = config.printer(printer) if printer and kind != "printer" else {}
+    printer = _print_profile(doc)
+    machine = project.machine(doc) or config.default_printer()
+    nozzle = config.machine(machine).for_profile(printer) if machine and printer and kind != "printer" else None
+    about = {"filament": nozzle.filament, "process": nozzle.process} if nozzle else {}
     mine = library.names(kind)
+    if kind == "printer" and (yours := config.machines()):
+        _list_machines(yours, machine if project.selected(doc, "printer") else None)
 
     try:
         presets = orca_install.Presets(github=orca_install.ORCA_REF)
@@ -232,18 +264,24 @@ def _choose(args: argparse.Namespace) -> int:
     if args.name is None:
         return _list_kind(doc, kind)
 
-    name = _from_library_or_orca(doc, kind, args.name, args.name_as and library.slug(args.name_as))
+    name_as = args.name_as and library.slug(args.name_as)
+    if kind == "printer":
+        machine, name = _printer_named(doc, args.name, name_as)
+    else:
+        name = _from_library_or_orca(doc, kind, args.name, name_as)
+        machine = None
     path = library.find(kind, name)
     if args.default:
-        return _make_default(doc, kind, name)
+        return _make_default(doc, kind, (machine, name) if kind == "printer" else name)
     starting = not project.FILE.exists()
     previous = project.selected(doc, kind).get("name")
-    project.select(doc, kind, name, library.fingerprint(path))
-    print(f"{kind.capitalize()} set to '{name}'")
+    previous_machine = project.machine(doc)
+    project.select(doc, kind, name, library.fingerprint(path), machine)
+    print(f"{kind.capitalize()} set to '{machine}'" + (f" ({name})" if machine != name else "") if kind == "printer" else f"{kind.capitalize()} set to '{name}'")
     if summary := _SUMMARIES[kind](library.read_settings(path)):
         print(f"  {summary}")
-    if kind == "printer" and previous and previous != name:
-        for line in _follow_printer(doc, name):
+    if kind == "printer" and previous and (previous != name or previous_machine != machine):
+        for line in _follow_printer(doc, machine, name):
             print(f"  {line}")
     if kind == "printer" or starting:
         # The config's defaults fill in what the print has not chosen yet.
@@ -743,6 +781,91 @@ def _value(args: argparse.Namespace) -> str:
     return path.read_text().replace("\r\n", "\n").replace("\n", "\\n")
 
 
+def _orca_sizes(presets: orca_install.Presets | None, profile: str) -> tuple[str, dict[str, str]]:
+    """Orca's printers that are this one with another nozzle: the model's name without the
+    nozzle, and Orca's printer for each size ("0.4" -> "Voron 2.4 350 0.4 nozzle")."""
+    orca_name = _orca_printer(presets, profile) if presets else None
+    if not orca_name:
+        return "", {}
+    base = re.sub(r"\s*\d*\.?\d+\s*nozzle\s*$", "", orca_name, flags=re.I)
+    if base == orca_name:
+        return orca_name, {}
+    sizes = {}
+    for name in presets.names("printer"):
+        if found := re.fullmatch(re.escape(base) + r"\s+(\d*\.?\d+)\s*nozzle", name, re.I):
+            sizes[f"{float(found[1]):g}"] = name
+    return base, sizes
+
+
+def _nozzle(args: argparse.Namespace) -> int:
+    """`deli nozzle [SIZE]`: the nozzles of this print's printer (or your default one), and
+    which is in it; with a size, that nozzle goes in: the printer's profile for it, imported
+    from Orca when the config has none, new prints start with it, and this print moves to it."""
+    doc = project.read()
+    machine = project.machine(doc) or config.default_printer()
+    if not machine:
+        raise CommandError("no printer is chosen for this print, and your config names no default; choose one with: deli printer <name>")
+    found = config.machine(machine)
+    profile = project.selected(doc, "printer").get("name") or found.profile
+    try:
+        presets = orca_install.Presets(github=orca_install.ORCA_REF)
+    except orca_install.OrcaError:
+        presets = None
+    model, orca = _orca_sizes(presets, profile) if profile else ("", {})
+
+    def size_key(size: str) -> float:
+        try:
+            return float(size)
+        except ValueError:
+            return 0.0
+
+    if args.size is None:
+        sizes = sorted({*found.nozzles, *orca}, key=size_key)
+        print(f"Nozzles of '{machine}'" + (f", Orca's {model}" if model else "") + ":")
+        for size in sizes:
+            notes = []
+            if size in found.nozzles:
+                notes.append(found.nozzles[size].profile)
+                if size == found.nozzle:
+                    notes.append("in it now")
+            else:
+                notes.append("not imported yet")
+            mark = "*" if size in found.nozzles and found.nozzles[size].profile == profile and project.selected(doc, "printer") else " "
+            print(f"{mark} {size} mm  ({'; '.join(notes)})")
+        print("\nPut one in with: deli nozzle <size>")
+        return 0
+
+    try:
+        size = f"{float(args.size.removesuffix('mm')):g}"
+    except ValueError:
+        raise CommandError(f"'{args.size}' is not a nozzle size; give one in mm, such as 0.4") from None
+    if size in found.nozzles:
+        new = found.nozzles[size].profile
+        if new not in library.names("printer"):
+            raise CommandError(f"the profile for the {size} nozzle, '{new}', is not in your library; import it with: deli import orca printer \"...\" --name {new}")
+        config.set_current_nozzle(machine, size) if config.NOZZLES in config.read().get("printers", {}).get(machine, {}) else config.set_nozzle(machine, found.nozzles[size], current=True)
+    elif size in orca:
+        new = _from_library_or_orca(doc, "printer", orca[size], machine=machine)
+        if config.absorb(machine, new):
+            print(f"  what your config said about '{new}' (its address, settings and defaults) is now '{machine}''s")
+        config.set_nozzle(machine, config.machine(machine).for_profile(new) or config.Nozzle(size, new), current=True)
+    else:
+        have = ", ".join(sorted({*found.nozzles, *orca}, key=size_key)) or "none known"
+        raise CommandError(f"no {size} nozzle for '{machine}': Orca has {model or 'it'} with {have}. For a profile of your own: deli printer <profile> --name {machine}")
+    print(f"'{machine}' now has its {size} nozzle in: new prints on it start with '{new}'")
+    if "nozzle" in machine and machine == found.nozzles.get(found.nozzle or "", config.Nozzle("", "")).profile:
+        print(f"  (the printer is named after its old profile; give it a name of its own with: deli printer {new} --name <name>)")
+    if project.selected(doc, "printer") and profile != new:
+        project.select(doc, "printer", new, library.fingerprint(library.find("printer", new)), machine)
+        print(f"This print is on it: printer '{machine}' ({new})")
+        for line in _follow_printer(doc, machine, new):
+            print(f"  {line}")
+        for line in _config_fills(doc, False):
+            print(f"  {line}")
+        project.write(doc)
+    return 0
+
+
 def _profile_note(doc, key: str) -> str:
     """What the chosen profile has for a setting, to print under the print's own value."""
     kind = settings.kinds()[key]
@@ -804,14 +927,16 @@ def _own(doc, *more: dict[str, str]) -> set[str]:
     return keys
 
 
-def _profiles_of(printer: str | None) -> dict[str, str]:
-    """The settings of a printer and its default filament and process from the config, as far
-    as they are in the library."""
-    if not printer:
+def _profiles_of(machine: str | None) -> dict[str, str]:
+    """The settings of a printer's profile, with the nozzle in it now, and its default
+    filament and process from the config, as far as they are in the library."""
+    if not machine:
         return {}
-    about = config.printer(printer)
+    nozzle = config.machine(machine).current if machine in config.machines() or machine in library.names("printer") else None
+    if not nozzle:
+        return {}
     merged: dict[str, str] = {}
-    for kind, name in (("printer", printer), ("filament", about.get("filament")), ("process", about.get("process"))):
+    for kind, name in (("printer", nozzle.profile), ("filament", nozzle.filament), ("process", nozzle.process)):
         if name and name in library.names(kind):
             merged |= library.read_settings(library.find(kind, name))
     return merged
@@ -840,7 +965,10 @@ def _in_library(kind: str, wanted: str) -> str | None:
 
 
 def _named(kind: str, wanted: str) -> str:
-    """The library's name for the profile `--printer|--filament|--process` names."""
+    """The library's name for the profile `--filament|--process` names, or, for `--printer`,
+    the config's printer (machine), else the library printer named after itself."""
+    if kind == "printer" and (found := _machine_named(wanted)):
+        return found
     if found := _in_library(kind, wanted):
         return found
     names = library.names(kind)
@@ -1347,7 +1475,7 @@ def _import(args: argparse.Namespace) -> int:
     elif converted.dropped:
         print(f"  {len(converted.dropped)} Orca settings have no PrusaSlicer equivalent and were left out (-v lists them)")
     if args.kind == "printer" and not args.output and not args.printer_only:
-        _import_defaults(presets, imported.orca_name, loaded.name)
+        _import_defaults(presets, imported.orca_name, loaded.name, loaded.name)
     return 0
 
 
@@ -1381,7 +1509,7 @@ def _for_this_printer(doc, kind: str, name: str) -> str:
         return name
     path = library.find(kind, name)
     made_for = library.made_for(path)
-    printer = project.selected(doc, "printer").get("name") or config.default_printer()
+    printer = _print_profile(doc)
     if not made_for or not printer:
         return name
     try:
@@ -1398,7 +1526,52 @@ def _for_this_printer(doc, kind: str, name: str) -> str:
     return converted
 
 
-def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = None) -> str:
+def _machine_named(wanted: str) -> str | None:
+    """The config's printer someone typed the name of, or words of it; None when none is
+    like it, an error when several are."""
+    names = config.machines()
+    typed = library.slug(wanted)
+    if typed in names or wanted in names:
+        return wanted if wanted in names else typed
+    words = [word for word in (library.slug(word) for word in wanted.split()) if word]
+    found = [name for name in names if (typed and typed in name) or (words and all(word in name for word in words))]
+    if len(found) > 1:
+        raise CommandError(f"your config has {len(found)} printers matching '{wanted}'; which one?\n  " + "\n  ".join(found))
+    return found[0] if found else None
+
+
+def _printer_named(doc, wanted: str, name_as: str | None = None) -> tuple[str, str]:
+    """The printer `deli printer NAME` asks for, as the config's printer (machine) and the
+    library profile: one of your printers by its name, with the nozzle in it now; else a
+    profile in the library or Orca's, on the printer that runs it, or on one named with
+    `--name` (made, or given this profile as another nozzle), or on one named after it."""
+    machine = None if name_as else _machine_named(wanted)
+    if machine:
+        found = config.machine(machine)
+        if not found.profile:
+            raise CommandError(f"'{machine}' does not say which nozzle is in it; its nozzles are {', '.join(found.nozzles)}. Say with: deli nozzle <size>")
+        if found.profile not in library.names("printer"):
+            raise CommandError(f"the profile for '{machine}', '{found.profile}', is not in your library; import it with: deli import orca printer \"...\" --name {found.profile}")
+        return machine, found.profile
+    existed = name_as in config.machines() if name_as else False
+    profile = _from_library_or_orca(doc, "printer", wanted, machine=name_as)
+    if name_as:
+        size = config.nozzle_size(profile) or "?"
+        before = config.machine(name_as) if existed else None
+        nozzle = before.for_profile(profile) if before else None
+        moved = config.absorb(name_as, profile)
+        config.set_nozzle(name_as, nozzle or config.machine(name_as).for_profile(profile) or config.Nozzle(size, profile), current=True)
+        if before and not nozzle:
+            print(f"'{name_as}' now has a {size} nozzle too, '{profile}'")
+        elif not before:
+            print(f"Your printer '{name_as}' is '{profile}', with a {size} nozzle")
+        if moved:
+            print(f"  what your config said about '{profile}' (its address, settings and defaults) is now '{name_as}''s")
+        return name_as, profile
+    return config.machine_of(profile) or profile, profile
+
+
+def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = None, machine: str | None = None) -> str:
     """The library's name for what `deli printer|filament|process NAME` asks for: one in the
     library by its name or a part only it has; else one of Orca's presets (at the release
     `deli import` reads), imported now, a printer with its default process and filament,
@@ -1424,11 +1597,11 @@ def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = Non
         loaded = orca_install.into_library(imported, name_as)
         left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
         print(f"Imported printer '{loaded.name}' from Orca {release}'s '{orca_name}' ({len(loaded.settings)} settings{left_out})")
-        _import_defaults(presets, orca_name, loaded.name)
+        _import_defaults(presets, orca_name, machine or loaded.name, loaded.name)
         return loaded.name
 
     # Converted for the print's printer, when Orca has it (a converted printer carries Orca's name).
-    printer = project.selected(doc, "printer").get("name") or config.default_printer()
+    printer = _print_profile(doc)
     orca_printer = _orca_printer(presets, printer) if printer else None
     name, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer, name_as)
     if stored is not None:
@@ -1437,12 +1610,27 @@ def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = Non
     return name
 
 
-def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: str) -> None:
-    """With a printer, the process and filament Orca starts it with, and those made the
-    config's defaults for it (and it the default printer) where the config names none."""
+def _print_profile(doc) -> str | None:
+    """The library printer profile a filament or process is converted for: the print's, or
+    the default printer's, with the nozzle in it now."""
+    if profile := project.selected(doc, "printer").get("name"):
+        return profile
+    default = config.default_printer()
+    return config.machine(default).profile if default else None
+
+
+def _import_defaults(presets: orca_install.Presets, orca_printer: str, machine: str, printer: str) -> None:
+    """With a printer profile, the process and filament Orca starts it with, and those made
+    the config's defaults for the machine's nozzle that runs it (and it the default printer)
+    where the config names none."""
     defaults = presets.defaults(orca_printer)
     doc = config.read()
-    mine = config.printer(printer, doc)
+    if machine == printer or (machine in config.machines(doc) and config.machine(machine, doc).for_profile(printer)):
+        nozzle = config.machine(machine, doc).for_profile(printer)  # a machine named after its profile needs no table
+    else:
+        nozzle = config.Nozzle(config.nozzle_size(printer) or "?", printer)
+        config.set_nozzle(machine, nozzle, current=machine not in config.machines(doc) or not config.machine(machine, doc).nozzle)
+    mine = {"filament": nozzle.filament, "process": nozzle.process}
     picked = None
     if "process" not in defaults:
         # Orca names none for some printers (95 of them in 2.4.2); a print cannot slice
@@ -1463,11 +1651,11 @@ def _import_defaults(presets: orca_install.Presets, orca_printer: str, printer: 
             why = "made for this printer" if defaults[kind] == picked else "Orca's default for this printer"
             print(f"Imported {kind} '{name}', {why} ({stored})")
         if not mine.get(kind):
-            config.set_value(f"printers.{printer}.{kind}", name)
-            print(f"  and made it the default {kind} for new prints on '{printer}'")
+            config.set_default(machine, printer, kind, name)
+            print(f"  and made it the default {kind} for new prints on '{machine}'")
     if config.default_printer(doc) is None:
-        config.set_value(config.DEFAULT_PRINTER, printer)
-        print(f"Made '{printer}' your default printer for new prints")
+        config.set_value(config.DEFAULT_PRINTER, machine)
+        print(f"Made '{machine}' your default printer for new prints")
 
 
 def _home_relative(path: Path) -> str:
@@ -1509,7 +1697,7 @@ def _send(args: argparse.Namespace) -> int:
             paths = [sliced[plate] for plate in sorted(sliced)]
 
     printer = project.chosen_profile(doc, "printer")
-    printer_name = project.selected(doc, "printer").get("name")
+    printer_name = project.machine(doc)
     host = send.host_for(printer_name, printer[1].get("host_type", "") if printer else "")
 
     def progress(sent: int, total: int) -> None:
@@ -1558,8 +1746,9 @@ def _config(args: argparse.Namespace) -> int:
         library.find(field, library.slug(args.value))  # must be in the library
     elif field == "host" and not args.value.startswith(("http://", "https://")):
         send.parse_host(args.value, where=args.key)  # a plain http host is checked against the printer's host_type when sending
+    known = name in config.machines() or library.slug(name) in library.names("printer")
     config.set_value(args.key, args.value)
-    if library.slug(name) not in library.names("printer"):
+    if not known:
         print(f"  note: no printer named '{name}' is in your library yet")
     return 0
 
@@ -1801,10 +1990,24 @@ def _layer_info(current: dict[str, str]) -> dict[str, str]:
             "layer_gcode": f"{layer}\\n{LAYER_INFO}" if layer else LAYER_INFO}
 
 
-def _fit_to(printer: str, found) -> list[str]:
-    """Make a newly imported printer match what the machine reported: no taller prints than
-    its Z travel, the material passed to a Klipper PRINT_START that reads it, and the layers
-    told to Klipper for Mainsail and Fluidd."""
+def _machine_for_setup(found) -> str | None:
+    """The name `deli setup` gives the printer at an address: the first label of its host
+    name ("troodon" for troodon.local), unless the config has a printer there already."""
+    hostname = send.parse_host(found.host).hostname if found.host else ""
+    name = library.slug(hostname.split(".")[0]) if hostname else ""
+    if not name or name[0].isdigit():  # an IP address names nothing
+        return None
+    for other in config.machines():
+        if config.machine(other).host == found.host:
+            return other
+    return name
+
+
+def _fit_to(machine: str, printer: str, found) -> list[str]:
+    """Make a newly imported printer match what the machine reported, as settings for every
+    print on it in the config, where a `deli import` of the profile leaves them: no taller
+    prints than its Z travel, the material passed to a Klipper PRINT_START that reads it,
+    and the layers told to Klipper for Mainsail and Fluidd."""
     path = library.find("printer", printer)
     current = library.read_settings(path)
     changes, said = {}, []
@@ -1821,8 +2024,8 @@ def _fit_to(printer: str, found) -> list[str]:
     if found.kind == "moonraker" and (layers := _layer_info(current | changes)):
         changes |= layers
         said.append("Klipper is told the layer count and the current layer, for Mainsail and Fluidd")
-    if changes:
-        library.update(path, changes)
+    for key, value in changes.items():
+        config.set_profile_setting("printer", machine, key, value)
     return said
 
 
@@ -1880,19 +2083,23 @@ def _setup(args: argparse.Namespace) -> int:
             raise CommandError("several of Orca's printers fit what answered there; name yours with --printer")
         if wanted:
             had = set(library.names("printer"))
+            machine = _machine_for_setup(found) if found else None
             with contextlib.redirect_stdout(io.StringIO()):
-                printer = _from_library_or_orca(project.read(), "printer", wanted)
-            about = config.printer(printer)
-            _done(_orca_name("printer", printer))
+                profile = _from_library_or_orca(project.read(), "printer", wanted, machine=machine)
+            printer = machine or config.machine_of(profile) or profile
+            if machine and not config.machine(machine).for_profile(profile):
+                config.set_nozzle(machine, config.Nozzle(config.nozzle_size(profile) or "?", profile), current=True)
+            nozzle = config.machine(printer).for_profile(profile)
+            _done(_orca_name("printer", profile) + (f", as '{printer}'" if printer != profile else ""))
             for kind in ("process", "filament"):
-                print(f"     {kind:<9} {_orca_name(kind, about.get(kind)) or _dim('none yet; choose one with: deli ' + kind)}")
-            if found and printer not in had:
-                for line in _fit_to(printer, found):
+                print(f"     {kind:<9} {_orca_name(kind, getattr(nozzle, kind, None)) or _dim('none yet; choose one with: deli ' + kind)}")
+            if found and profile not in had:
+                for line in _fit_to(printer, profile, found):
                     print(f"     {_dim(line)}")
     if printer and found and found.kind != "bambu":
         config.set_value(f"printers.{printer}.host", found.host)
         _done(f"deli send sends to {found.host}")
-        if found.kind == "octoprint" and asking and not config.printer(printer).get("api_key"):
+        if found.kind == "octoprint" and asking and not config.machine(printer).api_key:
             if key := _ask(f"   OctoPrint's API key: {_dim('(Enter to skip)')} "):
                 config.set_value(f"printers.{printer}.api_key", key)
 
@@ -1904,9 +2111,9 @@ def _setup(args: argparse.Namespace) -> int:
             _done("new prints start with it")
         else:
             print(f"   {_dim('Your default printer is still ' + str(_orca_name('printer', default)) + '; a print chooses this one with: deli printer ' + printer)}")
-        bambu = found.kind == "bambu" if found else (_orca_name("printer", printer) or "").startswith("Bambu Lab")
+        bambu = found.kind == "bambu" if found else (_orca_name("printer", config.machine(printer).profile or "") or "").startswith("Bambu Lab")
         print(f"\n{_title('All set.')} In a folder with a model:")
-        print("   deli add model.stl\n   " + ("deli slice -o .   (then copy the .gcode file to the printer)" if bambu or not config.printer(printer).get("host")
+        print("   deli add model.stl\n   " + ("deli slice -o .   (then copy the .gcode file to the printer)" if bambu or not config.machine(printer).host
                                               else "deli send --print"))
     elif not found:
         print("   Skipped. Find it later with: deli vendor, then deli printer \"<name>\" --default")
@@ -1966,7 +2173,9 @@ def build_parser() -> argparse.ArgumentParser:
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library, or Orca's name for one, or part of either")
         choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
-        choose.add_argument("--name", dest="name_as", metavar="NAME", help=f"the name to keep an imported {kind} under in your library, instead of Orca's")
+        choose.add_argument("--name", dest="name_as", metavar="NAME",
+                            help="a name of your own for the printer this profile is for, such as voron; a printer named so already gets it as another nozzle"
+                            if kind == "printer" else f"the name to keep an imported {kind} under in your library, instead of Orca's")
         choose.set_defaults(run=_choose)
 
     vendor_ = commands.add_parser(
@@ -1999,6 +2208,16 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("part", help="the part's file, or its name without the extension")
     remove.add_argument("--count", type=int, metavar="N", help="remove only N copies")
     remove.set_defaults(run=_remove)
+
+    nozzle = commands.add_parser(
+        "nozzle",
+        help="the nozzles of this print's printer, or put one in",
+        description="List the nozzles of this print's printer (or your default one): those in your config, and those "
+        "OrcaSlicer has a profile for. With a size, that nozzle goes in: the profile for it is imported if need be, new "
+        "prints on the printer start with it, and this print moves to it, with the filament and process for it.",
+    )
+    nozzle.add_argument("size", nargs="?", help="the nozzle's size in mm, such as 0.4")
+    nozzle.set_defaults(run=_nozzle)
 
     short = ", ".join(f"{alias} ({name})" for alias, name in settings.ALIASES.items())
     set_ = commands.add_parser(
