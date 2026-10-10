@@ -624,8 +624,10 @@ Things that a user would notice, roughly in the order they matter:
   carried on when resumed and ran to the end, but came out stringy, from a spool that
   was probably damp. On the Voron, a Benchy in PLA and a two-part desiccant canister in
   PETG with a 0.8 mm nozzle printed cleanly (the canister's thread, designed for a 0.4,
-  did not survive the nozzle, which is no slicer's fault). Nothing with supports has
-  been printed, and `deli send` to OctoPrint has only been tested against a fake. If you
+  did not survive the nozzle, which is no slicer's fault). One print with organic
+  supports, a phone stand on the Centauri, came out rough where the supports touched it
+  and on overhangs left unsupported; converted profiles give overhangs no extra fan yet
+  (`PLAN.md`). `deli send` to OctoPrint has only been tested against a fake. If you
   print with another printer, please say how it went (see
   [CONTRIBUTING.md](CONTRIBUTING.md)).
 - **Converted profiles differ from Orca in small ways.** The first layer's layer-change
