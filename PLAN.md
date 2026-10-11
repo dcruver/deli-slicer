@@ -566,6 +566,49 @@ Done. 8 tests pass.
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
 per-part settings, multi-filament, more host types.
 
+**Filaments and processes kept per printer, to do (the user, 2026-10-11).** Today the
+library is one flat list per kind, named after Orca's preset (`generic-pla-system`,
+`elegoo-pla-ecc`), with the printer a filament or process was converted for recorded
+inside the file (`# for:`), and a second conversion of the same preset for another
+nozzle stored beside it as `<name>-<printer>` (`generic-pla-system-voron-2.4-350-0.6-nozzle`).
+The user found this as confusing as Orca's own names. The facts behind it: Orca's `@`
+tail names the printers a preset is for (`@ECC` the Centauri, `@System` Orca's shared
+library for vendors without filaments of their own, `@base` a template), which deli
+already knows and shows; and a filament profile is how to print a material on one
+hotend and extruder, so the same spool rightly has one per printer (temperatures,
+cooling, the volumetric cap for the Voron's Rapido 2 HF, pressure advance). The user
+chose, over renaming alone: **a filament or process belongs to a printer**, the
+taxonomy the user wanted all along (vendor, printer, then its filaments and processes).
+
+- The library keeps filaments and processes under the printer profile (Orca's, one per
+  nozzle) they were converted for, so a name is unique within a printer, not across
+  the library: `generic-pla` under the Voron's 0.8 nozzle, `generic-pla` under its
+  0.6 nozzle, `elegoo-pla` under the Centauri. `<name>-<printer>` and `# for:` go.
+- Names: Orca's name with the `@` tail dropped, slugged (`generic-pla`, `generic-petg`,
+  `0.30mm-standard`), since the printer says the rest. `--name` still overrides.
+- `deli filament|process <name>` chooses among the print's printer's; `deli filament`
+  lists them; `deli.toml` records the name as now, and the printer it is under is the
+  print's. Choosing one on a print whose printer has none of that name converts from
+  Orca for that printer, as now, with no second entry to name.
+- The config's filament and process settings (`filaments.<name>.settings`,
+  `processes.<name>.settings`) move under the printer too, since pressure advance and
+  a volumetric cap are the printer's as much as the filament's. The layer order stays:
+  global, printer, filament, process, print.
+- `--filament NAME` and `--process NAME` on `deli set` then name one of the print's
+  printer's (or the default printer's, outside a print).
+- Migration: a one-time move of each library file by its `# for:` line, and of each
+  config settings table to the printer of the library file it names; a file without
+  `# for:` (loaded, or edited) asks, or goes under the default printer. Prints keep
+  slicing: `deli.toml` names and hashes are unchanged.
+- Open: whether a machine with several nozzles (`printers.voron.nozzles`) shows its
+  filaments per nozzle or merged in listings; whether a filament loaded with
+  `deli load` from an INI, which names no printer, is kept under the printer it was
+  loaded on.
+
+Done first, on its own (2026-10-11): Orca's templates (`instantiation` false, which
+GitHub's index does not say) are refused when chosen and left out of what fits a
+printer; the user's 0.4-nozzle Voron had "Generic PETG @base" as its PETG.
+
 **Start and end G-code, to do (the user, 2026-10-05).** Orca lets a user write a
 printer's own start and end G-code; deli has no way to change a setting in a printer
 profile in the library, only `deli set` per print (or editing the INI by hand, after

@@ -1,0 +1,12 @@
+{
+  "type": "filament",
+  "name": "Elegoo PLA @base",
+  "instantiation": "false",
+  "filament_type": [
+    "PLA"
+  ],
+  "nozzle_temperature": [
+    "215"
+  ],
+  "compatible_printers": []
+}

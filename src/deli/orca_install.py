@@ -131,6 +131,13 @@ def _is_base(name: str) -> bool:
     return name.startswith("fdm_")
 
 
+def _template(data: orca.Orca) -> bool:
+    """Whether a preset is one Orca never offers for printing, only for others to inherit
+    from: `instantiation` false. Most are named fdm_* or @base, but not all, and a few
+    @base presets are printable, so the flag is what counts."""
+    return str(data.get("instantiation", "true")).lower() == "false"
+
+
 class LocalVendor:
     """One vendor's folder of presets on this machine, read once."""
 
@@ -138,8 +145,7 @@ class LocalVendor:
         self.index = orca.load_index([folder])
 
     def names(self, kind: str) -> list[str]:
-        return [name for (orca_kind, name), data in self.index.items()
-                if orca_kind == KINDS[kind] and str(data.get("instantiation", "true")).lower() != "false"]  # fmt: skip
+        return [name for (orca_kind, name), data in self.index.items() if orca_kind == KINDS[kind] and not _template(data)]
 
     def get(self, key: tuple[str, str]) -> orca.Orca | None:
         return self.index.get(key)
@@ -312,6 +318,9 @@ class Presets:
         named, anywhere = [], 0
         for name in candidates:
             try:
+                own = self._own(kind, name)
+                if own is not None and _template(own):
+                    continue  # a GitHub vendor's names are its index's, which does not say
                 compatible = self.resolve(kind, name).get("compatible_printers") or []
             except OrcaError:
                 continue
@@ -363,8 +372,7 @@ class Presets:
     def names(self, kind: str) -> list[str]:
         """Presets of a kind that can be used as they are: not the bases others inherit from."""
         self._read_all()
-        found = {name for (orca_kind, name), data in self.user.items()
-                 if orca_kind == KINDS[kind] and str(data.get("instantiation", "true")).lower() != "false"}  # fmt: skip
+        found = {name for (orca_kind, name), data in self.user.items() if orca_kind == KINDS[kind] and not _template(data)}
         for vendor in self.vendors.values():
             found.update(vendor.names(kind))
         return sorted(found)
@@ -388,6 +396,14 @@ class Presets:
         lower = {found.lower(): found for found in names}
         close = [lower[match] for match in difflib.get_close_matches(name.lower(), list(lower), n=3, cutoff=0.6)]
         raise NotFound(f"Orca has no {kind} named or containing '{name}'" + (f"; did you mean: {', '.join(close)}?" if close else ""), close)
+
+    def _own(self, kind: str, name: str) -> orca.Orca | None:
+        """A preset's own file, before its `inherits` chain: the user's, else the first
+        vendor's that has it; None when nobody has it."""
+        key = (KINDS[kind], name)
+        if (data := self.user.get(key)) is not None:
+            return data
+        return next((data for v in self._vendors_for(name) if (data := self.vendors[v].get(key)) is not None), None)
 
     def resolve(self, kind: str, name: str) -> orca.Orca:
         """A preset with its `inherits` chain flattened, the user's presets first and then
@@ -418,6 +434,14 @@ class Presets:
         """Convert one Orca preset. A process or filament is converted for a printer: the
         one given, else the first it says it is compatible with."""
         name = self.find(kind, name)
+        own = self._own(kind, name)
+        if own is not None and _template(own):
+            # Listed by a GitHub vendor's index, which does not say; the file does.
+            stem = name.split("@")[0].strip()
+            others = [found for found in self.names(kind)
+                      if found != name and found.lower().startswith(stem.lower()) and not found.endswith("@base")]  # fmt: skip
+            raise OrcaError(f"Orca's {kind} '{name}' is a template its presets inherit from, not one to print with"
+                            + (f"; try: {', '.join(others[:5])}" if others else ""))
         preset = self.resolve(kind, name)
         if kind == "printer":
             return Imported(kind, name, None, orca.convert_machine(preset), self.source(kind, name))

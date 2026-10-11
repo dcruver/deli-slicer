@@ -365,7 +365,7 @@ deli filament "generic petg"          # another filament than its default, conve
 deli set infill 20%                   # or any PrusaSlicer setting by name
 deli supports organic                 # automatic supports, for a model that needs them: on, off, grid, snug, organic
 deli scale 150%                       # a bigger boat
-deli scale z 60mm                     # or one side to a size, the others left as they are
+deli scale z 60mm                     # or one side to a size, the others left as they are: z is up, however the part is turned
 deli rotate 45                        # turned on the bed
 deli move 60 80                       # put it there instead of in the middle
 deli pause 40                         # pause once layer 40 is done: change the filament for a two-colour boat
@@ -600,7 +600,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli remove <part> [--count N]` | take a part, or some copies, out |
 | `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
-| `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis |
+| `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis; the axis is the bed's, as the part lies once rotated |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli move [part] [--copy N] <x> <y>` | where the part's middle goes on the bed, or one copy's; `z -0.25` sinks it, `plate 2` keeps it to plate 2, `auto` has it arranged again. `deli translate` is the same command |
 | `deli arrange [--plate N]` | arrange every part and copy again, or one plate's, forgetting where they were moved |
@@ -645,6 +645,11 @@ Things that a user would notice, roughly in the order they matter:
   card, or another program's send).
 - **No Windows wheel.** On Windows, deli runs in WSL ([above](#on-windows-in-wsl)); a
   wheel of its own needs `deli view`'s background server ported first.
+- **Filaments and processes are one flat list**, named after Orca's presets
+  (`generic-pla-system`, `elegoo-pla-ecc`), with the printer each was converted for
+  recorded inside the file, and a second conversion for another nozzle stored as
+  `<name>-<printer>`. They are to be kept under their printer instead, with Orca's `@`
+  tail dropped from the name (`PLAN.md`).
 - **Settings apply to the whole print**, not to one part.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.

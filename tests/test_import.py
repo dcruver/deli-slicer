@@ -228,6 +228,23 @@ def test_github_vendor_narrows_the_search(github):
     assert not any("api.github.com" in url for url in github)  # no listing needed
 
 
+def test_a_template_listed_by_a_github_index_cannot_be_imported(github, home, print_dir, capsys):
+    """A GitHub vendor's index lists every preset, templates included (its files say
+    `instantiation` false; a name's @base is no sure sign); the file is read when one is
+    chosen, and a template refused."""
+    presets = orca_install.Presets(github=orca_install.ORCA_REF)
+
+    with pytest.raises(orca_install.OrcaError, match="'Elegoo PLA @base' is a template its presets inherit from, not one to print with; try: Elegoo PLA @ECC"):
+        presets.convert("filament", "Elegoo PLA @base", printer=MACHINE)
+    assert presets.fitting("filament", MACHINE) == (["Elegoo PLA @ECC"], 0)  # not counted as one for any printer
+
+    main(["printer", "centauri", "--default"])
+    capsys.readouterr()
+    assert main(["filament", "Elegoo PLA @base"]) == 1
+    assert "is a template" in capsys.readouterr().err
+    assert library.names("filament") == ["elegoo-pla-ecc"]
+
+
 def test_github_missing_preset_is_an_error(github):
     presets = orca_install.Presets(github=orca_install.ORCA_REF)
 

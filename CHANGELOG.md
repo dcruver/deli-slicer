@@ -5,6 +5,12 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- Orca's templates, the presets others inherit from and nobody prints with ("Generic PETG
+  @base", say: `instantiation` false in its file), are refused when chosen or imported
+  from GitHub, naming the presets to try instead, and left out of what `deli filament`
+  and `deli process` list for a printer. Before, GitHub's index listed them like any
+  other and one could be imported and printed with.
+
 - **Changed:** `deli scale x|y|z` goes by the bed's axes, as the part lies once rotated:
   `deli scale z 60mm` makes a part 60 mm tall whether or not it was turned on its side
   with `deli rotate x 90`, and `deli scale` shows the factors in that order. Before, the
