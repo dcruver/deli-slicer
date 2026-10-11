@@ -64,6 +64,15 @@ nozzle. A print still records the exact profile and its hash, so nothing changes
 (Added in 0.11, when a nozzle change on the user's Voron meant a new printer name, a new
 address and the overrides set again.)
 
+A filament or process is the printer's too. It says how a material, or a layer height,
+prints on one hotend and bed, which is why Orca has one per printer family and tags each
+with the printer (`@ECC`, `@System`). deli keeps it under the printer it was converted
+for, named without the tag, so the same spool is `generic-pla` on each printer that has
+it, each file what Orca says for that printer, and a filament's settings (pressure
+advance, the volumetric cap) are kept under the printer as well. (Added in 0.13, when
+the user found `generic-pla-system` and `generic-pla-system-voron-2.4-350-0.6-nozzle`
+as confusing as Orca's own names, and chose this over renaming alone.)
+
 ## You should not need to know where things live
 
 Finding a printer goes **vendor, then printer, then a filament and a process for that

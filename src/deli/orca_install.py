@@ -476,6 +476,19 @@ def ini(imported: Imported) -> str:
     return orca.to_ini(converted, imported.orca_name)
 
 
-def into_library(imported: Imported, name: str | None = None) -> library.Loaded:
+def library_printer(orca_printer: str | None) -> str | None:
+    """The library's name for the printer a process or filament was converted for: the
+    library printer converted from it, else the name it would have."""
+    if not orca_printer:
+        return None
+    return library.printer_named(orca_printer) or library.slug(orca_printer)
+
+
+def into_library(imported: Imported, name: str | None = None, printer: str | None = None) -> library.Loaded:
+    """Store a converted preset in the library: a printer by Orca's name, a process or
+    filament under `printer` (the library's, else the one for the Orca printer it was
+    converted for) by Orca's name without its `@` tail, since the printer says that."""
+    if imported.kind != "printer":
+        name = name or library.short_name(imported.orca_name)  # the text names itself with the tail
     return library.store(imported.kind, ini(imported), imported.source or f"orca:{imported.orca_name}", name=name,
-                         fallback=imported.orca_name, made_for=imported.printer_name)
+                         fallback=imported.orca_name, printer=printer or library_printer(imported.printer_name))

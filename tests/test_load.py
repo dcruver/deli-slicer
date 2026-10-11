@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # A complete configuration exported by PrusaSlicer: printer, process and filament in one file.
 EXPORT = ROOT / "vendor/PrusaSlicer/tests/data/default_fff.ini"
 CUBE = ROOT / "vendor/PrusaSlicer/tests/data/test_stl/ASCII/20mmbox-LF.stl"
+MK3 = "original-prusa-i3-mk3"
 
 
 @pytest.fixture(autouse=True)
@@ -35,12 +36,22 @@ def test_printer_is_named_from_the_file_and_keeps_only_printer_settings(home, ca
     assert "bed 250 x 210 mm, height 210 mm, nozzle 0.4 mm, firmware marlin" in out
 
 
-def test_each_kind_takes_its_own_settings(home):
-    assert main(["load", "filament", str(EXPORT)]) == 0
-    assert main(["load", "process", str(EXPORT)]) == 0
+def test_each_kind_takes_its_own_settings(home, capsys):
+    main(["load", "printer", str(EXPORT)])
+    assert main(["load", "filament", str(EXPORT), "--printer", MK3]) == 0
+    assert main(["load", "process", str(EXPORT), "--printer", "mk3"]) == 0  # a part of the name
 
-    assert "temperature" in settings(home / "filaments" / "generic-abs.ini")
-    assert "layer_height" in settings(home / "processes" / "0.20mm-quality-mk3.ini")
+    # A filament or process is kept under the printer it is for.
+    assert "temperature" in settings(home / "filaments" / MK3 / "generic-abs.ini")
+    assert "layer_height" in settings(home / "processes" / MK3 / "0.20mm-quality-mk3.ini")
+    assert f"Loaded filament 'generic-abs' for '{MK3}'" in capsys.readouterr().out
+
+
+def test_a_filament_needs_a_printer(home, capsys):
+    assert main(["load", "filament", str(EXPORT)]) == 1
+
+    assert "a filament belongs to a printer; say which with --printer" in capsys.readouterr().err
+    assert not (home / "filaments").exists()
 
 
 def test_file_url_loads_the_same_as_a_path(home):
@@ -66,7 +77,7 @@ def test_loading_again_replaces(home, capsys):
 
 
 def test_loaded_parts_slice_together(home, tmp_path):
-    loaded = [library.load(kind, str(EXPORT)) for kind in library.KINDS]
+    loaded = [library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3") for kind in library.KINDS]
     config = "".join(part.path.read_text() for part in loaded)
 
     result = _engine.slice([(str(CUBE), (1, 1, 1), (0, 0, 0), 1, [], 0, [], [])], config, str(tmp_path / "cube.gcode"))
@@ -175,7 +186,7 @@ def test_delis_own_settings_are_kept(tmp_path):
     source = tmp_path / "process.ini"
     source.write_text("layer_height = 0.2\nprint_flow_ratio = 0.970\nprint_settings_id = with flow\n")
 
-    loaded = library.load("process", str(source))
+    loaded = library.load("process", str(source), printer="any")
 
     assert loaded.settings["print_flow_ratio"] == "0.97"
     assert loaded.unknown == []

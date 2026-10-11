@@ -237,6 +237,14 @@ your default printer, and a filament you chose yourself stays chosen. Once impor
 printer is in your library (`~/.config/deli/`), and choosing it again reads it from
 there: a newer deli or a newer Orca never changes a printer under you.
 
+A filament or process belongs to a printer: it is how a material, or a layer height,
+prints on that machine's hotend and bed, which is why Orca keeps one per printer family
+and names them `Generic PLA @System`, `Elegoo PLA @ECC`. deli keeps each under the
+printer it was converted for, named without that tail: `generic-pla` under your Voron
+and `elegoo-pla` under your Centauri are two files, each what Orca says for its
+printer. `deli filament` lists the ones for the print's printer; choosing one another
+printer has converts it for this one.
+
 ### 3. Other filaments and processes
 
 ```
@@ -441,12 +449,17 @@ differences the same way, under its name; so does a spool that prints best a lit
 its profile, or a process you always adjust:
 
 ```
-deli set --printer voron-2.4-350-0.4-nozzle max_print_height 310
-deli set --printer voron-2.4-350-0.4-nozzle start_gcode "..."
-deli set --filament generic-pla-system temperature 215
-deli set --process "0.20mm Standard @Voron" walls 3
-deli set --printer voron-2.4-350-0.4-nozzle       # list a profile's
+deli set --printer voron max_print_height 310
+deli set --printer voron start_gcode "..."
+deli set --filament generic-pla temperature 215      # this print's printer's PLA (or your default printer's)
+deli set --process "0.20mm Standard" walls 3
+deli set --printer voron --filament generic-pla filament_max_volumetric_speed 30   # another printer's
+deli set --printer voron                             # list a profile's
 ```
+
+A filament's or process's settings are the printer's, as the filament itself is: the
+pressure advance and the volumetric cap that suit a material in one hotend are not
+right in another, so they are kept under the printer (`printers.voron.filaments.generic-pla.settings`).
 
 They go in your config beside Orca's profile, not into it, so every print with that
 profile has them, and a `deli import` of a newer Orca profile keeps them. This is deli's
@@ -645,11 +658,6 @@ Things that a user would notice, roughly in the order they matter:
   card, or another program's send).
 - **No Windows wheel.** On Windows, deli runs in WSL ([above](#on-windows-in-wsl)); a
   wheel of its own needs `deli view`'s background server ported first.
-- **Filaments and processes are one flat list**, named after Orca's presets
-  (`generic-pla-system`, `elegoo-pla-ecc`), with the printer each was converted for
-  recorded inside the file, and a second conversion for another nozzle stored as
-  `<name>-<printer>`. They are to be kept under their printer instead, with Orca's `@`
-  tail dropped from the name (`PLAN.md`).
 - **Settings apply to the whole print**, not to one part.
 - **Supports** are PrusaSlicer's automatic ones; painted supports need a 3MF painted
   elsewhere, which is untested.

@@ -28,7 +28,7 @@ def job(tmp_path, monkeypatch):
     shutil.copy(CUBE, job / "cube.stl")
     monkeypatch.chdir(job)
     for kind, name in NAMES.items():
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
         main([kind, name])
     main(["add", "cube.stl"])
     return job
@@ -197,7 +197,7 @@ def test_profile_changed_in_the_library_is_refused_until_accepted(job, tmp_path,
 
 
 def test_profile_missing_from_the_library_is_an_error(job, capsys):
-    library.find("filament", NAMES["filament"]).unlink()
+    library.find("filament", NAMES["filament"], NAMES["printer"]).unlink()
 
     assert main(["slice"]) == 1
 

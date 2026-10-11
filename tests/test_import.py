@@ -106,10 +106,10 @@ def test_import_puts_the_converted_preset_in_the_library(home, capsys):
 def test_import_names_the_printer_a_process_was_converted_for(home, capsys):
     assert main(["import", "orca", "process", "mine", "--orca", str(FIXTURE), "--name", "thick walls"]) == 0
 
-    assert library.names("process") == ["thick-walls"]
+    assert library.names("process", "elegoo-centauri-carbon-0.6-nozzle") == ["thick-walls"]  # under the printer it was converted for
     out = capsys.readouterr().out
     assert f"for Orca's printer '{MACHINE}'" in out
-    assert library.read_settings(library.find("process", "thick-walls"))["print_flow_ratio"] == "0.97"
+    assert library.read_settings(library.find("process", "thick-walls", "elegoo-centauri-carbon-0.6-nozzle"))["print_flow_ratio"] == "0.97"
 
 
 def test_output_writes_a_file_deli_load_accepts(home, tmp_path, capsys):
@@ -119,7 +119,7 @@ def test_output_writes_a_file_deli_load_accepts(home, tmp_path, capsys):
 
     assert "Wrote filament" in capsys.readouterr().out
     assert not home.exists()
-    loaded = library.load("filament", str(out))
+    loaded = library.load("filament", str(out), printer="elegoo-centauri-carbon-0.6-nozzle")
     assert loaded.name == "elegoo-pla-ecc"
     assert loaded.unknown == []
 
@@ -242,7 +242,7 @@ def test_a_template_listed_by_a_github_index_cannot_be_imported(github, home, pr
     capsys.readouterr()
     assert main(["filament", "Elegoo PLA @base"]) == 1
     assert "is a template" in capsys.readouterr().err
-    assert library.names("filament") == ["elegoo-pla-ecc"]
+    assert library.names("filament", "elegoo-centauri-carbon-0.6-nozzle") == ["elegoo-pla"]
 
 
 def test_github_missing_preset_is_an_error(github):
@@ -258,22 +258,23 @@ def test_github_missing_preset_is_an_error(github):
 def test_a_printer_comes_with_orcas_default_process_and_filament(home, capsys):
     assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE)]) == 0
 
-    assert library.names("process") == ["0.30mm-standard-elegoo-cc-0.6-nozzle"]
-    assert library.names("filament") == ["elegoo-pla-ecc"]
+    # Under the printer, named by Orca's name without its @ tail, which named the printer.
+    assert library.names("process", "elegoo-centauri-carbon-0.6-nozzle") == ["0.30mm-standard"]
+    assert library.names("filament", "elegoo-centauri-carbon-0.6-nozzle") == ["elegoo-pla"]
     out = capsys.readouterr().out
-    assert "Imported process '0.30mm-standard-elegoo-cc-0.6-nozzle', Orca's default for this printer" in out
+    assert "Imported process '0.30mm-standard', Orca's default for this printer" in out
     assert "Made 'elegoo-centauri-carbon-0.6-nozzle' your default printer" in out
     from deli import config
 
     assert config.default_printer() == "elegoo-centauri-carbon-0.6-nozzle"
-    assert config.printer("elegoo-centauri-carbon-0.6-nozzle") == {"process": "0.30mm-standard-elegoo-cc-0.6-nozzle", "filament": "elegoo-pla-ecc"}
+    assert config.printer("elegoo-centauri-carbon-0.6-nozzle") == {"process": "0.30mm-standard", "filament": "elegoo-pla"}
 
 
 def test_printer_only_leaves_out_the_defaults(home):
     assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE), "--printer-only"]) == 0
 
     assert library.names("printer") == ["elegoo-centauri-carbon-0.6-nozzle"]
-    assert library.names("process") == [] and library.names("filament") == []
+    assert library.names("process", "elegoo-centauri-carbon-0.6-nozzle") == [] and library.names("filament", "elegoo-centauri-carbon-0.6-nozzle") == []
 
 
 def test_defaults_already_chosen_in_the_config_are_kept(home):
@@ -288,19 +289,24 @@ def test_defaults_already_chosen_in_the_config_are_kept(home):
     assert config.printer("elegoo-centauri-carbon-0.6-nozzle")["filament"] == "my-petg"
 
 
-def test_a_default_that_differs_from_one_of_the_same_name_is_stored_apart(home, capsys):
-    """A process converted for another printer, which prints may rely on, is not replaced."""
+def test_a_second_printer_gets_its_own_process_and_filament(home, capsys):
+    """A process converted for one printer, which prints may rely on, is not touched when
+    another printer brings the same preset: each printer has its own."""
     assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE)]) == 0
-    process = library.find("process", "0.30mm-standard-elegoo-cc-0.6-nozzle")
+    process = library.find("process", "0.30mm-standard", "elegoo-centauri-carbon-0.6-nozzle")
     process.write_text(process.read_text() + "perimeters = 9\n")
     capsys.readouterr()
 
     assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE), "--name", "second"]) == 0
 
     assert "perimeters = 9" in process.read_text()
-    assert "0.30mm-standard-elegoo-cc-0.6-nozzle-second" in library.names("process")
-    out = capsys.readouterr().out
-    assert "The filament for this printer, 'elegoo-pla-ecc', is already in your library" in out
+    assert library.names("process", "second") == ["0.30mm-standard"]
+    assert "perimeters = 9" not in library.find("process", "0.30mm-standard", "second").read_text()
+    assert "Imported filament 'elegoo-pla', Orca's default for this printer" in capsys.readouterr().out
+
+    assert main(["import", "orca", "printer", MACHINE, "--orca", str(FIXTURE)]) == 0  # again: the library is kept
+    assert "perimeters = 9" in process.read_text()
+    assert "The filament for this printer, 'elegoo-pla', is already in your library" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- listing
@@ -408,8 +414,8 @@ def test_choosing_a_printer_orca_has_imports_it_with_its_defaults(github, home, 
 
     doc = project.read()
     assert project.selected(doc, "printer")["name"] == "elegoo-centauri-carbon-0.6-nozzle"
-    assert project.selected(doc, "process")["name"] == "0.30mm-standard-elegoo-cc-0.6-nozzle"
-    assert project.selected(doc, "filament")["name"] == "elegoo-pla-ecc"
+    assert project.selected(doc, "process")["name"] == "0.30mm-standard"
+    assert project.selected(doc, "filament")["name"] == "elegoo-pla"
 
 
 def test_a_printer_can_be_named_as_your_own(github, home, print_dir, capsys):
@@ -426,7 +432,7 @@ def test_a_printer_can_be_named_as_your_own(github, home, print_dir, capsys):
     assert library.names("printer") == ["elegoo-centauri-carbon-0.6-nozzle"]
     machine = config.machine("elegoo")
     assert machine.nozzle == "0.6" and machine.profile == "elegoo-centauri-carbon-0.6-nozzle"
-    assert machine.current.process == "0.30mm-standard-elegoo-cc-0.6-nozzle"  # Orca's defaults, for that nozzle
+    assert machine.current.process == "0.30mm-standard"  # Orca's defaults, for that nozzle
     assert config.default_printer() == "elegoo"
 
     assert main(["printer", "elegoo"]) == 0  # by its name
@@ -449,13 +455,13 @@ def test_a_printer_is_found_by_words_in_any_order(github, home, print_dir, capsy
 
 def test_a_filament_orca_has_is_converted_for_the_prints_printer(github, home, print_dir, capsys):
     assert main(["printer", "centauri", "--default"]) == 0
-    library.path_of("filament", "elegoo-pla-ecc").unlink()
+    library.path_of("filament", "elegoo-pla", "elegoo-centauri-carbon-0.6-nozzle").unlink()
     capsys.readouterr()
 
     assert main(["filament", "Elegoo PLA @ECC"]) == 0
 
     assert "for 'elegoo-centauri-carbon-0.6-nozzle'" in capsys.readouterr().out
-    assert library.names("filament") == ["elegoo-pla-ecc"]
+    assert library.names("filament", "elegoo-centauri-carbon-0.6-nozzle") == ["elegoo-pla"]
 
 
 def test_the_library_is_looked_in_first(github, home, print_dir):
@@ -537,10 +543,11 @@ def test_setup_adds_to_zshrc_only_when_told(home, print_dir, tmp_path, monkeypat
     assert 'eval "$(deli completion zsh)"' in capsys.readouterr().out
 
 
-def test_an_import_records_the_printer_it_was_converted_for(home):
+def test_an_import_goes_under_the_printer_it_was_converted_for(home):
     assert main(["import", "orca", "process", "mine", "--orca", str(FIXTURE)]) == 0
 
-    assert library.made_for(library.find("process", library.names("process")[0])) == MACHINE
+    # Named by Orca's name without the @ tail, a user's "- Mine" kept.
+    assert library.everywhere("process") == {"elegoo-centauri-carbon-0.6-nozzle": ["0.30mm-standard-mine"]}
 
 
 def test_setup_is_styled_only_at_a_terminal(github, home, print_dir, monkeypatch, capsys):

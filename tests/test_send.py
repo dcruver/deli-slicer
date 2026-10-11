@@ -177,7 +177,7 @@ def job(tmp_path, monkeypatch):
 
 def choose_profiles():
     for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
         main([kind, name])
 
 

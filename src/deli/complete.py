@@ -57,15 +57,29 @@ def _overridden() -> list[str]:
 
 
 def _layer_keys(before: list[str]) -> list[str]:
-    """The settings of the config's layer `--global|--printer|--filament|--process` names."""
-    from deli.cli import _named
+    """The settings of the config's layer `--global|--printer|--filament|--process` names,
+    as `deli set` finds it."""
+    from deli.cli import _target
 
-    if "--global" in before:
-        return list(config.settings())
-    for kind in config.LAYERS:
-        if f"--{kind}" in before[:-1]:
-            return list(config.profile_settings(kind, _named(kind, before[before.index(f"--{kind}") + 1])))
-    return []
+    def value(option: str) -> str | None:
+        return before[before.index(option) + 1] if option in before[:-1] else None
+
+    args = argparse.Namespace(everywhere="--global" in before, for_printer=value("--printer"), for_filament=value("--filament"), for_process=value("--process"))
+    layer = _target(args, project.read())
+    return list(layer.settings) if layer else []
+
+
+def _profile(key: str | None = None) -> str | None:
+    """The library printer whose filaments and processes are offered: the print's, else the
+    default printer's with the nozzle in it; for a config key, the printer and nozzle it names."""
+    from deli.cli import _print_profile
+
+    if key:
+        if found := config.nozzle_key(key):
+            nozzle = config.machine(found[0]).nozzles.get(found[1])
+            return nozzle.profile if nozzle else None
+        return config.machine(config.split_key(key)[0]).profile
+    return _print_profile(project.read())
 
 
 def _config_keys() -> list[str]:
@@ -121,9 +135,10 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command in library.KINDS:
         if position != 0:
             return []
-        # Your printers, the library's, and Orca's, which `deli printer` and the rest import as they choose.
+        # Your printers, the library's (the print's printer's filaments and processes), and
+        # Orca's, which `deli printer` and the rest import as they choose.
         yours = _quiet(config.machines, []) if command == "printer" else []
-        return yours + _quiet(lambda: library.names(command), []) + _quiet(lambda: _orca_presets([])().names(command), [])
+        return yours + _quiet(lambda: library.names(command, _profile()), []) + _quiet(lambda: _orca_presets([])().names(command), [])
     if command == "nozzle":
         if position != 0:
             return []
@@ -162,10 +177,8 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
     if command == "config":
         if position == 0:
             return _config_keys()
-        if position == 1 and typed[0].endswith(".filament"):
-            return _quiet(lambda: library.names("filament"), [])
-        if position == 1 and typed[0].endswith(".process"):
-            return _quiet(lambda: library.names("process"), [])
+        if position == 1 and typed[0].endswith((".filament", ".process")):
+            return _quiet(lambda: library.names(typed[0].rsplit(".", 1)[1], _profile(typed[0])), [])
         if position == 1 and typed[0] == config.DEFAULT_PRINTER:
             return _quiet(lambda: library.names("printer"), [])
         return []
@@ -178,7 +191,7 @@ def _option_value(command: str, option: str) -> list[str]:
         return _quiet(lambda: _orca_presets([])().names("printer"), [])
     if command in ("set", "unset") and option in ("--printer", "--filament", "--process"):
         yours = _quiet(config.machines, []) if option == "--printer" else []
-        return yours + [name for name in _quiet(lambda: library.names(option[2:]), []) if name not in yours]
+        return yours + [name for name in _quiet(lambda: library.names(option[2:], _profile()), []) if name not in yours]
     if command == "config" and option == "--unset":
         return [key for key, _ in _quiet(config.entries, []) if not key.startswith(config.SETTINGS + ".") and f".{config.SETTINGS}." not in key]
     if command == "slice" and option in ("-o", "--output"):

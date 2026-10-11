@@ -18,7 +18,9 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     (tmp_path / "job").mkdir()
     monkeypatch.chdir(tmp_path / "job")
-    library.load("process", str(EXPORT))
+    library.load("printer", str(EXPORT))
+    library.load("process", str(EXPORT), printer="original-prusa-i3-mk3")
+    main(["printer", "original-prusa-i3-mk3"])
     main(["process", PROCESS])
     return tmp_path / "job" / "deli.toml"
 

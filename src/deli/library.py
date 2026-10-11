@@ -3,6 +3,13 @@
 `deli load` copies settings from a PrusaSlicer INI file, local or at a URL, into
 the library. Nothing else in deli touches the network: once loaded, a printer
 only changes when it is loaded again.
+
+A printer is `printers/<name>.ini`. A filament or process belongs to a printer: how to
+print a material, or a layer height, on that machine's hotend and bed, which is why
+Orca keeps one per printer family. It is kept under the printer it was converted or
+loaded for, `filaments/<printer>/<name>.ini`, so its name need only be unique for that
+printer: `generic-pla` under the Voron's 0.8 nozzle and under the Centauri are two
+files, each what Orca says for its printer.
 """
 
 from __future__ import annotations
@@ -87,16 +94,33 @@ def fetch(source: str) -> str:
         raise LibraryError(f"{source} is not a text file") from None
 
 
-def names(kind: str) -> list[str]:
-    """Names of everything of one kind in the library."""
-    return sorted(path.stem for path in (library_dir() / _FOLDERS[kind]).glob("*.ini"))
+def folder(kind: str, printer: str | None = None) -> Path:
+    """Where the library keeps one kind: its printers, or one printer's filaments or
+    processes. A filament or process without a printer is nowhere."""
+    if kind == "printer":
+        return library_dir() / _FOLDERS[kind]
+    if not printer:
+        raise LibraryError(f"a {kind} belongs to a printer; choose one first with: deli printer <name>")
+    return library_dir() / _FOLDERS[kind] / printer
 
 
-def matching(kind: str, wanted: str) -> list[str]:
-    """The library's names of a kind that are what someone typed: the name itself, else those
-    with the typed text in them, or every typed word in them in any order ("voron 0.4" is
-    "voron-2.4-350-0.4-nozzle"). As `orca_install.matches` reads Orca's names."""
-    found = names(kind)
+def names(kind: str, printer: str | None = None) -> list[str]:
+    """Names of everything of one kind in the library: the printers, or one printer's
+    filaments or processes (none without a printer)."""
+    if kind != "printer" and not printer:
+        return []
+    return sorted(path.stem for path in folder(kind, printer).glob("*.ini"))
+
+
+def everywhere(kind: str) -> dict[str, list[str]]:
+    """Every printer's filaments or processes, by the printer's name, in the library."""
+    if kind == "printer":
+        return {"": names(kind)}
+    parent = library_dir() / _FOLDERS[kind]
+    return {found.name: names(kind, found.name) for found in sorted(parent.iterdir()) if found.is_dir()} if parent.is_dir() else {}
+
+
+def _typed(found: list[str], wanted: str) -> list[str]:
     typed = slug(wanted)
     if typed in found:
         return [typed]
@@ -104,12 +128,37 @@ def matching(kind: str, wanted: str) -> list[str]:
     return [name for name in found if (typed and typed in name) or (words and all(word in name for word in words))]
 
 
-def find(kind: str, name: str) -> Path:
-    path = library_dir() / _FOLDERS[kind] / f"{name}.ini"
+def matching(kind: str, wanted: str, printer: str | None = None) -> list[str]:
+    """The library's names of a kind, for a printer, that are what someone typed: the name
+    itself, else those with the typed text in them, or every typed word in them in any order
+    ("voron 0.4" is "voron-2.4-350-0.4-nozzle"). As `orca_install.matches` reads Orca's names."""
+    return _typed(names(kind, printer), wanted)
+
+
+def matching_elsewhere(kind: str, wanted: str, printer: str | None) -> dict[str, list[str]]:
+    """What `matching` finds among the other printers' filaments or processes, by printer."""
+    found = {other: _typed(found, wanted) for other, found in everywhere(kind).items() if other != printer}
+    return {other: found for other, found in found.items() if found}
+
+
+def find(kind: str, name: str, printer: str | None = None) -> Path:
+    """The library file of a printer, or of one printer's filament or process."""
+    path = folder(kind, printer) / f"{name}.ini"
     if not path.exists():
-        loaded = ", ".join(names(kind)) or "none"
-        raise LibraryError(f"no {kind} named '{name}' is loaded (loaded: {loaded}); add one with: deli load {kind} <source>")
+        loaded = ", ".join(names(kind, printer)) or "none"
+        where = f" for '{printer}'" if kind != "printer" else ""
+        raise LibraryError(f"no {kind} named '{name}' is loaded{where} (loaded: {loaded}); add one with: deli load {kind} <source>")
     return path
+
+
+def short_name(orca_name: str) -> str:
+    """Orca's name for a preset without its `@` tail, which names the printers it is for
+    ("Generic PLA @System", "0.30mm Standard @Elegoo CC 0.6 nozzle"): in the library the
+    printer it is under says that."""
+    head, _, tail = orca_name.partition("@")
+    suffix = tail.rsplit(" - ", 1)[1].strip() if " - " in tail else ""  # a user's copy: "... @ECC - Copy"
+    head = head.strip() + (f" - {suffix}" if suffix else "")
+    return head.strip(" -") or orca_name
 
 
 # Settings of deli's own, which PrusaSlicer does not have, and the kind of profile each is kept in.
@@ -154,18 +203,20 @@ def _name_in(settings: dict[str, str], kind: str) -> str:
     return settings.get(ID_KEYS[kind], "").split(";")[0].strip().strip('"')
 
 
-def load(kind: str, source: str, name: str | None = None) -> Loaded:
-    """Copy the settings of one kind from `source` into the library."""
+def load(kind: str, source: str, name: str | None = None, printer: str | None = None) -> Loaded:
+    """Copy the settings of one kind from `source` into the library; a filament or process
+    under `printer`."""
     text = fetch(source)
     url = urllib.parse.urlsplit(source)
     if url.scheme == "":
         source = str(Path(source).expanduser().resolve())
-    return store(kind, text, source, name=name, fallback=Path(url.path).stem)
+    return store(kind, text, source, name=name, fallback=Path(url.path).stem, printer=printer)
 
 
-def path_of(kind: str, name: str) -> Path:
-    """Where the library keeps the one of a kind with that name (slugged), whether or not it is there."""
-    return library_dir() / _FOLDERS[kind] / f"{slug(name)}.ini"
+def path_of(kind: str, name: str, printer: str | None = None) -> Path:
+    """Where the library keeps the one of a kind with that name (slugged), for a printer,
+    whether or not it is there."""
+    return folder(kind, printer) / f"{slug(name)}.ini"
 
 
 def settings_in(kind: str, text: str) -> dict[str, str]:
@@ -199,10 +250,10 @@ def made_for(path: Path) -> str | None:
     return None
 
 
-def store(kind: str, text: str, source: str, name: str | None = None, fallback: str = "", made_for: str | None = None) -> Loaded:
+def store(kind: str, text: str, source: str, name: str | None = None, fallback: str = "", printer: str | None = None) -> Loaded:
     """Put the settings of one kind from INI `text` into the library, named `name`, else
-    as the text names itself, else `fallback`. `source` is recorded in the file, and so is
-    `made_for`, the printer a converted process or filament was made for."""
+    as the text names itself, else `fallback`; a filament or process under `printer`.
+    `source` is recorded in the file."""
     try:
         groups, unknown = _engine.split_config(text)
     except ValueError as err:
@@ -227,12 +278,58 @@ def store(kind: str, text: str, source: str, name: str | None = None, fallback: 
     if not name:
         raise LibraryError(f"cannot work out a name for this {kind}; give one with --name")
 
-    path = library_dir() / _FOLDERS[kind] / f"{name}.ini"
+    path = folder(kind, printer) / f"{name}.ini"
     replaced = path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"# deli {kind}: {name}", f"# source: {source}"] + ([f"# for: {made_for}"] if made_for else [])
+    lines = [f"# deli {kind}: {name}", f"# source: {source}"]
     lines += [f"{key} = {value}" for key, value in sorted(settings.items())]
     path.write_text("\n".join(lines) + "\n")
 
     others = {other: len(groups[other]) for other in KINDS if other != kind and groups.get(other)}
     return Loaded(kind, name, path, source, settings, others, unknown, connection, replaced)
+
+
+def printer_named(orca_name: str) -> str | None:
+    """The library printer converted from one of Orca's: the one named after it, else the
+    first whose file records that name (a printer imported under a name of its own)."""
+    if slug(orca_name) in names("printer"):
+        return slug(orca_name)
+    for name in names("printer"):
+        if _name_in(read_settings(find("printer", name)), "printer") == orca_name:
+            return name
+    return None
+
+
+def migrate(fallback: str | None = None) -> list[tuple[str, str, str]]:
+    """Move the filaments and processes an older deli kept in one flat list under the
+    printer each was converted for, which its `# for:` line names; one without the line
+    goes under `fallback` (the default printer's profile), else the library's only printer,
+    else stays where nothing reads it. Returns (kind, name, printer) for each moved."""
+    moved = []
+    printers = names("printer")
+    for kind in ("filament", "process"):
+        parent = library_dir() / _FOLDERS[kind]
+        for path in sorted(parent.glob("*.ini")) if parent.is_dir() else []:
+            made = made_for(path)
+            printer = (printer_named(made) if made else None) or fallback or (printers[0] if len(printers) == 1 else None)
+            if not printer:
+                continue
+            target = parent / printer / path.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                path.rename(target)
+            else:
+                path.unlink()
+            moved.append((kind, path.stem, printer))
+    return moved
+
+
+def copy_to(kind: str, name: str, printer: str, from_printer: str) -> bool:
+    """Give a printer another's filament or process as it is, under the same name, when it
+    has none so named. True when copied."""
+    target = folder(kind, printer) / f"{name}.ini"
+    if target.exists():
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(find(kind, name, from_printer).read_text())
+    return True

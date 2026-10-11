@@ -179,10 +179,12 @@ def made_from(doc: tomlkit.TOMLDocument) -> str:
         stat = Path(part["file"]).stat()
         lines.append(f"{stat.st_size} {stat.st_mtime_ns} {Path(part['file']).resolve()}")
     lines += [f"{key} = {value}" for key, value in config.settings().items()]
+    on = machine(doc)
     for kind in config.LAYERS:
-        name = machine(doc) if kind == "printer" else selected(doc, kind).get("name")
-        if name:
-            lines += [f"{config.TABLES[kind]}.{name}.settings.{key} = {value}" for key, value in config.profile_settings(kind, name).items()]
+        name = on if kind == "printer" else selected(doc, kind).get("name")
+        if name and on:
+            found = config.profile_settings(kind, name, machine=on)
+            lines += [f"{config.table_of(kind, name, on)}.settings.{key} = {value}" for key, value in found.items()]
     return "\n".join(lines) + "\n"
 
 
@@ -536,6 +538,7 @@ def set_part_count(part: dict, count: int) -> None:
 def chosen_profile(doc: tomlkit.TOMLDocument, kind: str) -> tuple[str, dict[str, str]] | None:
     """Name and settings of the printer, filament or process chosen for the print, if it is in the library."""
     name = selected(doc, kind).get("name")
-    if not name or name not in library.names(kind):
+    printer = selected(doc, "printer").get("name") if kind != "printer" else None
+    if not name or name not in library.names(kind, printer):
         return None
-    return name, library.read_settings(library.find(kind, name))
+    return name, library.read_settings(library.find(kind, name, printer))

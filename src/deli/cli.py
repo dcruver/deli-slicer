@@ -61,9 +61,22 @@ _SUMMARIES = {"printer": _printer_summary, "filament": _filament_summary, "proce
 
 
 def _load(args: argparse.Namespace) -> int:
-    loaded = library.load(args.kind, args.source, args.name)
+    printer = None
+    if args.kind != "printer":
+        # A filament or process is a printer's: the one named, else the print's, else the default.
+        if args.printer:
+            machine = _named("printer", args.printer)
+            printer = config.machine(machine).profile
+            if not printer:
+                raise CommandError(f"'{machine}' does not say which nozzle is in it; say with: deli nozzle <size>")
+        else:
+            printer = _print_profile(project.read())
+        if not printer:
+            raise CommandError(f"a {args.kind} belongs to a printer; say which with --printer, or choose one for this print first: deli printer <name>")
+    loaded = library.load(args.kind, args.source, args.name, printer)
     verb = "Replaced" if loaded.replaced else "Loaded"
-    print(f"{verb} {loaded.kind} '{loaded.name}' ({len(loaded.settings)} settings) from {loaded.source}")
+    for_printer = f" for '{printer}'" if printer else ""
+    print(f"{verb} {loaded.kind} '{loaded.name}'{for_printer} ({len(loaded.settings)} settings) from {loaded.source}")
     if summary := _SUMMARIES[loaded.kind](loaded.settings):
         print(f"  {summary}")
     print(f"  stored in {_home_relative(loaded.path)}")
@@ -83,11 +96,11 @@ def _config_fills(doc, starting: bool) -> list[tuple[str, str | None, str]]:
     chosen (None when it could not be) and why, as a note."""
     lines: list[tuple[str, str | None, str]] = []  # (kind, the choice as shown or None, why, or what went wrong)
 
-    def choose(kind: str, name: str, missing: str, why: str, machine: str | None = None) -> None:
+    def choose(kind: str, name: str, missing: str, why: str, machine: str | None = None, printer: str | None = None) -> None:
         try:
-            path = library.find(kind, name)
+            path = library.find(kind, name, printer)
         except library.LibraryError:
-            lines.append((kind, None, f"your config names the {kind} '{name}' {missing}, but it is not in your library"))
+            lines.append((kind, None, f"your config names the {kind} '{name}' {missing}, but it is not in your library" + (f" for '{printer}'" if printer else "")))
             return
         project.select(doc, kind, name, library.fingerprint(path), machine)
         lines.append((kind, f"{machine} ({name})" if machine and machine != name else name, why))
@@ -102,28 +115,36 @@ def _config_fills(doc, starting: bool) -> list[tuple[str, str | None, str]]:
         for other in ("filament", "process"):
             default = getattr(nozzle, other, None)
             if default and not project.selected(doc, other).get("name"):
-                choose(other, default, "for this printer", "from your config for this printer")
+                choose(other, default, "for this printer", "from your config for this printer", printer=profile)
     return lines
 
 
-def _follow_printer(doc, machine: str, profile: str) -> dict[str, str]:
+def _follow_printer(doc, machine: str, profile: str, previous: str | None = None) -> dict[str, str]:
     """When a print changes printer, or nozzle, its filament and process change with it, to
     the config's defaults for that printer and nozzle: a process is made for a nozzle and a
     filament converted for a bed, so the old ones would not fit. What was chosen before is
-    named, so that a deliberate choice can be made again. Without defaults the old ones
-    stay, and the notes say so. Returns a note per kind changed or kept, for the block."""
+    named, so that a deliberate choice can be made again. Without defaults the old ones,
+    the previous printer's, are converted for this one as choosing them would; failing
+    that the notes say so. Returns a note per kind changed or kept, for the block."""
     notes = {}
     nozzle = config.machine(machine).for_profile(profile)
     for kind in ("filament", "process"):
         before = project.selected(doc, kind).get("name")
         default = getattr(nozzle, kind, None)
-        if not before or before == default:
+        if not before:
             continue
-        if default and default in library.names(kind):
-            project.select(doc, kind, default, library.fingerprint(library.find(kind, default)))
-            notes[kind] = f"the default for this printer; was '{before}' (choose it again with: deli {kind} {before})"
+        if default and default in library.names(kind, profile):
+            project.select(doc, kind, default, library.fingerprint(library.find(kind, default, profile)))
+            notes[kind] = "the default for this printer" + (f"; was '{before}' (choose it again with: deli {kind} {before})" if before != default else "")
+        elif previous and before in library.names(kind, previous):
+            try:
+                name = _for_this_printer(doc, kind, before, previous, profile)
+                project.select(doc, kind, name, library.fingerprint(library.find(kind, name, profile)))
+                notes[kind] = f"the previous printer's, made for this one as choosing it would be; see those made for it with: deli {kind}"
+            except CommandError as err:
+                notes[kind] = f"the previous printer's, which could not be made for this one ({err}); choose one with: deli {kind}"
         else:
-            notes[kind] = f"kept from the previous printer, which may not suit this one; see those for it with: deli {kind}"
+            notes[kind] = f"not among this printer's; choose one with: deli {kind}"
     return notes
 
 
@@ -143,14 +164,18 @@ def _block(doc, notes: dict[str, str] | None = None) -> None:
     notes = notes or {}
     rows: list[tuple[str, str, str | None]] = []
     machine = project.machine(doc)
+    printer = project.selected(doc, "printer").get("name")
     for kind in library.KINDS:
         chosen = project.selected(doc, kind).get("name")
         if not chosen:
             rows.append((kind.capitalize(), f"none; choose one with: deli {kind} <name>", notes.get(kind)))
             continue
         shown = f"{machine} ({chosen})" if kind == "printer" and machine != chosen else chosen
-        path = library.path_of(kind, chosen)
-        summary = _SUMMARIES[kind](library.read_settings(path)) if path.exists() else "not in your library"
+        try:
+            path = library.path_of(kind, chosen, printer if kind != "printer" else None)
+        except library.LibraryError:
+            path = None
+        summary = _SUMMARIES[kind](library.read_settings(path)) if path and path.exists() else "not in your library" + (f" for '{printer}'" if kind != "printer" and printer else "")
         rows.append((kind.capitalize(), f"{shown}  {summary}" if summary else shown, notes.get(kind)))
     parts = project.parts(doc)
     rows.append(("Parts", ", ".join(f"{p['file']}{_copies(project.part_count(p))}" for p in parts) if parts else "none yet; add one with: deli add <file>", None))
@@ -245,7 +270,8 @@ def _list_kind(doc, kind: str) -> int:
     machine = project.machine(doc) or config.default_printer()
     nozzle = config.machine(machine).for_profile(printer) if machine and printer and kind != "printer" else None
     about = {"filament": nozzle.filament, "process": nozzle.process} if nozzle else {}
-    mine = library.names(kind)
+    mine = library.names(kind, printer if kind != "printer" else None)
+    under = printer if kind != "printer" else None
     if kind == "printer" and (yours := config.machines()):
         _list_machines(yours, machine if project.selected(doc, "printer") else None)
 
@@ -268,13 +294,19 @@ def _list_kind(doc, kind: str) -> int:
         if orca_default and orca_default not in offered:
             offered.append(orca_default)
 
-    # One row per choice: (shown as, library name or None).
-    rows = {name: (library.slug(name) if library.slug(name) in mine else None) for name in offered}
+    # One row per choice: (shown as, library name or None). A library entry from Orca,
+    # named as deli names them (not with --name), is shown by Orca's name; its file says
+    # which (see _orca_source).
+    sources = {name: _orca_source(kind, name, under) for name in mine}
+
+    def as_named(orca_name: str) -> str | None:
+        return next((n for n in (library.slug(library.short_name(orca_name)), library.slug(orca_name)) if n in mine and sources[n] == orca_name), None)
+
+    rows = {name: as_named(name) for name in offered}
     for name in mine:
         if name in rows.values():
             continue
-        orca_name = library.read_settings(library.find(kind, name)).get(library.ID_KEYS[kind], "").strip('"')
-        rows[orca_name if orca_name in orca_names and library.slug(orca_name) == name else name] = name
+        rows[sources[name] if sources[name] in orca_names and as_named(sources[name]) == name else name] = name
     if current.get("name") and current["name"] not in rows.values():
         rows[current["name"]] = current["name"]
 
@@ -290,7 +322,7 @@ def _list_kind(doc, kind: str) -> int:
         if name is not None and name == current.get("name"):
             if name not in mine:
                 notes.append("not in your library")
-            elif library.fingerprint(library.find(kind, name)) != current.get("sha256"):
+            elif library.fingerprint(library.find(kind, name, under)) != current.get("sha256"):
                 notes.append(f"changed in your library since it was chosen; accept with: deli {kind} {name}")
         if name is not None and name == default:
             notes.append("your default" if kind == "printer" else "the default for this printer")
@@ -325,7 +357,7 @@ def _choose(args: argparse.Namespace) -> int:
     else:
         name = _from_library_or_orca(doc, kind, args.name, name_as)
         machine = None
-    path = library.find(kind, name)
+    path = library.find(kind, name, _print_profile(doc) if kind != "printer" else None)
     if args.default:
         return _make_default(doc, kind, (machine, name) if kind == "printer" else name)
     starting = not project.FILE.exists()
@@ -336,7 +368,7 @@ def _choose(args: argparse.Namespace) -> int:
     if previous and (previous != name or (kind == "printer" and previous_machine != machine)):
         notes[kind] = f"was '{previous}'" if kind != "printer" or previous_machine in (None, previous) else f"was '{previous_machine}' ({previous})"
     if kind == "printer" and previous and (previous != name or previous_machine != machine):
-        notes |= _follow_printer(doc, machine, name)
+        notes |= _follow_printer(doc, machine, name, previous)
     if kind == "printer" or starting:
         # The config's defaults fill in what the print has not chosen yet.
         for other, chosen, why in _config_fills(doc, starting):
@@ -921,7 +953,7 @@ def _nozzle(args: argparse.Namespace) -> int:
         print(f"  (the printer is named after its old profile; give it a name of its own with: deli printer {new} --name <name>)")
     if project.selected(doc, "printer") and profile != new:
         project.select(doc, "printer", new, library.fingerprint(library.find("printer", new)), machine)
-        notes = {"printer": f"was '{profile}'"} | _follow_printer(doc, machine, new)
+        notes = {"printer": f"was '{profile}'"} | _follow_printer(doc, machine, new, profile)
         for other, chosen, why in _config_fills(doc, False):
             notes[other] = why
         project.write(doc)
@@ -939,17 +971,23 @@ def _profile_note(doc, key: str) -> str:
     return f"the {kind} '{profile[0]}' has {_short(settings.shown(key, profile[1][key]))}"
 
 
-def _profile_note_for(kind: str, name: str, key: str) -> str:
-    """What a profile in the library has for a setting, or, for a printer, what its default
-    filament or process from the config has: `_profile_note` for a profile no print here uses."""
+def _profile_note_for(kind: str, name: str, key: str, machine: str | None = None) -> str:
+    """What a profile in the library has for a setting, or, for a printer, what its profile
+    or default filament or process from the config has: `_profile_note` for a profile no
+    print here uses. A filament or process is one of `machine`'s."""
     wanted = settings.kinds()[key]
-    if wanted != kind:
-        if kind != "printer":
+    if kind == "printer":
+        found = config.machine(name)
+        printer = found.profile
+        name = printer if wanted == "printer" else getattr(found.current, wanted, None)
+    else:
+        if wanted != kind:
             return ""
-        name = config.printer(name).get(wanted, "")
-    if not name or name not in library.names(wanted):
+        printer = config.machine(machine).profile if machine else None
+    under = printer if wanted != "printer" else None
+    if not name or not printer or name not in library.names(wanted, under):
         return ""
-    profile = library.read_settings(library.find(wanted, name))
+    profile = library.read_settings(library.find(wanted, name, under))
     return f"the {wanted} '{name}' has {_short(settings.shown(key, profile[key]))}" if key in profile else ""
 
 
@@ -1001,53 +1039,86 @@ def _profiles_of(machine: str | None) -> dict[str, str]:
         return {}
     merged: dict[str, str] = {}
     for kind, name in (("printer", nozzle.profile), ("filament", nozzle.filament), ("process", nozzle.process)):
-        if name and name in library.names(kind):
-            merged |= library.read_settings(library.find(kind, name))
+        under = nozzle.profile if kind != "printer" else None
+        if name and name in library.names(kind, under):
+            merged |= library.read_settings(library.find(kind, name, under))
     return merged
 
 
-def _profiles_for(kind: str | None, name: str | None) -> dict[str, str]:
+def _profiles_for(kind: str | None, name: str | None, machine: str | None = None) -> dict[str, str]:
     """What a setting in the config is checked against when there is no print here to check
-    it with: a printer with its defaults, else the default printer's trio with the profile
-    named laid over it."""
+    it with: a printer with its defaults, else a printer's trio (`machine`'s, else the
+    default printer's) with the filament or process named laid over it."""
     if kind == "printer":
         return _profiles_of(name)
-    merged = _profiles_of(config.default_printer())
-    if kind and name:
-        merged |= library.read_settings(library.find(kind, name))
+    machine = machine or config.default_printer()
+    merged = _profiles_of(machine)
+    if kind and name and machine:
+        merged |= library.read_settings(library.find(kind, name, config.machine(machine).profile))
     return merged
 
 
-def _in_library(kind: str, wanted: str) -> str | None:
+def _in_library(kind: str, wanted: str, printer: str | None = None) -> str | None:
     """The library's name for a profile given by its name, the text in it, or every typed
-    word in it ("voron 0.4"); None when the library has nothing like it, an error when it has
-    several."""
-    found = library.matching(kind, wanted)
+    word in it ("voron 0.4"); a filament or process among `printer`'s. None when the library
+    has nothing like it, an error when it has several."""
+    found = library.matching(kind, wanted, printer)
     if len(found) > 1:
         raise CommandError(f"your library has {len(found)} {_PLURALS[kind]} matching '{wanted}'; which one?\n  " + "\n  ".join(found))
     return found[0] if found else None
 
 
-def _named(kind: str, wanted: str) -> str:
-    """The library's name for the profile `--filament|--process` names, or, for `--printer`,
-    the config's printer (machine), else the library printer named after itself."""
-    if kind == "printer" and (found := _machine_named(wanted)):
+def _printer_for_layer(doc, machine: str | None = None) -> tuple[str, str]:
+    """The printer whose filament or process `--filament|--process NAME` names, and the
+    library profile whose it is: the machine named, else the print's (with the print's
+    profile), else the default printer with the nozzle in it now."""
+    doc = project.read() if doc is None else doc
+    machine = machine or project.machine(doc) or config.default_printer()
+    if not machine:
+        raise CommandError("a filament or process is a printer's, and neither this print nor your config names one; choose one with: deli printer <name>")
+    if project.machine(doc) == machine and (profile := project.selected(doc, "printer").get("name")):
+        return machine, profile
+    profile = config.machine(machine).profile
+    if not profile:
+        raise CommandError(f"'{machine}' does not say which nozzle is in it; say with: deli nozzle <size>")
+    return machine, profile
+
+
+def _named(kind: str, wanted: str, doc=None, machine: str | None = None) -> str:
+    """The library's name for the profile `--filament|--process` names, one of `machine`'s
+    (see `_printer_for_layer`), or, for `--printer`, the config's printer (machine), else the
+    library printer named after itself."""
+    if kind == "printer":
+        if found := _machine_named(wanted):
+            return found
+        if found := _in_library(kind, wanted):
+            return found
+        names = library.names(kind)
+        mine = f" (it has: {', '.join(names)})" if names else ""
+        raise CommandError(f"no printer '{wanted}' in your library{mine}; choose it for a print first with: deli printer {wanted}")
+    machine, printer = _printer_for_layer(doc, machine)
+    if found := _in_library(kind, wanted, printer):
         return found
-    if found := _in_library(kind, wanted):
-        return found
-    names = library.names(kind)
+    names = library.names(kind, printer)
     mine = f" (it has: {', '.join(names)})" if names else ""
-    raise CommandError(f"no {kind} '{wanted}' in your library{mine}; choose it for a print first with: deli {kind} {wanted}")
+    raise CommandError(f"no {kind} '{wanted}' for '{machine}' in your library{mine}; choose it for a print on it first with: deli {kind} {wanted}")
 
 
-def _target(args: argparse.Namespace) -> settings.Layer | None:
+def _target(args: argparse.Namespace, doc=None) -> settings.Layer | None:
     """The config's layer `--global`, `--printer`, `--filament` or `--process` names; None
-    for the print's own settings."""
+    for the print's own settings. A filament or process is the print's printer's, or the
+    default printer's, or with `--printer` too that printer's."""
     if args.everywhere:
+        if args.for_printer:
+            raise CommandError("--global is for every print; leave out --printer, or use it alone for every print on that printer")
         return settings.layer(None)
-    for kind in config.LAYERS:
+    for kind in settings.LAYERS_OF_A_PRINTER:
         if wanted := getattr(args, f"for_{kind}"):
-            return settings.layer(kind, _named(kind, wanted))
+            machine = _named("printer", args.for_printer) if args.for_printer else None
+            machine, _ = _printer_for_layer(doc, machine)
+            return settings.layer(kind, _named(kind, wanted, doc, machine), machine)
+    if args.for_printer:
+        return settings.layer("printer", _named("printer", args.for_printer))
     return None
 
 
@@ -1057,11 +1128,11 @@ def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int
     left alone, and its own settings still win."""
     layers = settings.config_layers(doc)
     # Whether the print here is under that layer; its own layer object stands in for the target then.
-    mine = next((found for found in layers if (found.kind, found.name) == (target.kind, target.name)), None)
+    mine = next((found for found in layers if (found.kind, found.name, found.machine) == (target.kind, target.name, target.machine)), None)
     overrides = project.settings(doc)
 
     def profile_note(key: str) -> str:
-        return _profile_note(doc, key) if mine or not target.kind else _profile_note_for(target.kind, target.name, key)
+        return _profile_note(doc, key) if mine or not target.kind else _profile_note_for(target.kind, target.name, key, target.machine)
 
     def around(key: str) -> str:
         """What is over and under the target for the print here, or for the profile alone."""
@@ -1103,10 +1174,10 @@ def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int
     if mine and project.FILE.exists():
         beneath, own = _beneath(doc), _own(doc)
     else:
-        beneath, own = _profiles_for(target.kind, target.name) | layers[0].settings | target.settings, _own(doc, target.settings)
+        beneath, own = _profiles_for(target.kind, target.name, target.machine) | layers[0].settings | target.settings, _own(doc, target.settings)
     value = settings.check(key, _value(args), beneath, own)
     if target.kind:
-        config.set_profile_setting(target.kind, target.name, key, value)
+        config.set_profile_setting(target.kind, target.name, key, value, target.machine)
     else:
         config.set_setting(key, value)
     target.settings[key] = value
@@ -1150,7 +1221,7 @@ def _set_one(args: argparse.Namespace) -> int:
             settings.resolve(args.setting)
         except settings.SettingError:
             return _search(doc, args.setting)
-    if target := _target(args):
+    if target := _target(args, doc):
         return _set_in_config(args, doc, target)
     overrides = project.settings(doc)
     layers = settings.config_layers(doc)
@@ -1241,7 +1312,7 @@ def _unset(args: argparse.Namespace) -> int:
     to remove."""
     if not args.settings:
         doc = project.read()
-        target = _target(args)
+        target = _target(args, doc)
         overrides = target.settings if target else project.settings(doc)
         where = target.where if target else "by this print"
         option = f" {target.option}" if target else ""
@@ -1261,7 +1332,7 @@ def _unset(args: argparse.Namespace) -> int:
 
 def _unset_one(args: argparse.Namespace) -> int:
     doc = project.read()
-    target = _target(args)
+    target = _target(args, doc)
     overrides = target.settings if target else project.settings(doc)
     where = target.where if target else "by this print"
     # A name written by hand can be removed even if it is not a real setting.
@@ -1270,7 +1341,7 @@ def _unset_one(args: argparse.Namespace) -> int:
         print(f"{key} is not changed {where}")
         return 0
     if target and target.kind:
-        config.unset_profile_setting(target.kind, target.name, key)
+        config.unset_profile_setting(target.kind, target.name, key, target.machine)
     elif target:
         config.unset_setting(key)
     else:
@@ -1289,7 +1360,7 @@ def _accepted_profile(doc, kind: str) -> dict[str, str]:
     name = chosen.get("name")
     if not name:
         raise CommandError(f"no {kind} is chosen; choose one with: deli {kind} <name>")
-    path = library.find(kind, name)
+    path = library.find(kind, name, project.selected(doc, "printer").get("name") if kind != "printer" else None)
     if "sha256" not in chosen:
         raise CommandError(f"deli.toml names the {kind} '{name}' without its hash; accept it with: deli {kind} {name}")
     if library.fingerprint(path) != chosen["sha256"]:
@@ -1543,51 +1614,66 @@ def _import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _orca_source(kind: str, name: str, printer: str | None = None) -> str:
+    """Orca's name for a library profile converted from one of its presets, as its file
+    records it; empty for one that was not."""
+    return library.read_settings(library.find(kind, name, printer)).get(library.ID_KEYS[kind], "").strip('"')
+
+
 def _store_from_orca(presets: orca_install.Presets, kind: str, orca_name: str, orca_printer: str | None, printer: str | None, name_as: str | None = None) -> tuple[str, str | None]:
     """Convert one of Orca's presets (a process or filament for `orca_printer`) into the
-    library, unless the same is there already. One that differs from a library entry of the
-    same name, converted for another printer, which prints may rely on, is stored under a
-    name with this printer's (`printer`, its library name) instead. Returns the library
-    name, and what was stored ("56 settings, 23 left out"), None if it was there already."""
+    library under `printer` (its library name), unless one from the same preset is there
+    already: the library is kept as it is, so that nothing changes under a print (`deli
+    import` converts afresh). It is named by Orca's name without its `@` tail; a different
+    preset of that short name for the same printer keeps the whole name. Returns the
+    library name, and what was stored ("56 settings, 23 left out"), None if it was there."""
     imported = presets.convert(kind, orca_name, orca_printer)
-    name = name_as or imported.orca_name
-    existing = library.path_of(kind, name)
-    if existing.exists():
-        if library.read_settings(existing) == library.settings_in(kind, orca_install.ini(imported)):
+    printer = printer or orca_install.library_printer(imported.printer_name)
+    for name in ([name_as] if name_as else [library.short_name(imported.orca_name), imported.orca_name]):
+        existing = library.path_of(kind, name, printer)
+        if not existing.exists():
+            break
+        there = library.read_settings(existing)
+        if there.get(library.ID_KEYS[kind], "").strip('"') == imported.orca_name or there == library.settings_in(kind, orca_install.ini(imported)):
             return existing.stem, None
-        if printer is None:
-            raise CommandError(f"your library has a different {kind} named '{existing.stem}'; import Orca's under another name with: "
-                               f'deli import orca {kind} "{orca_name}" --name <name>')
-        name = f"{name} {printer}"
-    loaded = orca_install.into_library(imported, name)
+    else:
+        raise CommandError(f"your library has a different {kind} named '{existing.stem}' for '{printer}'; import Orca's under another name with: "
+                           f'deli import orca {kind} "{orca_name}" --name <name>')
+    loaded = orca_install.into_library(imported, name, printer)
     left_out = f", {len(imported.converted.dropped)} left out" if imported.converted.dropped else ""
     return loaded.name, f"{len(loaded.settings)} settings{left_out}"
 
 
-def _for_this_printer(doc, kind: str, name: str) -> str:
-    """A process or filament in the library as it suits the print's printer. One converted
-    from Orca's for another printer (its file says which) is converted again for this one
-    and kept beside it; one converted for this printer, or not from Orca at all, or edited
-    by hand, is used as it is. Without Orca's presets at hand, as it is too."""
-    if kind == "printer":
-        return name
-    path = library.find(kind, name)
-    made_for = library.made_for(path)
-    printer = _print_profile(doc)
-    if not made_for or not printer:
-        return name
+def _elsewhere(kind: str, wanted: str, printer: str) -> tuple[str, str] | None:
+    """A filament or process another printer has, by what was typed: its printer and name;
+    None when none has one like it, an error when several unlike ones do."""
+    found = library.matching_elsewhere(kind, wanted, printer)
+    pairs = [(other, name) for other, names in found.items() for name in names]
+    if len(pairs) > 1 and len({_orca_source(kind, name, other) or f"{other}/{name}" for other, name in pairs}) > 1:
+        raise CommandError(f"your library has {len(pairs)} {_PLURALS[kind]} matching '{wanted}', for other printers; which one?\n  "
+                           + "\n  ".join(f"{name} (for '{other}')" for other, name in pairs))
+    return pairs[0] if pairs else None
+
+
+def _for_this_printer(doc, kind: str, name: str, from_printer: str, printer: str) -> str:
+    """A process or filament another printer has, made for this print's printer: converted
+    again from the Orca preset it came from, under its name; one not from Orca at all
+    (loaded, or edited by hand) is copied as it is, and so is one when Orca's presets
+    cannot be read. Returns the library name it has for this printer."""
+    orca_name = _orca_source(kind, name, from_printer)
     try:
-        presets = orca_install.Presets(github=orca_install.ORCA_REF)
-        orca_printer = _orca_printer(presets, printer)
-        orca_name = library.read_settings(path).get(library.ID_KEYS[kind], "").strip('"')
-        if orca_printer is None or orca_printer == made_for or orca_name not in presets.names(kind):
-            return name
-        converted, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer)
-    except (orca_install.OrcaError, CommandError):
-        return name
-    if stored is not None:
-        print(f"Converted {kind} '{converted}' from Orca's '{orca_name}' for '{printer}' ({stored})")
-    return converted
+        presets = orca_install.Presets(github=orca_install.ORCA_REF) if orca_name else None
+        orca_printer = _orca_printer(presets, printer) if presets else None
+        if orca_printer and orca_name in presets.names(kind):
+            converted, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer)
+            if stored is not None:
+                print(f"Converted {kind} '{converted}' from Orca's '{orca_name}' for '{printer}' ({stored})")
+            return converted
+    except orca_install.OrcaError as err:
+        print(f"Orca's presets could not be read ({err}); the {kind} is copied as it is", file=sys.stderr)
+    if library.copy_to(kind, name, printer, from_printer):
+        print(f"Copied {kind} '{name}' from '{from_printer}' for '{printer}' as it is" + (": not converted from Orca" if not orca_name else ""))
+    return name
 
 
 def _machine_named(wanted: str) -> str | None:
@@ -1640,11 +1726,19 @@ def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = Non
     library by its name or a part only it has; else one of Orca's presets (at the release
     `deli import` reads), imported now, a printer with its default process and filament,
     a process or filament converted for the print's printer."""
-    names = library.names(kind)
-    if found := _in_library(kind, wanted):
+    printer = _print_profile(doc) if kind != "printer" else None
+    if kind != "printer" and not printer:
+        raise CommandError(f"a {kind} is a printer's, and neither this print nor your config names one; choose one for this print with: "
+                           "deli printer <name>, or your default printer with: deli printer <name> --default")
+    names = library.names(kind, printer)
+    if found := _in_library(kind, wanted, printer):
         if name_as:
             raise CommandError(f"'{wanted}' is already in your library as '{found}'; --name names one being imported from Orca")
-        return _for_this_printer(doc, kind, found)
+        return found
+    if printer and (pair := _elsewhere(kind, wanted, printer)):
+        if name_as:
+            raise CommandError(f"'{wanted}' is already in your library as '{pair[1]}' for '{pair[0]}'; --name names one being imported from Orca")
+        return _for_this_printer(doc, kind, pair[1], pair[0], printer)
 
     mine = f" (it has: {', '.join(names)})" if names else ""
     try:
@@ -1665,8 +1759,7 @@ def _from_library_or_orca(doc, kind: str, wanted: str, name_as: str | None = Non
         return loaded.name
 
     # Converted for the print's printer, when Orca has it (a converted printer carries Orca's name).
-    printer = _print_profile(doc)
-    orca_printer = _orca_printer(presets, printer) if printer else None
+    orca_printer = _orca_printer(presets, printer)
     name, stored = _store_from_orca(presets, kind, orca_name, orca_printer, printer, name_as)
     if stored is not None:
         for_printer = f", for '{printer}'" if orca_printer else ""
@@ -1807,7 +1900,15 @@ def _config(args: argparse.Namespace) -> int:
     config.refuse_setting(args.key, "set")
     name, field = config.split_key(args.key)
     if field in ("filament", "process"):
-        library.find(field, library.slug(args.value))  # must be in the library
+        # Must be in the library, for the printer and nozzle the key names.
+        if found := config.nozzle_key(args.key):
+            nozzle = config.machine(found[0]).nozzles.get(found[1])
+            profile = nozzle.profile if nozzle else None
+        else:
+            profile = config.machine(name).profile
+        if not profile:
+            raise CommandError(f"'{name}' does not say which nozzle is in it; say with: deli nozzle <size>")
+        library.find(field, library.slug(args.value), profile)
     elif field == "host" and not args.value.startswith(("http://", "https://")):
         send.parse_host(args.value, where=args.key)  # a plain http host is checked against the printer's host_type when sending
     known = name in config.machines() or library.slug(name) in library.names("printer")
@@ -1971,11 +2072,12 @@ def _pick_nozzle(names: list[str], model: str, known: float | None = None, named
         print(f"   {model} comes with a {', '.join(sizes[:-1])} or {sizes[-1]} mm nozzle in Orca's printers.")
 
 
-def _orca_name(kind: str, name: str | None) -> str | None:
-    """How a library profile is shown in deli setup: Orca's name for it when it has one."""
-    if not name or name not in library.names(kind):
+def _orca_name(kind: str, name: str | None, printer: str | None = None) -> str | None:
+    """How a library profile is shown in deli setup: Orca's name for it when it has one; a
+    filament or process is `printer`'s."""
+    if not name or name not in library.names(kind, printer):
         return name
-    return library.read_settings(library.find(kind, name)).get(library.ID_KEYS[kind], "").strip('"') or name
+    return _orca_source(kind, name, printer) or name
 
 
 def _describe(found) -> str:
@@ -2156,7 +2258,7 @@ def _setup(args: argparse.Namespace) -> int:
             nozzle = config.machine(printer).for_profile(profile)
             _done(_orca_name("printer", profile) + (f", as '{printer}'" if printer != profile else ""))
             for kind in ("process", "filament"):
-                print(f"     {kind:<9} {_orca_name(kind, getattr(nozzle, kind, None)) or _dim('none yet; choose one with: deli ' + kind)}")
+                print(f"     {kind:<9} {_orca_name(kind, getattr(nozzle, kind, None), profile) or _dim('none yet; choose one with: deli ' + kind)}")
             if found and profile not in had:
                 for line in _fit_to(printer, profile, found):
                     print(f"     {_dim(line)}")
@@ -2217,6 +2319,7 @@ def build_parser() -> argparse.ArgumentParser:
     load.add_argument("kind", choices=library.KINDS)
     load.add_argument("source", help="an https:// or file:// URL, or a path, of a PrusaSlicer INI file")
     load.add_argument("--name", help="name to store it under (default: the name in the file)")
+    load.add_argument("--printer", metavar="NAME", help="the printer a filament or process is for (default: this print's, else your default printer)")
     load.set_defaults(run=_load)
 
     plurals = {"printer": "printers", "filament": "filaments", "process": "processes"}
@@ -2310,9 +2413,9 @@ def build_parser() -> argparse.ArgumentParser:
                       "no setting is named so, lists those with it in their name")
     where = set_.add_mutually_exclusive_group()
     where.add_argument("--global", dest="everywhere", action="store_true", help="for every print, in your config, not this print")
-    where.add_argument("--printer", dest="for_printer", metavar="NAME", help="for every print on that printer, in your config, not this print")
-    where.add_argument("--filament", dest="for_filament", metavar="NAME", help="for every print with that filament, in your config")
-    where.add_argument("--process", dest="for_process", metavar="NAME", help="for every print with that process, in your config")
+    where.add_argument("--filament", dest="for_filament", metavar="NAME", help="for every print with that filament on this print's printer (or your default one), in your config")
+    where.add_argument("--process", dest="for_process", metavar="NAME", help="for every print with that process on this print's printer (or your default one), in your config")
+    set_.add_argument("--printer", dest="for_printer", metavar="NAME", help="for every print on that printer, in your config, not this print; with --filament or --process, that printer's")
     set_.set_defaults(run=_set)
 
     supports = commands.add_parser(
@@ -2340,9 +2443,9 @@ def build_parser() -> argparse.ArgumentParser:
     unset.add_argument("settings", nargs="*", metavar="setting", help="a setting's name or short name; several at once. With none, list what there is to remove")
     where = unset.add_mutually_exclusive_group()
     where.add_argument("--global", dest="everywhere", action="store_true", help="the setting changed for every print, in your config")
-    where.add_argument("--printer", dest="for_printer", metavar="NAME", help="the setting changed for every print on that printer")
-    where.add_argument("--filament", dest="for_filament", metavar="NAME", help="the setting changed for every print with that filament")
-    where.add_argument("--process", dest="for_process", metavar="NAME", help="the setting changed for every print with that process")
+    where.add_argument("--filament", dest="for_filament", metavar="NAME", help="the setting changed for every print with that filament on this print's printer (or your default one)")
+    where.add_argument("--process", dest="for_process", metavar="NAME", help="the setting changed for every print with that process on this print's printer (or your default one)")
+    unset.add_argument("--printer", dest="for_printer", metavar="NAME", help="the setting changed for every print on that printer; with --filament or --process, that printer's")
     unset.set_defaults(run=_unset)
 
     scale = commands.add_parser(
@@ -2533,6 +2636,39 @@ def _is_option(word: str) -> bool:
         return True
 
 
+def _migrate_library() -> None:
+    """A library an older deli kept as one flat list of filaments and processes is moved
+    under its printers, once, and the config's filament and process settings with it (see
+    `library.migrate`). A machine whose defaults name a filament or process moved under
+    another printer gets a copy under its own, so that nothing changes under a print."""
+    try:
+        default = config.default_printer()
+        fallback = config.machine(default).profile if default else None
+    except config.ConfigError:
+        fallback = None
+    moved = library.migrate(fallback)
+    placed: dict[tuple[str, str], list[str]] = {}
+    for kind, name, printer in moved:
+        placed.setdefault((kind, name), []).append(printer)
+    settings_moved = []
+    try:
+        for machine in config.machines() if moved else []:
+            for nozzle in config.machine(machine).nozzles.values():
+                for kind in ("filament", "process"):
+                    name = getattr(nozzle, kind)
+                    if name and (kind, name) in placed and nozzle.profile not in placed[(kind, name)] and nozzle.profile in library.names("printer"):
+                        library.copy_to(kind, name, nozzle.profile, placed[(kind, name)][0])
+                        placed[(kind, name)].append(nozzle.profile)
+        machines = {key: sorted({config.machine_of(printer) or printer for printer in printers}) for key, printers in placed.items()}
+        settings_moved = config.migrate(machines)
+    except config.ConfigError:
+        pass  # the config as it stands is reported by the command itself
+    if moved or settings_moved:
+        what = [f"{len(moved)} moved"] if moved else []
+        what += [f"{len(settings_moved)} settings tables moved in your config"] if settings_moved else []
+        print(f"deli: your library's filaments and processes are now kept under their printers ({'; '.join(what)}; see: deli filament)", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     if getattr(_engine, "API_VERSION", 1) != ENGINE_API:
         print("deli: the engine was built from older code than the rest of deli; rebuild it with: make reinstall", file=sys.stderr)
@@ -2546,6 +2682,8 @@ def main(argv: list[str] | None = None) -> int:
     elif rest:
         parser.error("unrecognized arguments: " + " ".join(rest))
     try:
+        if args.command != "__complete":
+            _migrate_library()
         return args.run(args)
     except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, config.ConfigError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)

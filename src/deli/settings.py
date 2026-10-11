@@ -163,40 +163,52 @@ class Layer:
     kind: str | None
     name: str | None
     settings: dict[str, str]
+    machine: str | None = None  # the printer a filament's or process's layer belongs to
 
     @property
     def where(self) -> str:
-        """As the commands say it: "for every print", "for every print on 'x'", "for every print with the filament 'x'"."""
+        """As the commands say it: "for every print", "for every print on 'x'", "for every print with the filament 'x' on 'y'"."""
         if self.kind is None:
             return "for every print"
-        return f"for every print on '{self.name}'" if self.kind == "printer" else f"for every print with the {self.kind} '{self.name}'"
+        if self.kind == "printer":
+            return f"for every print on '{self.name}'"
+        return f"for every print with the {self.kind} '{self.name}'" + (f" on '{self.machine}'" if self.machine else "")
 
     @property
     def option(self) -> str:
-        """The `deli set` option that reaches it."""
+        """The `deli set` option that reaches it, from a print on the printer (or with it the default one)."""
         return "--global" if self.kind is None else f"--{self.kind} {self.name}"
 
     @property
     def source(self) -> str:
-        """As `effective` names it: "your config for every print", "your config for the filament 'x'"."""
-        return "your config for every print" if self.kind is None else f"your config for the {self.kind} '{self.name}'"
+        """As `effective` names it: "your config for every print", "your config for the filament 'x' on 'y'"."""
+        if self.kind is None:
+            return "your config for every print"
+        on = f" on '{self.machine}'" if self.machine and self.kind != "printer" else ""
+        return f"your config for the {self.kind} '{self.name}'{on}"
 
 
-def layer(kind: str | None, name: str | None = None) -> Layer:
-    """The config's layer for every print, or for one profile, read now."""
-    return Layer(kind, name, config.profile_settings(kind, name) if kind else config.settings())
+def layer(kind: str | None, name: str | None = None, machine: str | None = None) -> Layer:
+    """The config's layer for every print, for one printer, or for one of a printer's
+    filaments or processes, read now."""
+    found = config.profile_settings(kind, name, machine=machine) if kind else config.settings()
+    return Layer(kind, name, found, machine if kind in LAYERS_OF_A_PRINTER else None)
+
+
+LAYERS_OF_A_PRINTER = ("filament", "process")
 
 
 def config_layers(doc) -> list[Layer]:
     """The config's layers under a print's own settings, lowest first: for every print, then
-    for its printer, filament and process, as far as it has chosen them."""
+    for its printer, and its filament and process on that printer, as far as it has chosen them."""
     from deli import project  # here to keep settings importable on its own
 
     layers = [layer(None)]
+    machine = project.machine(doc)
     for kind in config.LAYERS:
-        name = project.machine(doc) if kind == "printer" else project.selected(doc, kind).get("name")
-        if name:
-            layers.append(layer(kind, name))
+        name = machine if kind == "printer" else project.selected(doc, kind).get("name")
+        if name and (kind == "printer" or machine):
+            layers.append(layer(kind, name, machine))
     return layers
 
 

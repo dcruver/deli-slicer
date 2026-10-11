@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deli import library
+from deli import config, library
 from deli.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +21,8 @@ def project(tmp_path, monkeypatch):
     (tmp_path / "job").mkdir()
     monkeypatch.chdir(tmp_path / "job")
     for kind in library.KINDS:
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer=NAMES["printer"])
+    config.set_value("printer", NAMES["printer"])  # a filament or process is a printer's: the print's, or the default's
     return tmp_path / "job" / "deli.toml"
 
 
@@ -59,7 +60,7 @@ def test_all_three_are_kept_side_by_side(project):
 
 @pytest.mark.parametrize("kind", ["filament", "process"])
 def test_listing_marks_the_chosen_one(kind, project, capsys):
-    library.load(kind, str(EXPORT), name="spare")
+    library.load(kind, str(EXPORT), name="spare", printer=NAMES["printer"])
     main([kind, NAMES[kind]])
     capsys.readouterr()
 
@@ -80,7 +81,7 @@ def test_one_that_is_not_loaded_is_an_error(kind, project, capsys):
 
 @pytest.mark.parametrize("kind", ["filament", "process"])
 def test_none_loaded_says_how_to_add_one(kind, project, capsys):
-    library.find(kind, NAMES[kind]).unlink()
+    library.find(kind, NAMES[kind], NAMES["printer"]).unlink()
 
     assert main([kind]) == 0
 

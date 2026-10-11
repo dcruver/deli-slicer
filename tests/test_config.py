@@ -23,8 +23,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.delenv("DELI_API_KEY", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     for kind in library.KINDS:
-        library.load(kind, str(EXPORT))
-    library.load("filament", str(EXPORT), name="spare-pla")
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
+    library.load("filament", str(EXPORT), name="spare-pla", printer=MK3)
     job = tmp_path / "job"
     job.mkdir()
     shutil.copy(CUBE, job / "cube.stl")
@@ -120,8 +120,9 @@ def test_choosing_a_printer_applies_its_defaults(home, capsys):
 
 
 def test_defaults_do_not_override_what_the_print_already_chose(home, capsys):
-    main(["config", f"printers.{MK3}.filament", "spare-pla"])
+    main(["printer", MK3])
     main(["filament", ABS])
+    main(["config", f"printers.{MK3}.filament", "spare-pla"])
     capsys.readouterr()
 
     main(["printer", MK3])
@@ -132,7 +133,7 @@ def test_defaults_do_not_override_what_the_print_already_chose(home, capsys):
 
 def test_default_missing_from_the_library_is_noted(home, capsys):
     main(["config", f"printers.{MK3}.filament", "spare-pla"])
-    library.find("filament", "spare-pla").unlink()
+    library.find("filament", "spare-pla", MK3).unlink()
     capsys.readouterr()
 
     assert main(["printer", MK3]) == 0
@@ -328,7 +329,8 @@ def test_default_printer_is_listed_and_unset(home, capsys):
 
 def test_changing_printer_brings_its_filament_and_process(home, capsys):
     library.load("printer", str(EXPORT), name="other")
-    library.load("process", str(EXPORT), name="other-quality")
+    library.load("process", str(EXPORT), name="other-quality", printer="other")
+    library.load("filament", str(EXPORT), name="spare-pla", printer="other")
     main(["config", "printers.other.filament", "spare-pla"])
     main(["config", "printers.other.process", "other-quality"])
     main(["printer", MK3])
@@ -347,7 +349,9 @@ def test_changing_printer_brings_its_filament_and_process(home, capsys):
     assert f"Filament  spare-pla" in out and f"the default for this printer; was '{ABS}' (choose it again with: deli filament {ABS})" in out
 
 
-def test_changing_to_a_printer_without_defaults_keeps_them_and_says_so(home, capsys):
+def test_changing_to_a_printer_without_defaults_brings_them_over(home, capsys):
+    """The previous printer's filament is made for the new one as choosing it would be:
+    converted from Orca's preset where it came from one, else copied as it is."""
     library.load("printer", str(EXPORT), name="other")
     main(["printer", MK3])
     main(["filament", ABS])
@@ -358,8 +362,10 @@ def test_changing_to_a_printer_without_defaults_keeps_them_and_says_so(home, cap
     from deli import project
 
     assert project.selected(project.read(), "filament")["name"] == ABS
+    assert library.names("filament", "other") == [ABS]  # its own copy
     out = capsys.readouterr().out
-    assert f"Filament  {ABS}" in out and "kept from the previous printer, which may not suit this one" in out
+    assert f"Copied filament '{ABS}' from '{MK3}' for 'other' as it is" in out
+    assert "the previous printer's, made for this one as choosing it would be" in out
 
 
 def test_global_settings_are_listed_by_config_but_changed_by_set(home, capsys):
@@ -413,27 +419,66 @@ def test_a_printers_settings_table_must_hold_plain_values(home, capsys):
     assert f"'printers.{MK3}.settings' should be a table of setting = value lines" in capsys.readouterr().err
 
 
-def test_a_filaments_and_a_processs_settings_are_listed_by_config_but_changed_by_set(home, capsys):
+def test_a_filaments_and_a_processs_settings_are_the_printers_listed_by_config_but_changed_by_set(home, capsys):
+    """A filament's or process's settings are kept under the printer whose filament or
+    process it is: the print's, else the default printer's, else `--printer`'s."""
+    main(["config", "printer", MK3])
     main(["set", "--filament", ABS, "temperature", "250"])
-    main(["set", "--process", QUALITY, "walls", "3"])
+    main(["set", "--printer", MK3, "--process", QUALITY, "walls", "3"])
     capsys.readouterr()
 
     assert main(["config"]) == 0
-    assert capsys.readouterr().out == f"filaments.{ABS}.settings.temperature = 250\nprocesses.{QUALITY}.settings.perimeters = 3\n"
-    assert main(["config", f"processes.{QUALITY}.settings.perimeters"]) == 0
+    assert capsys.readouterr().out == (
+        f"printer = {MK3}\nprinters.{MK3}.filaments.{ABS}.settings.temperature = 250\nprinters.{MK3}.processes.{QUALITY}.settings.perimeters = 3\n"
+    )
+    assert main(["config", f"printers.{MK3}.processes.{QUALITY}.settings.perimeters"]) == 0
     assert capsys.readouterr().out == "3\n"
-    assert main(["config", f"filaments.{ABS}.settings.temperature", "240"]) == 1
-    assert f"deli set --filament {ABS} temperature <value>" in capsys.readouterr().err
-    assert main(["config", "--unset", f"processes.{QUALITY}.settings.perimeters"]) == 1
-    assert f"deli unset --process {QUALITY} perimeters" in capsys.readouterr().err
+    assert main(["config", f"printers.{MK3}.filaments.{ABS}.settings.temperature", "240"]) == 1
+    assert f"deli set --printer {MK3} --filament {ABS} temperature <value>" in capsys.readouterr().err
+    assert main(["config", "--unset", f"printers.{MK3}.processes.{QUALITY}.settings.perimeters"]) == 1
+    assert f"deli unset --printer {MK3} --process {QUALITY} perimeters" in capsys.readouterr().err
+    assert main(["config", f"filaments.{ABS}.settings.temperature", "240"]) == 1  # where an older deli kept them
+    assert f"a filament's settings are a printer's: printers.<printer>.filaments.<name>.settings" in capsys.readouterr().err
 
 
 def test_a_filaments_table_holds_only_settings(home, capsys):
-    (home / "config.toml").write_text(f"[filaments.{ABS}]\nhost = \"x\"\n")
+    (home / "config.toml").write_text(f"[printers.{MK3}.filaments.{ABS}]\nhost = \"x\"\n")
 
     assert main(["config"]) == 1
 
-    assert f"'filaments.{ABS}.host' is not a setting deli knows" in capsys.readouterr().err
+    assert f"'printers.{MK3}.filaments.{ABS}.host' is not a setting deli knows" in capsys.readouterr().err
+
+
+def test_an_older_flat_library_and_config_are_moved_under_their_printers(home, capsys):
+    """A library deli kept as one flat list of filaments and processes, each file naming the
+    printer it was converted for, and the config's `filaments.<name>.settings` with it, are
+    moved under the printers once, on the next command; a printer whose defaults name one
+    gets a copy, so that nothing changes under a print."""
+    import shutil
+
+    library.load("printer", str(EXPORT), name="mk3-0.6")
+    flat = home / "filaments"
+    for name in list(flat.iterdir()):
+        shutil.rmtree(name)
+    for name, made_for in (("generic-abs", "Original Prusa i3 MK3"), ("generic-pla", None), ("old-petg", "Gone Printer")):
+        lines = ["# deli filament: " + name, "# source: x"] + ([f"# for: {made_for}"] if made_for else []) + ["temperature = 230", 'filament_settings_id = "X"']
+        (flat / f"{name}.ini").write_text("\n".join(lines) + "\n")
+    (home / "config.toml").write_text(
+        f"printer = \"{MK3}\"\n[printers.\"mk3-0.6\"]\nfilament = \"generic-abs\"\n[filaments.generic-abs.settings]\ntemperature = 240\n[processes.\"{QUALITY}\".settings]\nperimeters = 3\n"
+    )
+
+    assert main(["config"]) == 0
+
+    assert "now kept under their printers (3 moved" in capsys.readouterr().err
+    assert library.names("filament", MK3) == ["generic-abs", "generic-pla", "old-petg"]  # by its line, else the default printer's
+    assert library.names("filament", "mk3-0.6") == ["generic-abs"]  # the copy its defaults need
+    assert not list(flat.glob("*.ini"))
+    data = tomllib.loads((home / "config.toml").read_text())
+    assert "filaments" not in data and "processes" not in data
+    assert data["printers"][MK3]["filaments"]["generic-abs"]["settings"] == {"temperature": 240}
+    assert data["printers"]["mk3-0.6"]["filaments"]["generic-abs"]["settings"] == {"temperature": 240}
+    assert data["printers"][MK3]["processes"][QUALITY]["settings"] == {"perimeters": 3}
+    assert main(["config"]) == 0 and "moved" not in capsys.readouterr().err  # once
 
 
 # ---------------------------------------------------------------- a printer you have: a machine with nozzles
@@ -466,7 +511,7 @@ def test_nozzle_lists_and_switches_a_printers_nozzles(home, capsys):
     changed = EXPORT.read_text().replace("nozzle_diameter = 0.4", "nozzle_diameter = 0.6")
     (home.parent / "mk3-06.ini").write_text(changed)
     library.load("printer", str(home.parent / "mk3-06.ini"), name="mk3-0.6")
-    library.load("process", str(EXPORT), name="quality-0.6")
+    library.load("process", str(EXPORT), name="quality-0.6", printer="mk3-0.6")
     main(["printer", MK3, "--name", "prusa"])
     main(["add", "cube.stl"])
     main(["printer", "mk3-0.6", "--name", "prusa"])  # adds the 0.6 nozzle, and the print moves to it

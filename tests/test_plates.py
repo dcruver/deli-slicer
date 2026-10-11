@@ -33,7 +33,7 @@ def job(tmp_path, monkeypatch):
     shutil.copy(CUBE, job / "box.stl")
     monkeypatch.chdir(job)
     for kind, name in NAMES.items():
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
         main([kind, name])
     main(["add", "cube.stl"])
     main(["set", "bed_shape", SMALL_BED])

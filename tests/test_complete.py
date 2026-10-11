@@ -23,7 +23,7 @@ def job(tmp_path, monkeypatch):
     shutil.copy(CUBE, job / "other.stl")
     monkeypatch.chdir(job)
     library.load("printer", str(EXPORT))
-    library.load("filament", str(EXPORT))
+    library.load("filament", str(EXPORT), printer="original-prusa-i3-mk3")
     return job
 
 
@@ -47,6 +47,8 @@ def test_commands():
 def test_kinds_and_library_names():
     assert complete("load") == ["filament", "printer", "process"]
     assert complete("printer") == ["original-prusa-i3-mk3"]
+    assert complete("filament") == []  # a filament is a printer's, and no print or default names one
+    main(["printer", "original-prusa-i3-mk3"])
     assert complete("filament") == ["generic-abs"]
     assert complete("process") == []
 
@@ -96,6 +98,7 @@ def test_settings_and_their_short_names():
     assert complete("config", "--unset") == []  # a global setting is `deli unset --global`'s to remove
 
     assert complete("set", "--printer") == ["original-prusa-i3-mk3"]
+    main(["printer", "original-prusa-i3-mk3"])
     assert complete("set", "--filament") == ["generic-abs"]
     main(["set", "--printer", "mk3", "layer", "0.3"])
     main(["set", "--filament", "abs", "temperature", "250"])
@@ -105,7 +108,7 @@ def test_settings_and_their_short_names():
     assert complete("config", "--unset") == []
     # `deli config` reads a settings key, so it is offered, and no printer is made of it
     assert [key for key in complete("config") if "settings" in key] == [
-        "filaments.generic-abs.settings.temperature",
+        "printers.original-prusa-i3-mk3.filaments.generic-abs.settings.temperature",
         "printers.original-prusa-i3-mk3.settings.layer_height",
         "settings.perimeters",
     ]

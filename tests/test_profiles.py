@@ -20,7 +20,7 @@ def home(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("path", FILES, ids=lambda path: f"{path.parent.name}/{path.stem}")
 def test_profile_loads_whole(path):
-    loaded = library.load(FOLDERS[path.parent.name], str(path))
+    loaded = library.load(FOLDERS[path.parent.name], str(path), printer="shipped")  # a filament or process is a printer's
 
     assert loaded.name == path.stem
     assert loaded.unknown == []

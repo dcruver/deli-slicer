@@ -566,7 +566,7 @@ Done. 8 tests pass.
 The list under "Not done yet" in `README.md` is the one to keep current. In short:
 per-part settings, multi-filament, more host types.
 
-**Filaments and processes kept per printer, to do (the user, 2026-10-11).** Today the
+**Filaments and processes kept per printer, done 2026-10-11 (the user, 2026-10-11).** Before, the
 library is one flat list per kind, named after Orca's preset (`generic-pla-system`,
 `elegoo-pla-ecc`), with the printer a filament or process was converted for recorded
 inside the file (`# for:`), and a second conversion of the same preset for another
@@ -600,10 +600,14 @@ taxonomy the user wanted all along (vendor, printer, then its filaments and proc
   config settings table to the printer of the library file it names; a file without
   `# for:` (loaded, or edited) asks, or goes under the default printer. Prints keep
   slicing: `deli.toml` names and hashes are unchanged.
-- Open: whether a machine with several nozzles (`printers.voron.nozzles`) shows its
-  filaments per nozzle or merged in listings; whether a filament loaded with
-  `deli load` from an INI, which names no printer, is kept under the printer it was
-  loaded on.
+- Settled as it was done: the library and the config go by the printer profile (one per
+  nozzle, as Orca's are) for files, and by the machine for settings tables, as the
+  printer's own settings do; `deli load filament|process` takes `--printer`, else the
+  print's printer, else the default printer's nozzle; a machine with several nozzles
+  lists the nozzle in use's filaments; `_store_from_orca` keeps a file already there
+  from the same preset rather than replacing it, and a different preset of the same
+  short name keeps its whole name. The user's own library was migrated the same day
+  (their `deli` runs this checkout), and checked file by file.
 
 Done first, on its own (2026-10-11): Orca's templates (`instantiation` false, which
 GitHub's index does not say) are refused when chosen and left out of what fits a

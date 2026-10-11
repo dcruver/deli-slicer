@@ -26,24 +26,26 @@ which win.
     [printers.voron.settings]
     max_print_height = 310                # for every print on this printer (`deli set --printer`)
 
+    [printers.voron.filaments.generic-pla.settings]
+    filament_max_volumetric_speed = 30    # for every print with this filament on this printer (`deli set --filament`)
+
+    [printers.voron.processes.0.40mm-standard.settings]
+    perimeters = 2                        # for every print with this process on this printer (`deli set --process`)
+
 A printer with one nozzle may be written the short way, named after its profile, with
 `filament` and `process` in its own table (how deli wrote it before 0.11):
 
     [printers.elegoo-centauri-carbon-0.6-nozzle]
     host = "elegoo://centauri.local"
-    filament = "elegoo-petg-cf-ecc"
-    process = "0.30mm-standard-elegoo-cc-0.6-nozzle"
-
-    [filaments.elegoo-pla-ecc.settings]
-    temperature = 215                     # for every print with this filament (`deli set --filament`)
-
-    [processes.0.30mm-standard-elegoo-cc-0.6-nozzle.settings]
-    perimeters = 3                        # for every print with this process (`deli set --process`)
+    filament = "elegoo-petg-cf"
+    process = "0.30mm-standard"
 
 The layers, each over the one before: the chosen profiles, `[settings]`, the printer's,
 the filament's and the process's `settings`, then the print's own. A profile's
 modifications live here beside Orca's base, not in it, so `deli import` of a newer base
-keeps them: Orca's base plus these is a custom profile.
+keeps them: Orca's base plus these is a custom profile. A filament's or process's are a
+printer's, as the filament or process itself is (`library`): pressure advance and a
+volumetric cap are the hotend's as much as the material's.
 
 `deli config` reads and writes it by dotted key, like `git config`.
 """
@@ -61,14 +63,17 @@ from deli import library
 
 DEFAULT_PRINTER = "printer"  # the top-level key that names the printer new prints start with
 SETTINGS = "settings"  # the table of settings changed for every print
-# The top-level table that holds each kind of profile's tables; a printer's has its
-# connection and defaults too, a filament's or process's only `settings`.
+# The table that holds each kind of profile's tables: `printers` at the top, with each
+# printer's connection, defaults, nozzles and settings, and in a printer's table its
+# `filaments` and `processes`, each of those holding only `settings`.
 TABLES = {"printer": "printers", "filament": "filaments", "process": "processes"}
 # The order the config's layers lie in, each over the one before, under a print's own.
 LAYERS = ("printer", "filament", "process")
-# The keys a printer's table may hold, besides its `settings` and `nozzles` tables.
+# The keys a printer's table may hold, besides its tables.
 PRINTER_KEYS = ("host", "api_key", "filament", "process", "profile", "nozzle")
 NOZZLES = "nozzles"  # the table of a printer's nozzles, one table per size
+# The tables a printer's table may hold.
+PRINTER_TABLES = ("settings", NOZZLES, TABLES["filament"], TABLES["process"])
 # The keys of one nozzle's table.
 NOZZLE_KEYS = ("profile", "filament", "process")
 # Keys deli once kept and no longer reads, ignored in old files and still removable with
@@ -111,6 +116,10 @@ def printer(name: str, doc: tomlkit.TOMLDocument | None = None) -> dict:
     for key, value in table.items():
         if key in RETIRED_KEYS or key == SETTINGS:
             continue
+        if key in (TABLES["filament"], TABLES["process"]):
+            if not isinstance(value, dict) or not all(isinstance(t, dict) for t in value.values()):
+                raise ConfigError(f"{path()}: 'printers.{name}.{key}' should be a table with one table per {key[:-1]}")
+            continue
         if key == NOZZLES:
             if not isinstance(value, dict):
                 raise ConfigError(f"{path()}: 'printers.{name}.{NOZZLES}' should be a table with one table per nozzle size")
@@ -125,7 +134,7 @@ def printer(name: str, doc: tomlkit.TOMLDocument | None = None) -> dict:
             raise ConfigError(f"{path()}: 'printers.{name}.{key}' is not a setting deli knows; the keys are " + ", ".join((*PRINTER_KEYS, SETTINGS)))
         if not isinstance(value, str):
             raise ConfigError(f"{path()}: 'printers.{name}.{key}' should be one value")
-    return {key: value for key, value in table.items() if key not in (*RETIRED_KEYS, SETTINGS, NOZZLES)}
+    return {key: value for key, value in table.items() if key not in (*RETIRED_KEYS, *PRINTER_TABLES)}
 
 
 @dataclass
@@ -330,52 +339,110 @@ def _plain_settings(table, where: str) -> dict[str, str]:
     return {key: plain_value(value) for key, value in table.items()}
 
 
-def _kind_table(kind: str, doc: tomlkit.TOMLDocument) -> dict:
-    table = doc.get(TABLES[kind], {})
+def _kind_table(kind: str, machine: str | None, doc: tomlkit.TOMLDocument) -> dict:
+    """The table holding one kind's tables: `printers`, or a printer's `filaments` or `processes`."""
+    if kind == "printer":
+        table = doc.get(TABLES[kind], {})
+    else:
+        if not machine:
+            raise ConfigError(f"a {kind}'s settings are a printer's; name the printer")
+        printer(machine, doc)  # validates the table
+        table = doc.get("printers", {}).get(machine, {}).get(TABLES[kind], {})
     if not isinstance(table, dict):
         raise ConfigError(f"{path()}: '{TABLES[kind]}' should be a table with one table per {kind}")
     return table
 
 
-def profile_settings(kind: str, name: str, doc: tomlkit.TOMLDocument | None = None) -> dict[str, str]:
-    """The settings changed for every print with one printer, filament or process:
-    `printers|filaments|processes.<name>.settings`."""
+def table_of(kind: str, name: str, machine: str | None = None) -> str:
+    """The dotted key of a profile's table: `printers.<machine>`, or `printers.<machine>.filaments.<name>`."""
+    return f"printers.{name}" if kind == "printer" else f"printers.{machine}.{TABLES[kind]}.{name}"
+
+
+def profile_settings(kind: str, name: str, doc: tomlkit.TOMLDocument | None = None, machine: str | None = None) -> dict[str, str]:
+    """The settings changed for every print with one printer, `printers.<name>.settings`,
+    or with one of a printer's filaments or processes, `printers.<machine>.filaments.<name>.settings`."""
     doc = read() if doc is None else doc
-    where = f"{TABLES[kind]}.{name}"
+    where = table_of(kind, name, machine)
     if kind == "printer":
         printer(name, doc)  # validates the table
     else:
-        table = _kind_table(kind, doc).get(name, {})
+        table = _kind_table(kind, machine, doc).get(name, {})
         if not isinstance(table, dict):
             raise ConfigError(f"{path()}: '{where}' should be a table")
         if unknown := [key for key in table if key != SETTINGS]:
             raise ConfigError(f"{path()}: '{where}.{unknown[0]}' is not a setting deli knows; a {kind}'s table holds only {SETTINGS}")
-    return _plain_settings(_kind_table(kind, doc).get(name, {}).get(SETTINGS, {}), f"{where}.{SETTINGS}")
+    return _plain_settings(_kind_table(kind, machine, doc).get(name, {}).get(SETTINGS, {}), f"{where}.{SETTINGS}")
 
 
-def set_profile_setting(kind: str, name: str, key: str, value: str) -> None:
+def _profile_table(kind: str, name: str, machine: str | None, doc: tomlkit.TOMLDocument):
+    """A profile's table in the config, made if it is not there."""
+    printers = doc.setdefault("printers", tomlkit.table())
+    if kind == "printer":
+        return printers.setdefault(name, tomlkit.table())
+    return printers.setdefault(machine, tomlkit.table()).setdefault(TABLES[kind], tomlkit.table()).setdefault(name, tomlkit.table())
+
+
+def set_profile_setting(kind: str, name: str, key: str, value: str, machine: str | None = None) -> None:
     doc = read()
-    profile_settings(kind, name, doc)
-    table = doc.setdefault(TABLES[kind], tomlkit.table()).setdefault(name, tomlkit.table())
+    profile_settings(kind, name, doc, machine)
+    table = _profile_table(kind, name, machine, doc)
     table.setdefault(SETTINGS, tomlkit.table())[key] = toml_value(value)
     write(doc)
 
 
-def unset_profile_setting(kind: str, name: str, key: str) -> bool:
+def unset_profile_setting(kind: str, name: str, key: str, machine: str | None = None) -> bool:
     """Remove a setting changed for every print with a profile; True if it was there."""
     doc = read()
-    if key not in profile_settings(kind, name, doc):
+    if key not in profile_settings(kind, name, doc, machine):
         return False
-    table = doc[TABLES[kind]][name]
+    table = _profile_table(kind, name, machine, doc)
     del table[SETTINGS][key]
     if not table[SETTINGS]:
         del table[SETTINGS]
-    if not table:
-        del doc[TABLES[kind]][name]
-        if not doc[TABLES[kind]]:
-            del doc[TABLES[kind]]
+    if not table and kind != "printer":
+        kinds = doc["printers"][machine][TABLES[kind]]
+        del kinds[name]
+        if not kinds:
+            del doc["printers"][machine][TABLES[kind]]
+            if not doc["printers"][machine]:
+                del doc["printers"][machine]
+    if not doc["printers"]:
+        del doc["printers"]
     write(doc)
     return True
+
+
+def migrate(placed: dict[tuple[str, str], list[str]] | None = None) -> list[str]:
+    """Move the `filaments.<name>.settings` and `processes.<name>.settings` tables an older
+    deli kept at the top under the printers whose filament or process the name now is:
+    those `placed` maps (kind, name) to, else every printer that has one so named in the
+    library. One no printer has stays where it is. Returns the keys moved."""
+    doc = read()
+    if not any(isinstance(doc.get(TABLES[kind]), dict) for kind in LAYERS[1:]):
+        return []
+    moved = []
+    for kind in LAYERS[1:]:
+        tables = doc.get(TABLES[kind])
+        if not isinstance(tables, dict):
+            continue
+        for name, table in list(tables.items()):
+            found = table.get(SETTINGS, {}) if isinstance(table, dict) else {}
+            machines = (placed or {}).get((kind, name)) or sorted(
+                {machine_of(printer, doc) or printer for printer, names in library.everywhere(kind).items() if name in names}
+            )
+            if not machines:
+                continue
+            for machine in machines:
+                target = _profile_table(kind, name, machine, doc).setdefault(SETTINGS, tomlkit.table())
+                for key, value in found.items():
+                    target.setdefault(key, value)
+                moved.append(f"{TABLES[kind]}.{name}.{SETTINGS} -> {table_of(kind, name, machine)}.{SETTINGS}")
+            del tables[name]
+        if not tables:
+            del doc[TABLES[kind]]
+    if moved:
+        write(doc)
+    return moved
 
 
 def default_printer(doc: tomlkit.TOMLDocument | None = None) -> str | None:
@@ -446,28 +513,42 @@ def split_key(key: str, retired: bool = False) -> tuple[str, str]:
     return library.slug(".".join(parts[1:-1])), parts[-1]
 
 
-def _profile_setting_key(key: str) -> tuple[str, str, str] | None:
-    """`printers|filaments|processes.<name>.settings[.<key>]` as the kind, the profile's name
-    and the key, else None. A name may hold dots, so the split is at the last `settings` segment."""
+def _profile_setting_key(key: str) -> tuple[str, str, str, str | None] | None:
+    """`printers.<printer>.settings[.<key>]`, or `printers.<printer>.filaments|processes.<name>.settings[.<key>]`,
+    as the kind, the profile's name, the key and the printer (None for a printer's own), else
+    None. A name may hold dots, so the split is at the last `settings` segment, and at the
+    last `filaments` or `processes` before it."""
     parts = key.split(".")
-    kinds = {table: kind for kind, table in TABLES.items()}
-    if len(parts) < 3 or parts[0] not in kinds or SETTINGS not in parts[2:]:
+    if len(parts) < 3 or parts[0] != "printers" or SETTINGS not in parts[2:]:
         return None
     at = len(parts) - 1 - parts[::-1].index(SETTINGS)
-    return kinds[parts[0]], ".".join(parts[1:at]), ".".join(parts[at + 1 :])
+    kinds = {table: kind for kind, table in TABLES.items() if kind != "printer"}
+    inner = [i for i in range(2, at) if parts[i] in kinds]
+    if inner:
+        i = inner[-1]
+        if i + 1 >= at:
+            return None
+        return kinds[parts[i]], ".".join(parts[i + 1 : at]), ".".join(parts[at + 1 :]), ".".join(parts[1:i])
+    return "printer", ".".join(parts[1:at]), ".".join(parts[at + 1 :]), None
 
 
 def refuse_setting(key: str, verb: str) -> None:
     """A `settings.<name>` key is `deli set --global`'s to write and `deli unset --global`'s
-    to remove, and `printers.<printer>.settings.<name>` is `--printer`'s (`--filament`,
-    `--process` likewise), so that a setting is checked with the engine like any other."""
+    to remove, and `printers.<printer>.settings.<name>` is `--printer`'s (a printer's
+    `filaments.<name>.settings` `--filament`'s, `processes` `--process`'s), so that a
+    setting is checked with the engine like any other."""
     value = " <value>" if verb == "set" else ""
     if key == SETTINGS or key.startswith(SETTINGS + "."):
         name = key.removeprefix(SETTINGS).removeprefix(".") or "<setting>"
         raise ConfigError(f"a setting for every print is changed with: deli {verb} --global {name}{value}")
     if found := _profile_setting_key(key):
-        kind, profile, name = found
-        raise ConfigError(f"a setting for every print with a {kind} is changed with: deli {verb} --{kind} {profile} {name or '<setting>'}{value}")
+        kind, profile, name, machine = found
+        on = f" --printer {machine}" if machine else ""
+        raise ConfigError(f"a setting for every print with a {kind} is changed with: deli {verb}{on} --{kind} {profile} {name or '<setting>'}{value}")
+    kinds = {table: kind for kind, table in TABLES.items() if kind != "printer"}
+    if key.split(".")[0] in kinds:
+        kind = kinds[key.split(".")[0]]
+        raise ConfigError(f"a {kind}'s settings are a printer's: printers.<printer>.{TABLES[kind]}.<name>.settings, changed with: deli {verb} --{kind} <name> <setting>{value}")
 
 
 def nozzle_key(key: str) -> tuple[str, str, str] | None:
@@ -490,7 +571,8 @@ def get(key: str) -> str | list[str] | None:
     if key.startswith(SETTINGS + "."):
         return settings().get(key.removeprefix(SETTINGS + "."))
     if found := _profile_setting_key(key):
-        return profile_settings(found[0], found[1]).get(found[2])
+        kind, name, setting, machine = found
+        return profile_settings(kind, name, machine=machine).get(setting)
     name, field = split_key(key)
     return printer(name).get(field)
 
@@ -576,10 +658,10 @@ def entries() -> list[tuple[str, str | list[str]]]:
                     found.append((f"printers.{name}.{NOZZLES}.{size}.{field_}", nozzle[field_]))
         for key, value in profile_settings("printer", name, doc).items():
             found.append((f"printers.{name}.{SETTINGS}.{key}", value))
-    for kind in LAYERS[1:]:
-        for name in _kind_table(kind, doc):
-            for key, value in profile_settings(kind, name, doc).items():
-                found.append((f"{TABLES[kind]}.{name}.{SETTINGS}.{key}", value))
+        for kind in LAYERS[1:]:
+            for other in _kind_table(kind, name, doc):
+                for key, value in profile_settings(kind, other, doc, name).items():
+                    found.append((f"{table_of(kind, other, name)}.{SETTINGS}.{key}", value))
     for key, value in settings(doc).items():
         found.append((f"{SETTINGS}.{key}", value))
     return found

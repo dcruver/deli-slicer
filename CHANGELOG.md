@@ -5,6 +5,19 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- **Changed:** a filament or process belongs to a printer. The library keeps each under
+  the printer it was converted for (`~/.config/deli/filaments/<printer>/`), named by
+  Orca's name without its `@` tail, which named the printer: `generic-pla`, not
+  `generic-pla-system`, and never `generic-pla-system-voron-2.4-350-0.6-nozzle`.
+  `deli filament` lists the print's printer's; choosing one another printer has
+  converts it for this one; `deli load filament|process` takes `--printer`. A
+  filament's or process's settings are the printer's as well, under
+  `printers.<printer>.filaments.<name>.settings` in the config; `deli set --filament X`
+  reaches the print's printer's (or your default printer's), and with `--printer P` too
+  that printer's. The first command of the new deli moves an older library and config
+  under their printers, keeping every name, so prints keep slicing as they did; a
+  printer whose defaults named a moved filament gets a copy of it.
+
 - Orca's templates, the presets others inherit from and nobody prints with ("Generic PETG
   @base", say: `instantiation` false in its file), are refused when chosen or imported
   from GitHub, naming the presets to try instead, and left out of what `deli filament`

@@ -151,7 +151,7 @@ def test_mesh_without_a_part_is_empty(url):
 def sliced_cube():
     """The cube with all three profiles chosen, sliced to cube.gcode."""
     for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
         main([kind, name])
     main(["add", "cube.stl"])
     main(["slice"])
@@ -338,7 +338,7 @@ def test_no_other_page_can_run_commands(url):
 
 def test_the_page_slices_in_a_process_of_its_own(url):
     for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
         main([kind, name])
     main(["add", "cube.stl"])
 
@@ -390,7 +390,7 @@ class Moonraker(http.server.BaseHTTPRequestHandler):
 
 def sliced_print():
     for kind, name in {"printer": "original-prusa-i3-mk3", "filament": "generic-abs", "process": "0.20mm-quality-mk3"}.items():
-        library.load(kind, str(EXPORT))
+        library.load(kind, str(EXPORT), printer="original-prusa-i3-mk3")
         main([kind, name])
     main(["add", "cube.stl"])
     main(["slice"])
