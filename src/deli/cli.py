@@ -486,9 +486,10 @@ def _transform_target(doc, args: list[str], command: str) -> tuple[dict | None, 
 
 def _show_scale(part: dict) -> None:
     scale = project.part_transform(part, "scale")
-    state = f"is scaled to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "is not scaled"
+    rotate = project.part_transform(part, "rotate")
+    state = f"is scaled to {_percent(project.on_bed(scale, rotate))}" if scale != project.IDENTITY["scale"] else "is not scaled"
     print(f"{part['file']}{_copies(project.part_count(part))} {state}")
-    print(f"  {_size_text(_size(part, scale, project.part_transform(part, 'rotate')))}")
+    print(f"  {_size_text(_size(part, scale, rotate))}")
 
 
 def _scale(args: argparse.Namespace) -> int:
@@ -509,9 +510,17 @@ def _scale(args: argparse.Namespace) -> int:
     elif len(args.args) == 1:
         scale = [_factor(args.args[0], None)] * 3
     else:
+        # The axis is the bed's; the scale is of the model in its file, which the part's
+        # rotation may have turned onto another axis.
         axis = _axis(args.args[0])
-        scale[axis] = _factor(args.args[1], _size(part, project.IDENTITY["scale"], project.IDENTITY["rotate"])[axis])
-    done = f"to {_percent(scale)}" if scale != project.IDENTITY["scale"] else "back to its size in the file"
+        along = project.file_axis(rotate, axis)
+        if along is None:
+            raise CommandError(
+                f"{part['file']} is rotated {_turned(rotate)}, which leaves no side of it along {args.args[0].lower()}; "
+                f"scale it evenly, or along an axis before rotating it"
+            )
+        scale[along] = _factor(args.args[1], _size(part, project.IDENTITY["scale"], project.IDENTITY["rotate"])[along])
+    done = f"to {_percent(project.on_bed(scale, rotate))}" if scale != project.IDENTITY["scale"] else "back to its size in the file"
     print(f"Scaled {part['file']} {done}")
     size = _size(part, scale, rotate)
     project.set_part_transform(part, "scale", scale)
@@ -2341,8 +2350,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="scale the part, or show its scale",
         usage="deli scale [PART] [x|y|z] [FACTOR]",
         description="Scale a part. `deli scale 110%%` scales it evenly, `deli scale x 110%%` along one axis, and "
-        "`deli scale z 30mm` makes it that size along an axis. A scale is of the model as it is in its file, "
-        "so `deli scale 100%%` undoes it. With more than one part, name the part first. Without arguments, "
+        "`deli scale z 30mm` makes it that size along an axis. The axis is the bed's, as the part lies once "
+        "rotated. A scale is of the model as it is in its file, so `deli scale 100%%` undoes it. With more "
+        "than one part, name the part first. Without arguments, "
         "show each part's scale and the size it gives.",
     )
     scale.add_argument("args", nargs="*", help=argparse.SUPPRESS)

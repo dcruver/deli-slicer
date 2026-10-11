@@ -214,7 +214,8 @@ def state() -> dict:
         for part in project.parts(doc):
             scale = project.part_transform(part, "scale")
             rotate = project.part_transform(part, "rotate")
-            described = {"file": part["file"], "scale": scale, "rotate": rotate, "count": project.part_count(part)}
+            # The scale as the page describes it: in the bed's axes, as `deli scale` shows it.
+            described = {"file": part["file"], "scale": project.on_bed(scale, rotate), "rotate": rotate, "count": project.part_count(part)}
             # Per copy: where it was moved to, and the plate it is kept to (its own, or the part's).
             described |= {"at": project.copy_places(part), "kept": project.copy_plates(part), "turns": project.copy_turns(part)}
             described |= {"z": project.part_height(part), "plate": project.part_plate(part)}

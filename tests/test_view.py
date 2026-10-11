@@ -64,8 +64,8 @@ def test_state_has_the_part_and_the_printers_bed(url):
     library.load("printer", str(EXPORT))
     main(["printer", "original-prusa-i3-mk3"])
     main(["add", "cube.stl"])
+    main(["rotate", "x", "90"])
     main(["scale", "z", "200%"])
-    main(["rotate", "45"])
     main(["move", "60", "70"])
     main(["move", "z", "-1"])
 
@@ -78,11 +78,11 @@ def test_state_has_the_part_and_the_printers_bed(url):
     assert json.loads(get(url + "/state")[2])["printer"] == "prusa (original-prusa-i3-mk3)"  # your name for it, with the profile
     (part,) = state["parts"]
     assert part["file"] == "cube.stl"
-    assert part["scale"] == [1, 1, 2]
-    assert part["rotate"] == [0, 0, 45]
+    assert part["scale"] == [1, 1, 2]  # in the bed's axes, as `deli scale` shows it: the file's is [1, 2, 1]
+    assert part["rotate"] == [90, 0, 0]
     assert part["count"] == 1
     assert part["at"] == [[60, 70]] and part["z"] == -1  # per copy
-    assert part["size"] == pytest.approx([28.28, 28.28, 40], abs=0.01)
+    assert part["size"] == pytest.approx([20, 20, 40], abs=0.01)
 
 
 def test_version_changes_when_the_print_does(url):

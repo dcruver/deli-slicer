@@ -5,6 +5,14 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- **Changed:** `deli scale x|y|z` goes by the bed's axes, as the part lies once rotated:
+  `deli scale z 60mm` makes a part 60 mm tall whether or not it was turned on its side
+  with `deli rotate x 90`, and `deli scale` shows the factors in that order. Before, the
+  axis was the model file's, which a rotation had turned elsewhere. The scale is still
+  kept in the file's axes, so a print's `deli.toml` means what it did. A part turned by
+  an angle that leaves no side of it along the axis, such as 45°, refuses a scale along
+  one axis; scale it evenly, or before rotating it.
+
 - `deli status` shows the print at a glance: printer, filament, process, parts, where
   `deli send` would send, how many settings are changed and where, and whether the G-code
   is current. **Changed:** `deli printer`, `deli filament`, `deli process` and `deli nozzle`

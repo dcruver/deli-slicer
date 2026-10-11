@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import shutil
 from pathlib import Path
@@ -252,6 +253,32 @@ def set_part_transform(part: dict, key: str, values: list[float]) -> None:
         part.pop(key, None)
     else:
         part[key] = [int(v) if v == int(v) else v for v in values]
+
+
+def _rotation(rotate: list[float]) -> list[list[float]]:
+    """The matrix of a part's rotation, as the engine applies it: about x, then y, then z."""
+    x, y, z = (math.radians(a) for a in rotate)
+    cx, sx, cy, sy, cz, sz = math.cos(x), math.sin(x), math.cos(y), math.sin(y), math.cos(z), math.sin(z)
+    rx = [[1, 0, 0], [0, cx, -sx], [0, sx, cx]]
+    ry = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]]
+    rz = [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]]
+    product = lambda a, b: [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return product(rz, product(ry, rx))
+
+
+def file_axis(rotate: list[float], axis: int) -> int | None:
+    """The axis of the model in its file that a rotated part has along `axis` (0, 1 or 2 for the
+    bed's x, y or z), or None when the rotation leaves no side of the model along it."""
+    along = _rotation(rotate)[axis]  # the bed axis, in the file's frame
+    found = [j for j in range(3) if abs(abs(along[j]) - 1) < 1e-6]
+    return found[0] if len(found) == 1 else None
+
+
+def on_bed(scale: list[float], rotate: list[float]) -> list[float]:
+    """A part's scale factors in the order of the bed's axes, once it is rotated; in the file's
+    order when the rotation leaves no side of the model along an axis."""
+    axes = [file_axis(rotate, axis) for axis in range(3)]
+    return [scale[j] for j in axes] if None not in axes else scale
 
 
 def _plate_tables(doc: tomlkit.TOMLDocument) -> dict:

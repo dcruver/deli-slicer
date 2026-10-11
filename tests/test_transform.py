@@ -113,6 +113,40 @@ def test_rotating_about_another_axis(job, capsys):
     assert capsys.readouterr().out == "Rotated cube.stl 90° about x\n  20 x 40 x 20 mm\n"
 
 
+def test_scaling_a_rotated_part_goes_by_the_bed_axes(job, capsys):
+    """`deli scale z` makes the part taller as it lies on the bed, though the scale is kept
+    in the file's axes, which the rotation has turned."""
+    main(["rotate", "x", "90"])
+    capsys.readouterr()
+
+    assert main(["scale", "z", "2"]) == 0
+
+    assert part(job)["scale"] == [1, 2, 1]  # the file's y is the bed's z
+    assert capsys.readouterr().out == "Scaled cube.stl to 100% x 100% x 200%\n  20 x 20 x 40 mm\n"
+
+    assert main(["scale", "y", "30mm"]) == 0
+    assert part(job)["scale"] == [1, 2, 1.5]
+    assert capsys.readouterr().out == "Scaled cube.stl to 100% x 150% x 200%\n  20 x 30 x 40 mm\n"
+
+    main(["scale"])
+    assert capsys.readouterr().out == "cube.stl is scaled to 100% x 150% x 200%\n  20 x 30 x 40 mm\n"
+
+
+def test_scaling_along_an_axis_no_side_lies_on_is_an_error(job, capsys):
+    main(["rotate", "x", "45"])
+    capsys.readouterr()
+
+    assert main(["scale", "z", "2"]) == 1
+
+    assert "scale" not in part(job)
+    assert capsys.readouterr().err == (
+        "deli: cube.stl is rotated 45° about x, which leaves no side of it along z; scale it evenly, or along an axis before rotating it\n"
+    )
+    assert main(["scale", "x", "2"]) == 0  # x is untouched by a turn about it
+    assert part(job)["scale"] == [2, 1, 1]
+    assert main(["scale", "110%"]) == 0
+
+
 def test_rotations_about_different_axes_add_up_and_zero_undoes_one(job, capsys):
     main(["rotate", "x", "90"])
     main(["rotate", "45"])
