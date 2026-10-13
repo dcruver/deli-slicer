@@ -66,7 +66,7 @@ const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clipping
 // that works on the model is in use, the model is shown by itself, the G-code hidden: the
 // G-code is where the parts were.
 let modelChoice = null;
-const modelAlone = () => Boolean(partMesh) && (moving || mode === 'flat' || mode === 'turn' || showOverhangs);
+const modelAlone = () => Boolean(partMesh) && (moving || mode === 'flat' || mode === 'mirror' || mode === 'turn' || showOverhangs);
 const modelVisible = () => modelAlone() || (modelChoice ?? !paths);
 let moving = false;
 function showModel() {
@@ -505,6 +505,7 @@ const TOOLS = {
   measure: { label: 'Measure', title: 'Measure between two points (M)' },
   turn: { label: 'Rotate', title: 'Drag a part around to turn it on the bed, by 15°, or by 1° with Shift (R)', needsPart: true },
   flat: { label: 'Lay flat', title: 'Click the face of a part to lay on the bed', needsPart: true },
+  mirror: { label: 'Mirror', title: 'Click a side of a part to mirror it along that side\'s axis', needsPart: true },
 };
 let mode = null;
 
@@ -607,7 +608,7 @@ function setMode(name) {
     if (!commandRan) hideCommand();
   }
   mode = name;
-  renderer.domElement.style.cursor = { measure: 'crosshair', flat: 'pointer' }[name] ?? '';
+  renderer.domElement.style.cursor = { measure: 'crosshair', flat: 'pointer', mirror: 'pointer' }[name] ?? '';
   for (const button of info.querySelectorAll('[data-tool]')) button.setAttribute('aria-pressed', button.dataset.tool === name);
   showModel();  // Lay flat brings the model up
   if (paths) redrawLegend();
@@ -654,6 +655,7 @@ renderer.domElement.addEventListener('pointerup', event => {
   if (event.button === 2) return setMode(null);
   if (event.button !== 0) return;
   if (mode === 'flat') return layFlat(event.clientX, event.clientY);
+  if (mode === 'mirror') return mirrorAcross(event.clientX, event.clientY);
   if (mode !== 'measure') return;
   const point = pickAt(event.clientX, event.clientY);
   if (!point) return;
@@ -731,7 +733,7 @@ document.getElementById('applyCommand').addEventListener('click', async event =>
   }
   event.target.disabled = false;
   putBack();  // the print, redrawn from deli.toml, shows where the part is now
-  if (!failed && (mode === 'flat' || mode === 'turn')) setMode(null);  // the tool is done
+  if (!failed && (mode === 'flat' || mode === 'mirror' || mode === 'turn')) setMode(null);  // the tool is done
   showRan(printed, failed);
 });
 // The panel, once a command has run: what it printed. It stays up through redraws.
@@ -802,7 +804,7 @@ document.getElementById('copyCommand').addEventListener('click', async event => 
   }
 });
 document.getElementById('closeCommand').addEventListener('click', () => {
-  if (mode === 'flat' || mode === 'turn') setMode(null);
+  if (mode === 'flat' || mode === 'mirror' || mode === 'turn') setMode(null);
   putBack();
   commandRan = false;
   hideCommand();
@@ -1028,6 +1030,20 @@ function layFlat(x, y) {
     steps.map(([axis, to]) => ['rotate', part.file, ...which, axis, number(to)]));
 }
 
+// Mirror: the `deli mirror` along the bed's axis the clicked side faces most: a side for left
+// to right, the front for front to back, the top for top to bottom. A mirror is the part's,
+// every copy's; the same axis again puts it back, as `deli mirror` does.
+function mirrorAcross(x, y) {
+  const hit = partHit(x, y);
+  if (!hit) return;
+  const { part } = rangeOf(hit.faceIndex);
+  const n = hit.face.normal;
+  const axis = ['x', 'y', 'z'][[Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)].indexOf(Math.max(Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)))];
+  const back = part.mirror?.includes(axis);
+  showCommand(`deli mirror ${partName(part)} ${axis}`,
+    back ? `to put it back as it is in the file along ${axis}` : `to mirror it along ${axis}`, [['mirror', part.file, axis]]);
+}
+
 // Pause: the `deli pause` for the layer on the slider, or the one that takes it away.
 document.getElementById('pauseHere').addEventListener('click', () => {
   if (!paths) return;
@@ -1067,6 +1083,7 @@ function describe(state) {
     if (s.some(f => f !== 1)) lines.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
     const turns = ['x', 'y', 'z'].map((a, i) => r[i] ? `${r[i]}° about ${a}` : null).filter(Boolean);
     if (turns.length) lines.push(`<span class="dim">rotate</span> ${turns.join(', ')}`);
+    if (part.mirror?.length) lines.push(`<span class="dim">mirrored along</span> ${part.mirror.join(', ')}`);
     if (part.plate) lines.push(`<span class="dim">kept to plate</span> ${part.plate}`);
     // Where the copies on this plate were moved to, or kept to it on their own.
     part.at.forEach((at, i) => {

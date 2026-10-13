@@ -152,12 +152,13 @@ def _for_command(command: str, parser: argparse.ArgumentParser, before: list[str
         return [FILES] if position == 0 else []
     if command == "remove":
         return _part_names() if position == 0 else []
-    if command in ("scale", "rotate"):
+    if command in ("scale", "rotate", "mirror"):
         parts = _part_names()
+        axes = ["off", "x", "y", "z"] if command == "mirror" else ["x", "y", "z"]
         if position == 0:
-            return parts + ["x", "y", "z"] if len(_parts()) <= 1 else parts
+            return parts + axes if len(_parts()) <= 1 else parts
         if position == 1 and typed[0] in parts:
-            return ["x", "y", "z"]
+            return axes
         return []
     if command == "pause":
         return ["off"] if position == 0 else [str(layer) for layer in _quiet(lambda: project.pauses(project.read()), [])] if typed[0] == "off" else []

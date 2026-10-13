@@ -1,4 +1,4 @@
-"""`deli scale`, `deli rotate` and `deli move`."""
+"""`deli scale`, `deli rotate`, `deli mirror` and `deli move`."""
 
 import shutil
 import tomllib
@@ -174,8 +174,90 @@ def test_without_a_part_is_an_error(job, capsys):
 
     assert main(["scale", "110%"]) == 1
     assert main(["rotate", "45"]) == 1
+    assert main(["mirror", "x"]) == 1
 
-    assert capsys.readouterr().err.count("deli add <file>") == 2
+    assert capsys.readouterr().err.count("deli add <file>") == 3
+
+
+def test_mirroring_along_an_axis_and_again_puts_it_back(job, capsys):
+    capsys.readouterr()
+
+    assert main(["mirror", "x"]) == 0
+
+    assert part(job)["mirror"] == ["x"]
+    assert capsys.readouterr().out == "Mirrored cube.stl along x\n"
+
+    assert main(["mirror", "x"]) == 0
+
+    assert "mirror" not in part(job)
+    assert capsys.readouterr().out == "Mirrored cube.stl back to how it is in the file\n"
+
+
+def test_mirror_alone_shows_it_and_off_undoes_every_axis(job, capsys):
+    capsys.readouterr()
+    main(["mirror"])
+    assert capsys.readouterr().out == "cube.stl is not mirrored\n"
+
+    main(["mirror", "z"])
+    main(["mirror", "y"])
+    capsys.readouterr()
+    main(["mirror"])
+    assert part(job)["mirror"] == ["y", "z"]
+    assert capsys.readouterr().out == "cube.stl is mirrored along y and z\n"
+
+    assert main(["mirror", "off"]) == 0
+    assert "mirror" not in part(job)
+    assert capsys.readouterr().out == "Mirrored cube.stl back to how it is in the file\n"
+
+
+def test_mirroring_a_rotated_part_goes_by_the_bed_axes(job, capsys):
+    """`deli mirror z` mirrors the part top to bottom as it lies on the bed, though the mirror
+    is kept in the file's axes, which the rotation has turned."""
+    main(["rotate", "x", "90"])
+    capsys.readouterr()
+
+    assert main(["mirror", "z"]) == 0
+
+    assert part(job)["mirror"] == ["y"]  # the file's y is the bed's z
+    assert capsys.readouterr().out == "Mirrored cube.stl along z\n"
+    main(["mirror"])
+    assert capsys.readouterr().out == "cube.stl is mirrored along z\n"
+
+
+def test_mirroring_along_an_axis_no_side_lies_on_is_an_error(job, capsys):
+    main(["rotate", "x", "45"])
+    capsys.readouterr()
+
+    assert main(["mirror", "z"]) == 1
+
+    assert "mirror" not in part(job)
+    assert capsys.readouterr().err == (
+        "deli: cube.stl is rotated 45° about x, which leaves no side of it along z; mirror it before rotating it\n"
+    )
+    assert main(["mirror", "x"]) == 0  # x is untouched by a turn about it
+    assert part(job)["mirror"] == ["x"]
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["q"], "'q' is not an axis; use x, y or z, or off"),
+        (["x", "y"], "usage: deli mirror [PART] [x|y|z|off]"),
+    ],
+)
+def test_bad_mirror_is_an_error(args, message, job, capsys):
+    assert main(["mirror", *args]) == 1
+
+    assert message in capsys.readouterr().err
+    assert "mirror" not in part(job)
+
+
+def test_mirror_written_by_hand_must_name_axes(job, capsys):
+    (job / "deli.toml").write_text('[[part]]\nfile = "cube.stl"\nmirror = ["x", "q"]\n')
+
+    assert main(["mirror"]) == 1
+
+    assert "should name the axes it is mirrored along" in capsys.readouterr().err
 
 
 def test_transform_written_by_hand_must_be_three_numbers(job, capsys):

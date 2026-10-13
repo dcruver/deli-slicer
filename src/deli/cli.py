@@ -561,6 +561,57 @@ def _scale(args: argparse.Namespace) -> int:
     return 0
 
 
+def _along(axes: list[str]) -> str:
+    return " and ".join(filter(None, [", ".join(axes[:-1]), axes[-1]]))
+
+
+def _mirrored(part: dict) -> str:
+    """The bed's axes a part is mirrored along, as `deli mirror` shows them: the mirror is kept
+    in the file's axes, which the part's rotation may have turned."""
+    on_bed = project.on_bed(project.part_mirror(part), project.part_transform(part, "rotate"))
+    axes = [axis for axis, on in zip(AXES, on_bed) if on]
+    return f"along {_along(axes)}" if axes else ""
+
+
+def _show_mirror(part: dict) -> None:
+    state = f"is mirrored {_mirrored(part)}" if project.part_mirror(part) != [False] * 3 else "is not mirrored"
+    print(f"{part['file']}{_copies(project.part_count(part))} {state}")
+
+
+def _mirror(args: argparse.Namespace) -> int:
+    doc = project.read()
+    part, args.args = _transform_target(doc, args.args, "mirror")
+    if part is None:
+        for each in project.parts(doc):
+            _show_mirror(each)
+        return 0
+    if len(args.args) > 1:
+        raise CommandError("usage: deli mirror [PART] [x|y|z|off]")
+    if not args.args:
+        _show_mirror(part)
+        return 0
+    mirror = project.part_mirror(part)
+    rotate = project.part_transform(part, "rotate")
+    what = args.args[0].lower()
+    if what == "off":
+        mirror = [False] * 3
+    elif what not in AXES:
+        raise CommandError(f"'{args.args[0]}' is not an axis; use x, y or z, or off")
+    else:
+        # The axis is the bed's; the mirror is of the model in its file, which the part's
+        # rotation may have turned onto another axis.
+        along = project.file_axis(rotate, AXES.index(what))
+        if along is None:
+            raise CommandError(
+                f"{part['file']} is rotated {_turned(rotate)}, which leaves no side of it along {what}; mirror it before rotating it"
+            )
+        mirror[along] = not mirror[along]
+    project.set_part_mirror(part, mirror)
+    project.write(doc)
+    print(f"Mirrored {part['file']} {_mirrored(part) or 'back to how it is in the file'}")
+    return 0
+
+
 def _degrees(text: str) -> float:
     try:
         return float(text.strip().lower().removesuffix("°").removesuffix("deg"))
@@ -2460,6 +2511,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scale.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     scale.set_defaults(run=_scale)
+
+    mirror = commands.add_parser(
+        "mirror",
+        help="mirror the part along an axis, or show how it is mirrored",
+        usage="deli mirror [PART] [x|y|z|off]",
+        description="Mirror a part. `deli mirror x` turns it into its mirror image along x, the bed's axis as the part lies "
+        "once rotated; `deli mirror x` again puts it back, and `deli mirror off` undoes every mirror. The mirror is of the "
+        "model as it is in its file, applied before its scale and rotation. With more than one part, name the part first. "
+        "Without arguments, show how each part is mirrored.",
+    )
+    mirror.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    mirror.set_defaults(run=_mirror)
 
     rotate = commands.add_parser(
         "rotate",

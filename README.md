@@ -375,6 +375,7 @@ deli supports organic                 # automatic supports, for a model that nee
 deli scale 150%                       # a bigger boat
 deli scale z 60mm                     # or one side to a size, the others left as they are: z is up, however the part is turned
 deli rotate 45                        # turned on the bed
+deli mirror x                         # or its mirror image, for the other side of a pair
 deli move 60 80                       # put it there instead of in the middle
 deli pause 40                         # pause once layer 40 is done: change the filament for a two-colour boat
 deli view                             # the Benchy on the bed in your browser, live; the shell stays free
@@ -470,7 +471,7 @@ library has.
 
 A print can hold several models, each added the same way, and copies of one:
 `deli add 3DBenchy.stl --count 4` prints four, arranged on the bed for you. With more
-than one model, `scale`, `rotate` and `move` take the model's name first
+than one model, `scale`, `rotate`, `mirror` and `move` take the model's name first
 (`deli scale 3DBenchy 150%`).
 
 The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
@@ -540,12 +541,13 @@ G-code viewer makes it, and can be a minute or two from the one `deli slice` rep
 Overhangs shows in red the faces supports would hold up (at the print's
 `support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
 
-Dragging, Rotate and Lay flat change the print with deli's own commands: drag a part over
+Dragging, Rotate, Lay flat and Mirror change the print with deli's own commands: drag a part over
 the bed for its `deli move` (a copy is moved by itself, with `--copy`; a drag that would put
 it off the bed or on another part offers nothing); with Rotate (or R) drag a part around to
 turn it on the bed, by 15°, or 1° with Shift, for its `deli rotate ... z` (and, for one not
 yet placed, the `deli move` that keeps it where it is); or with Lay flat click a face of one
-for the `deli rotate` that lays that face on the bed (that copy's only); Arrange, once something has been
+for the `deli rotate` that lays that face on the bed (that copy's only); with Mirror click a side of one
+for the `deli mirror` along that side's axis (a side for left to right, the top for top to bottom); Arrange, once something has been
 moved, gives `deli arrange` (`--plate N` for the plate shown, on a print of several); Pause here, beside the layer slider, does the same for `deli pause` at that
 layer. The page shows the command, and Apply runs it (Copy, to run it yourself); either
 way `deli.toml` changes as the command says and the page follows. Once the print is
@@ -566,8 +568,8 @@ minutes, or until `deli view --stop`. When the printer's profile asks for a thum
 ![deli view in a browser: a sliced 3DBenchy on the printer's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
-`deli scale`, `deli rotate`, `deli move` and `deli pause` without arguments show what
-is chosen. `deli remove`, `deli unset`, `deli scale 100%`, `deli rotate 0`,
+`deli scale`, `deli rotate`, `deli mirror`, `deli move` and `deli pause` without arguments show what
+is chosen. `deli remove`, `deli unset`, `deli scale 100%`, `deli rotate 0`, `deli mirror off`,
 `deli move auto`, `deli arrange` and `deli pause off` undo things. Everything is in `deli.toml`, which
 is plain TOML you can edit, comment and commit:
 
@@ -615,6 +617,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis; the axis is the bed's, as the part lies once rotated |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
+| `deli mirror [part] [x\|y\|z\|off]` | the part's mirror image along the bed's axis, as it lies once rotated; the same axis again, or `off`, puts it back |
 | `deli move [part] [--copy N] <x> <y>` | where the part's middle goes on the bed, or one copy's; `z -0.25` sinks it, `plate 2` keeps it to plate 2, `auto` has it arranged again. `deli translate` is the same command |
 | `deli arrange [--plate N]` | arrange every part and copy again, or one plate's, forgetting where they were moved |
 | `deli pause [off] [layer ...] [--plate N]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |

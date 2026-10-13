@@ -8,7 +8,7 @@ wrote, supports included, for as long as nothing has changed since. The page ask
 the shell shows up in the browser.
 
 The page changes a print only by running deli's own commands, the ones its tools show
-(`deli move`, `deli rotate`, `deli pause`, `deli arrange`, `deli supports`), through `/run`; it slices with
+(`deli move`, `deli rotate`, `deli mirror`, `deli pause`, `deli arrange`, `deli supports`), through `/run`; it slices with
 `/slice` and sends to the printer with `/send`, which run `deli slice` and `deli send` in a
 process of their own: POSTs that must carry the token the page's address was given, from
 the page itself, so that no other web page can.
@@ -52,7 +52,7 @@ SOURCE = str(Path(__file__).resolve().parent)
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
-RUNNABLE = {"move", "rotate", "pause", "arrange", "supports"}  # the commands the page's tools may run
+RUNNABLE = {"move", "rotate", "mirror", "pause", "arrange", "supports"}  # the commands the page's tools may run
 _TOKEN = "DELI_VIEW_TOKEN"  # how `start` hands the background process its token: not on its command line, which others can read
 _running = threading.Lock()  # one command at a time: each takes over stdout and stderr while it runs
 
@@ -214,8 +214,9 @@ def state() -> dict:
         for part in project.parts(doc):
             scale = project.part_transform(part, "scale")
             rotate = project.part_transform(part, "rotate")
-            # The scale as the page describes it: in the bed's axes, as `deli scale` shows it.
+            # The scale and the mirrored axes as the page describes them: in the bed's axes, as `deli scale` and `deli mirror` show them.
             described = {"file": part["file"], "scale": project.on_bed(scale, rotate), "rotate": rotate, "count": project.part_count(part)}
+            described["mirror"] = [axis for axis, on in zip(project.AXES, project.on_bed(project.part_mirror(part), rotate)) if on]
             # Per copy: where it was moved to, and the plate it is kept to (its own, or the part's).
             described |= {"at": project.copy_places(part), "kept": project.copy_plates(part), "turns": project.copy_turns(part)}
             described |= {"z": project.part_height(part), "plate": project.part_plate(part)}

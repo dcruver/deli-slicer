@@ -1,4 +1,5 @@
 import re
+import struct
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,59 @@ def test_slices_a_cube(tmp_path):
     assert result.print_time > 0
     assert result.filament_mm > 0
     assert result.filament_g > 0
+
+
+# A wedge: a right triangle 20 mm along x and y, 10 mm tall, its slope facing +x +y.
+WEDGE = "solid wedge\n" + "".join(
+    f"facet normal 0 0 0\nouter loop\n{''.join(f'vertex {x} {y} {z}\n' for x, y, z in triangle)}endloop\nendfacet\n"
+    for triangle in [
+        [(0, 0, 0), (0, 20, 0), (20, 0, 0)], [(0, 0, 10), (20, 0, 10), (0, 20, 10)],
+        [(0, 0, 0), (20, 0, 0), (20, 0, 10)], [(0, 0, 0), (20, 0, 10), (0, 0, 10)],
+        [(0, 0, 0), (0, 0, 10), (0, 20, 10)], [(0, 0, 0), (0, 20, 10), (0, 20, 0)],
+        [(20, 0, 0), (0, 20, 0), (0, 20, 10)], [(20, 0, 0), (0, 20, 10), (20, 0, 10)],
+    ]
+) + "endsolid wedge\n"
+
+
+def points(vertices: bytes) -> list[tuple[float, float, float]]:
+    xs = struct.unpack(f"{len(vertices) // 4}f", vertices)
+    return [(round(xs[i], 2), round(xs[i + 1], 2), round(xs[i + 2], 2)) for i in range(0, len(xs), 3)]
+
+
+def signed_volume(vertices: bytes, triangles: bytes) -> float:
+    """Positive when the triangles face out."""
+    v = points(vertices)
+    ts = struct.unpack(f"{len(triangles) // 4}I", triangles)
+    total = 0.0
+    for i in range(0, len(ts), 3):
+        (ax, ay, az), (bx, by, bz), (cx, cy, cz) = v[ts[i]], v[ts[i + 1]], v[ts[i + 2]]
+        total += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)
+    return total / 6
+
+
+def test_a_negative_scale_mirrors_the_model_along_its_axis(tmp_path):
+    wedge = tmp_path / "wedge.stl"
+    wedge.write_text(WEDGE)
+    plain = [(str(wedge), (1, 1, 1), (0, 0, 0), 1, [(100, 100)], 0, [], [])]
+    mirrored = [(str(wedge), (-1, 1, 1), (0, 0, 0), 1, [(100, 100)], 0, [], [])]
+
+    assert _engine.model_size(str(wedge), scale=(-1, 1, 1)) == pytest.approx([20, 20, 10])
+
+    vertices, triangles, _ = _engine.mesh(plain, CONFIG)
+    flipped, flipped_triangles, _ = _engine.mesh(mirrored, CONFIG)
+    # Each corner is where its reflection in the part's middle was, and the slope faces -x +y.
+    assert sorted(set((round(200 - x, 2), y, z) for x, y, z in points(vertices))) == sorted(set(points(flipped)))
+    assert sorted(set(points(flipped))) != sorted(set(points(vertices)))
+    # The triangles still face out, so the model is as solid as before.
+    assert signed_volume(flipped, flipped_triangles) == pytest.approx(2000)
+    assert signed_volume(vertices, triangles) == pytest.approx(2000)
+
+    # Sliced, it is the same print as the wedge turned a quarter turn, which is the same shape
+    # (the wedge is symmetric about its diagonal): the mirror is of the geometry PrusaSlicer cuts.
+    result = _engine.slice(mirrored, CONFIG, str(tmp_path / "mirrored.gcode"))
+    same = _engine.slice([(str(wedge), (1, 1, 1), (0, 0, 90), 1, [(100, 100)], 0, [], [])], CONFIG, str(tmp_path / "turned.gcode"))
+    assert result.filament_mm == pytest.approx(same.filament_mm)
+    assert (result.layers, result.height) == (same.layers, same.height)
 
 
 def test_scale_is_per_axis(tmp_path):

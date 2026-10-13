@@ -5,6 +5,17 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+## 0.11.0 (2026-10-13)
+
+- `deli mirror [part] x|y|z` makes a part its mirror image along one of the bed's axes, as
+  it lies once rotated: the left-hand bracket from the right-hand one's file. The same
+  axis again, or `deli mirror off`, puts it back, and `deli mirror` shows how each part is
+  mirrored. It is kept as `mirror = ["x"]` in the part's table, in the model file's axes
+  like its scale, and applied before the scale and rotation. In `deli view`, Mirror, beside
+  Lay flat, offers that command for a side of a part you click, along the axis the side
+  faces (a side for left to right, the top for top to bottom), and the page lists how each
+  part is mirrored. The engine takes a negative scale factor as a mirror along its axis.
+
 - **Changed:** a filament or process belongs to a printer. The library keeps each under
   the printer it was converted for (`~/.config/deli/filaments/<printer>/`), named by
   Orca's name without its `@` tail, which named the printer: `generic-pla`, not

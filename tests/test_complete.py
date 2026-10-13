@@ -66,6 +66,8 @@ def test_parts_and_axes():
     main(["add", "cube.stl"])
     assert complete("scale") == ["cube", "cube.stl", "x", "y", "z"]
     assert complete("rotate", "cube.stl") == ["x", "y", "z"]
+    assert complete("mirror") == ["cube", "cube.stl", "off", "x", "y", "z"]
+    assert complete("mirror", "cube") == ["off", "x", "y", "z"]
     assert complete("remove") == ["cube", "cube.stl"]
     assert complete("move") == ["auto", "cube", "cube.stl", "plate", "x", "y", "z"]
     assert complete("move", "cube") == ["auto", "plate", "x", "y", "z"]

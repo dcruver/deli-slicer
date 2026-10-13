@@ -66,6 +66,7 @@ def test_state_has_the_part_and_the_printers_bed(url):
     main(["add", "cube.stl"])
     main(["rotate", "x", "90"])
     main(["scale", "z", "200%"])
+    main(["mirror", "z"])
     main(["move", "60", "70"])
     main(["move", "z", "-1"])
 
@@ -80,6 +81,7 @@ def test_state_has_the_part_and_the_printers_bed(url):
     assert part["file"] == "cube.stl"
     assert part["scale"] == [1, 1, 2]  # in the bed's axes, as `deli scale` shows it: the file's is [1, 2, 1]
     assert part["rotate"] == [90, 0, 0]
+    assert part["mirror"] == ["z"]  # in the bed's axes too: the file's is ["y"]
     assert part["count"] == 1
     assert part["at"] == [[60, 70]] and part["z"] == -1  # per copy
     assert part["size"] == pytest.approx([20, 20, 40], abs=0.01)
@@ -298,6 +300,8 @@ def test_the_page_runs_its_tools_commands(url):
     assert result["code"] == 0 and "40.5, 60" in result["output"]
     assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [[40.5, 60]]
     assert json.loads(post(url, ["rotate", "cube", "x", "90"])[1])["code"] == 0
+    assert json.loads(post(url, ["mirror", "cube", "z"])[1])["code"] == 0
+    assert json.loads(get(url + "/state")[2])["parts"][0]["mirror"] == ["z"]
     assert json.loads(post(url, ["pause", "3"])[1])["code"] == 0
     assert json.loads(get(url + "/state")[2])["pauses"] == {"1": [3]}
     main(["add", "cube.stl"])

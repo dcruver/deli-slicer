@@ -132,8 +132,8 @@ DynamicPrintConfig complete_config(DynamicPrintConfig config)
     return config;
 }
 
-// A part of a print: a model file, per-axis scale factors, angles in degrees about X, Y
-// and Z (applied in that order after scaling), how many copies to print, where on the bed
+// A part of a print: a model file, per-axis scale factors (a negative one mirrors the model
+// along its axis), angles in degrees about X, Y and Z (applied in that order after scaling), how many copies to print, where on the bed
 // each copy's middle is to be (x and y in millimetres, per copy; one left out, or past the
 // end of the list, is arranged), how far its underside is above the bed (negative: sunk
 // into it, and what is below is not printed), and the plate each copy is printed on,
@@ -154,15 +154,30 @@ Transform3d turned(const std::array<double, 3> &rotate)
     return turn;
 }
 
-// The model in a file, scaled by per-axis factors and then turned about X, Y and Z, in
-// that order, by angles in degrees; a copy given angles of its own is turned by those
-// instead. Every copy of every object of it is then dropped onto the bed.
+// The model in a file, mirrored along the axes whose scale factor is negative, scaled by
+// the factors and then turned about X, Y and Z, in that order, by angles in degrees; a copy
+// given angles of its own is turned by those instead. Every copy of every object of it is
+// then dropped onto the bed.
 Model load_transformed(const std::string &model_path, const std::array<double, 3> &scale,
                        const std::array<double, 3> &rotate, int count = 1, const std::vector<Turn> &turns = {})
 {
     Model model = FileReader::load_model(model_path);
     for (ModelObject *object : model.objects) {
-        object->scale(Vec3d(scale[0], scale[1], scale[2]));
+        // A mirror is written into the geometry itself, each volume's own transformation
+        // baked in first, and the triangles turned to face out again (TriangleMesh::mirror
+        // does): what reads the meshes afterwards sees an ordinary right-handed model.
+        if (scale[0] < 0 || scale[1] < 0 || scale[2] < 0)
+            for (ModelVolume *volume : object->volumes) {
+                TriangleMesh mesh = volume->mesh();
+                mesh.transform(volume->get_matrix());
+                for (int axis = 0; axis < 3; ++axis)
+                    if (scale[axis] < 0)
+                        mesh.mirror(Axis(axis));
+                volume->set_mesh(std::move(mesh));
+                volume->set_transformation(Geometry::Transformation());
+                volume->calculate_convex_hull();
+            }
+        object->scale(Vec3d(std::abs(scale[0]), std::abs(scale[1]), std::abs(scale[2])));
         object->rotate(Geometry::deg2rad(rotate[0]), X);
         object->rotate(Geometry::deg2rad(rotate[1]), Y);
         object->rotate(Geometry::deg2rad(rotate[2]), Z);
@@ -687,7 +702,7 @@ SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini,
     return result;
 }
 
-// Extent of the model in a file along X, Y and Z, in millimetres, once scaled and turned.
+// Extent of the model in a file along X, Y and Z, in millimetres, once mirrored, scaled and turned.
 std::array<double, 3> model_size(const std::string &model_path, std::array<double, 3> scale, std::array<double, 3> rotate)
 {
     nb::gil_scoped_release release;
@@ -981,7 +996,7 @@ NB_MODULE(_engine, m)
     m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{}, "plate"_a = 1,
           "Slice the parts of a print and write G-code to `output`.\n\n"
           "Each part is (model file, scale, rotate, count, places, height, plates, turns): per-axis scale\n"
-          "factors, degrees about X, Y and Z applied in that order after scaling, the number of\n"
+          "factors (a negative one mirrors the model along its axis), degrees about X, Y and Z applied in that order after scaling, the number of\n"
           "copies, per copy the x and y of its middle on the bed or None to have it arranged, how\n"
           "far its underside is above the bed (negative sinks it), and per copy the plate it is\n"
           "printed on, from 1, or None for the first it fits on, and per copy its own rotate or None\n"

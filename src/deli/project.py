@@ -118,7 +118,7 @@ def part_count(part: dict) -> int:
 def engine_parts(doc: tomlkit.TOMLDocument) -> list[tuple]:
     """The parts as `_engine.slice`, `_engine.plates` and `_engine.mesh` take them."""
     return [
-        (p["file"], part_transform(p, "scale"), part_transform(p, "rotate"), part_count(p), copy_places(p), part_height(p), copy_plates(p),
+        (p["file"], engine_scale(p), part_transform(p, "rotate"), part_count(p), copy_places(p), part_height(p), copy_plates(p),
          copy_turns(p))
         for p in parts(doc)
     ]
@@ -257,6 +257,33 @@ def set_part_transform(part: dict, key: str, values: list[float]) -> None:
         part[key] = [int(v) if v == int(v) else v for v in values]
 
 
+AXES = "xyz"
+
+
+def part_mirror(part: dict) -> list[bool]:
+    """Whether a part is mirrored along each axis of the model in its file: its `mirror`
+    names the axes, `["x"]` say."""
+    axes = part.get("mirror", [])
+    named = isinstance(axes, list) and all(isinstance(a, str) and a in AXES for a in axes)
+    if not named or len(set(axes)) != len(axes):
+        raise ProjectError(f"{FILE}: a part's 'mirror' should name the axes it is mirrored along, from x, y and z, each once")
+    return [axis in axes for axis in AXES]
+
+
+def set_part_mirror(part: dict, mirror: list[bool]) -> None:
+    """Record the axes a part is mirrored along, leaving nothing behind when there are none."""
+    if any(mirror):
+        part["mirror"] = [axis for axis, on in zip(AXES, mirror) if on]
+    else:
+        part.pop("mirror", None)
+
+
+def engine_scale(part: dict) -> list[float]:
+    """A part's scale as the engine takes it: a factor made negative mirrors the model along
+    its axis."""
+    return [-factor if mirrored else factor for factor, mirrored in zip(part_transform(part, "scale"), part_mirror(part))]
+
+
 def _rotation(rotate: list[float]) -> list[list[float]]:
     """The matrix of a part's rotation, as the engine applies it: about x, then y, then z."""
     x, y, z = (math.radians(a) for a in rotate)
@@ -276,8 +303,9 @@ def file_axis(rotate: list[float], axis: int) -> int | None:
     return found[0] if len(found) == 1 else None
 
 
-def on_bed(scale: list[float], rotate: list[float]) -> list[float]:
-    """A part's scale factors in the order of the bed's axes, once it is rotated; in the file's
+def on_bed(scale: list, rotate: list[float]) -> list:
+    """A part's scale factors (or anything else it has per axis of its file, such as the axes it
+    is mirrored along) in the order of the bed's axes, once it is rotated; in the file's
     order when the rotation leaves no side of the model along an axis."""
     axes = [file_axis(rotate, axis) for axis in range(3)]
     return [scale[j] for j in axes] if None not in axes else scale
