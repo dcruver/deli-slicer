@@ -456,7 +456,14 @@ def _remove(args: argparse.Namespace) -> int:
     doc = project.read()
     part = _part_named(_parts_of(doc), args.part)
     count = project.part_count(part)
-    if args.count is not None and 0 < args.count < count:
+    if args.copy is not None:
+        if count == 1:
+            raise CommandError(f"{part['file']} has only one copy; to take it out: deli remove {args.part}")
+        if not 1 <= args.copy <= count:
+            raise CommandError(f"{part['file']} has {count} copies; copies are numbered from 1")
+        project.remove_copy(part, args.copy)  # those after it move down a number
+        print(f"Removed copy {args.copy} of {part['file']}: now{_copies(count - 1) or ' one'}")
+    elif args.count is not None and 0 < args.count < count:
         left = count - args.count
         project.set_part_count(part, left)  # the last copies go
         print(f"Removed {args.count} of {part['file']}: now{_copies(left) or ' one'}")
@@ -2421,10 +2428,13 @@ def build_parser() -> argparse.ArgumentParser:
     remove = commands.add_parser(
         "remove",
         help="take a part, or some copies of it, out of this print",
-        description="Take a part out of the print in this directory, or with --count only some of its copies.",
+        description="Take a part out of the print in this directory, or with --count only its last N copies, "
+        "or with --copy one copy by its number (the copies after it move down a number).",
     )
     remove.add_argument("part", help="the part's file, or its name without the extension")
-    remove.add_argument("--count", type=int, metavar="N", help="remove only N copies")
+    which = remove.add_mutually_exclusive_group()
+    which.add_argument("--count", type=int, metavar="N", help="remove only the last N copies")
+    which.add_argument("--copy", type=int, metavar="N", help="remove one copy of a part with copies, numbered from 1")
     remove.set_defaults(run=_remove)
 
     status = commands.add_parser(

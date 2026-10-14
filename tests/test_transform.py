@@ -477,6 +477,31 @@ def test_the_last_copies_take_their_places_with_them(job, capsys):
     assert part(job) == {"file": "cube.stl", "plate": 2}
 
 
+def test_removing_one_copy_moves_those_after_it_down(job, capsys):
+    main(["add", "cube.stl", "--count", "2"])
+    main(["move", "--copy", "1", "plate", "2"])
+    main(["move", "--copy", "2", "50", "60"])
+    main(["rotate", "--copy", "3", "z", "45"])
+    capsys.readouterr()
+
+    assert main(["remove", "cube", "--copy", "2"]) == 0
+
+    assert capsys.readouterr().out == "Removed copy 2 of cube.stl: now x 2\n"
+    # Copy 3 is copy 2 now, with its own turn and the place the move gave it (kept where it lay).
+    assert part(job) == {"file": "cube.stl", "count": 2, "copy": {"1": {"plate": 2}, "2": {"at": [87, 100], "rotate": [0, 0, 45]}}}
+
+    assert main(["remove", "cube", "--copy", "1"]) == 0
+    assert part(job) == {"file": "cube.stl", "at": [87, 100], "rotate": [0, 0, 45]}  # the one left is the part
+
+    assert main(["remove", "cube", "--copy", "1"]) == 1
+    assert "has only one copy; to take it out: deli remove cube" in capsys.readouterr().err
+    main(["add", "cube.stl"])
+    assert main(["remove", "cube", "--copy", "3"]) == 1
+    assert "has 2 copies; copies are numbered from 1" in capsys.readouterr().err
+    with pytest.raises(SystemExit):  # one or the other
+        main(["remove", "cube", "--copy", "1", "--count", "1"])
+
+
 def test_arrange_one_plate_drops_only_its_places_and_keeps_its_plates(job, capsys):
     shutil.copy(CUBE, job / "box.stl")
     main(["add", "cube.stl", "--count", "2"])

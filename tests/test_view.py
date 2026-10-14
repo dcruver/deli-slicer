@@ -312,6 +312,10 @@ def test_the_page_runs_its_tools_commands(url):
     assert json.loads(get(url + "/state")[2])["supports"] is True
     assert json.loads(post(url, ["arrange"])[1])["code"] == 0
     assert json.loads(get(url + "/state")[2])["parts"][0]["at"] == [None, None]
+    assert json.loads(post(url, ["remove", "cube", "--copy", "2"])[1])["code"] == 0  # the page's Remove, a copy at a time
+    assert json.loads(get(url + "/state")[2])["parts"][0]["count"] == 1
+    assert json.loads(post(url, ["remove", "cube"])[1])["code"] == 0
+    assert json.loads(get(url + "/state")[2])["parts"] == []
 
 
 def test_a_command_that_fails_says_why(url):

@@ -19,6 +19,10 @@
   #info .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #info .tools button { white-space: nowrap; }
   #info .tools:not(:first-child) { margin-top: 8px; }
+  #info #selection:empty { display: none; }
+  #info [data-part] { cursor: pointer; }
+  #info [data-part]:hover { text-decoration: underline; }
+  #info [data-part].selected { color: #7dc4ff; }
   #info button { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px;
                  padding: 2px 10px; cursor: pointer; }
   #info button:hover { border-color: #8a9099; }

@@ -415,7 +415,9 @@ def test_thumbnails_in_formats_prusaslicer_cannot_write_are_left_out():
 
     assert out.settings["thumbnails"] == "160x160/PNG"
     assert any("320x320/COLPIC" in note for note in out.notes)
-    assert "thumbnails" not in orca.convert_machine({"thumbnails": ""}).settings
+    assert "thumbnails" not in orca.convert_machine({"thumbnails": ""}).settings  # asked for none
+    # A profile that says nothing, as Orca's Voron does, gets Orca's own default, as its G-code does.
+    assert orca.convert_machine({}).settings["thumbnails"] == orca.ORCA_THUMBNAILS == "48x48/PNG,300x300/PNG"
     assert orca.convert_machine({"thumbnails": "96x96,300x300", "thumbnails_format": "PNG"}).settings["thumbnails"] == "96x96/PNG,300x300/PNG"
 
 

@@ -387,6 +387,10 @@ def bed_without(printable_area: list[str], exclude: list[str]) -> list[str] | No
     return None
 
 
+# OrcaSlicer's default `thumbnails`, for a printer profile that sets none.
+ORCA_THUMBNAILS = "48x48/PNG,300x300/PNG"
+
+
 def convert_machine(machine: Orca) -> Converted:
     result = Converted()
     out, handled = result.settings, set()
@@ -432,6 +436,10 @@ def convert_machine(machine: Orca) -> Converted:
         if unknown:
             result.notes.append("thumbnails " + ", ".join(unknown) + " are in a format PrusaSlicer cannot write, so the printer's screen may show no picture.")
         handled.add("thumbnails")
+    else:
+        # A printer that says nothing gets Orca's own built-in default, which is what Orca's G-code
+        # for it carries (and what Mainsail and Fluidd show); PrusaSlicer's default is no picture.
+        out["thumbnails"] = ORCA_THUMBNAILS
 
     # Orca always extrudes in relative mode and never writes M201/M203 limits
     # for Klipper; say so explicitly instead of inheriting PrusaSlicer defaults.

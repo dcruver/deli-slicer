@@ -8,7 +8,7 @@ wrote, supports included, for as long as nothing has changed since. The page ask
 the shell shows up in the browser.
 
 The page changes a print only by running deli's own commands, the ones its tools show
-(`deli move`, `deli rotate`, `deli mirror`, `deli pause`, `deli arrange`, `deli supports`), through `/run`; it slices with
+(`deli move`, `deli rotate`, `deli mirror`, `deli remove`, `deli pause`, `deli arrange`, `deli supports`), through `/run`; it slices with
 `/slice` and sends to the printer with `/send`, which run `deli slice` and `deli send` in a
 process of their own: POSTs that must carry the token the page's address was given, from
 the page itself, so that no other web page can.
@@ -52,7 +52,7 @@ SOURCE = str(Path(__file__).resolve().parent)
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
-RUNNABLE = {"move", "rotate", "mirror", "pause", "arrange", "supports"}  # the commands the page's tools may run
+RUNNABLE = {"move", "rotate", "mirror", "remove", "pause", "arrange", "supports"}  # the commands the page's tools may run
 _TOKEN = "DELI_VIEW_TOKEN"  # how `start` hands the background process its token: not on its command line, which others can read
 _running = threading.Lock()  # one command at a time: each takes over stdout and stderr while it runs
 

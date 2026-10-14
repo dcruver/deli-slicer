@@ -541,6 +541,11 @@ G-code viewer makes it, and can be a minute or two from the one `deli slice` rep
 Overhangs shows in red the faces supports would hold up (at the print's
 `support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
 
+Click a part to select it, Shift-click to add another, or click a part's name in the box
+for every copy of it; a tool used on a selected part acts on the whole selection, one
+command per copy, and Remove gives the `deli remove` that takes the selection out. Click the
+empty bed, Clear or Esc to select nothing.
+
 Dragging, Rotate, Lay flat and Mirror change the print with deli's own commands: drag a part over
 the bed for its `deli move` (a copy is moved by itself, with `--copy`; a drag that would put
 it off the bed or on another part offers nothing); with Rotate (or R) drag a part around to
@@ -612,7 +617,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
 | `deli add <file> [--count N]` | add a model, or more copies of it |
-| `deli remove <part> [--count N]` | take a part, or some copies, out |
+| `deli remove <part> [--count N\|--copy N]` | take a part out, or its last N copies, or one copy by its number |
 | `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis; the axis is the bed's, as the part lies once rotated |

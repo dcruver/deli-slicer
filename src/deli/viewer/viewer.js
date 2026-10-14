@@ -55,7 +55,9 @@ const ceiling = new THREE.Plane(new THREE.Vector3(0, 0, -1), NO_CUT);
 const floor = new THREE.Plane(new THREE.Vector3(0, 0, 1), NO_CUT);
 renderer.localClippingEnabled = true;
 const MODEL_COLOUR = 0xf28c28;
-const material = new THREE.MeshStandardMaterial({ color: MODEL_COLOUR, roughness: 0.6, metalness: 0.05, clippingPlanes: [ceiling, floor] });
+const SELECTED_COLOUR = 0x7dc4ff;
+// Each vertex carries its copy's colour: the model's, or the selection's.
+const material = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.6, metalness: 0.05, clippingPlanes: [ceiling, floor] });
 const insideMaterial = new THREE.MeshBasicMaterial({ color: 0x5c3510, side: THREE.BackSide, clippingPlanes: [ceiling, floor] });
 const overhangMaterial = new THREE.MeshBasicMaterial({ color: 0xe5484d, clippingPlanes: [ceiling, floor],  // unlit: they face away from the light
   polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
@@ -156,15 +158,95 @@ async function drawPart(parts) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(nVertices * 3), 3));
   geometry.computeVertexNormals();
   placedNormals = geometry.attributes.normal.array.slice();  // as placed, for a part turned and put back
   partMesh = new THREE.Mesh(geometry, material);
+  for (const key of selected)  // a copy gone, or on another plate, is no longer selected
+    if (!partRanges.some(range => keyOf(range) === key)) selected.delete(key);
+  paintSelection();
   overhangMesh = new THREE.Mesh(overhangs(geometry), overhangMaterial);
   overhangMesh.visible = showOverhangs;
   partExtras = [new THREE.Mesh(geometry, insideMaterial), overhangMesh];
   scene.add(partMesh, ...partExtras);
   modelTop = 0;
   for (let i = 2; i < vertices.length; i += 3) modelTop = Math.max(modelTop, vertices[i]);
+}
+
+// The selection: copies picked by clicking them (Shift adds or takes one), or a part's name in
+// the box (every copy of it on this plate). A tool used on a selected copy acts on the whole
+// selection, one command per copy; on any other, on that copy alone, as with nothing selected.
+const selected = new Set();  // each copy as keyOf gives it
+const keyOf = range => `${range.part.file}#${range.copy}`;
+const isSelected = range => selected.has(keyOf(range));
+const selectedRanges = () => partRanges.filter(isSelected);
+const groupOf = range => isSelected(range) ? selectedRanges() : [range];
+// How a tool names what it acts on: the copy, or the selection.
+const whatIs = ranges => ranges.length > 1 ? `the ${ranges.length} selected`
+  : ranges[0].part.count > 1 ? `copy ${ranges[0].copy}` : 'it';
+function paintSelection() {
+  if (partMesh) {
+    const colour = partMesh.geometry.attributes.color.array;
+    const base = new THREE.Color(MODEL_COLOUR), picked = new THREE.Color(SELECTED_COLOUR);
+    for (const range of partRanges) {
+      const { r, g, b } = isSelected(range) ? picked : base;
+      for (let v = range.vertex * 3; v < (range.vertex + range.vertices) * 3; v += 3) {
+        colour[v] = r; colour[v + 1] = g; colour[v + 2] = b;
+      }
+    }
+    partMesh.geometry.attributes.color.needsUpdate = true;
+  }
+  for (const name of info.querySelectorAll('[data-part]'))
+    name.classList.toggle('selected', partRanges.some(range => range.part.file === name.dataset.part && isSelected(range)));
+  const row = document.getElementById('selection');
+  if (row) row.innerHTML = selectionRow();
+}
+function selectionRow() {
+  const count = selectedRanges().length;
+  if (!count) return '';
+  return `<span class="dim">${count} selected</span>`
+    + '<button type="button" id="removeSelected" title="The deli remove that takes what is selected out of the print">Remove</button>'
+    + '<button type="button" id="clearSelection" title="Select nothing (Esc)">Clear</button>';
+}
+function selectOnly(range, toggle) {
+  if (toggle) selected[isSelected(range) ? 'delete' : 'add'](keyOf(range));
+  else {
+    selected.clear();
+    selected.add(keyOf(range));
+  }
+  paintSelection();
+}
+// A part's name clicked: every copy of it on this plate, or with Shift those added to or
+// taken from the selection; clicked again when it is all that is selected, nothing.
+function selectPart(file, toggle) {
+  const copies = partRanges.filter(range => range.part.file === file);
+  const all = copies.every(isSelected);
+  if (!toggle) {
+    const only = all && selected.size === copies.length;
+    selected.clear();
+    if (!only) for (const range of copies) selected.add(keyOf(range));
+  } else for (const range of copies) selected[all ? 'delete' : 'add'](keyOf(range));
+  paintSelection();
+}
+function clearSelection() {
+  if (!selected.size) return;
+  selected.clear();
+  paintSelection();
+}
+// Remove: the `deli remove` for each selected copy, the last first so that the numbers of the
+// rest hold, or for the part when every copy of it is selected.
+function showRemove() {
+  const picked = selectedRanges(), runs = [], shown = [];
+  for (const part of new Set(picked.map(range => range.part))) {
+    const copies = picked.filter(range => range.part === part).map(range => range.copy).sort((a, b) => b - a);
+    const steps = copies.length === part.count ? [[]] : copies.map(copy => ['--copy', String(copy)]);
+    for (const step of steps) {
+      runs.push(['remove', part.file, ...step]);
+      shown.push(`deli remove ${[partName(part), ...step].join(' ')}`);
+    }
+  }
+  if (!runs.length) return;
+  showCommand(shown.join(' && '), `to take ${whatIs(picked)} out of the print`, runs);
 }
 
 // The triangles that look down at less than the overhang angle from level, so that supports
@@ -425,7 +507,7 @@ function options() {
     + (lastState?.parts.length && 'supports' in lastState
         ? `<button type="button" id="supports" title="${lastState.supports ? 'Supports are on: turn them off' : 'Turn on automatic supports'}"`
           + ` aria-pressed="${lastState.supports}">Supports</button>` : '')
-    + '</div></div>';
+    + `</div><div id="selection" class="tools">${selectionRow()}</div></div>`;
 }
 
 function showLayers() {
@@ -457,6 +539,10 @@ info.addEventListener('click', event => {
     return lastState && redraw(lastState);
   }
   if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
+  if (button?.id === 'removeSelected') return showRemove();
+  if (button?.id === 'clearSelection') return clearSelection();
+  const named = event.target.closest('[data-part]');
+  if (named) return selectPart(named.dataset.part, event.shiftKey);
   if (button?.id === 'sliceNow') return startSlice(button);
   if (button?.id === 'sendNow' || button?.id === 'printNow') return showSend(button.id === 'printNow');
   if (button?.id === 'supports') {
@@ -650,8 +736,10 @@ renderer.domElement.addEventListener('pointerdown', event => {
   if ((!mode || mode === 'turn') && event.button === 0) startDrag(event);
 }, { capture: true });  // before the view's controls, so that a drag on a part does not turn the view too
 renderer.domElement.addEventListener('pointerup', event => {
-  if (dragging) return endDrag();
-  if (!mode || !pressedAt || Math.hypot(event.clientX - pressedAt[0], event.clientY - pressedAt[1]) > 4) return;
+  if (dragging) return endDrag(event);
+  const still = pressedAt && Math.hypot(event.clientX - pressedAt[0], event.clientY - pressedAt[1]) <= 4;
+  if (!mode && still && event.button === 0) return clearSelection();  // a click on nothing
+  if (!mode || !still) return;
   if (event.button === 2) return setMode(null);
   if (event.button !== 0) return;
   if (mode === 'flat') return layFlat(event.clientX, event.clientY);
@@ -680,6 +768,7 @@ addEventListener('keydown', event => {
   else if ((event.key === 'r' || event.key === 'R') && partMesh) setMode(mode === 'turn' ? null : 'turn');
   else if (event.key === 'Escape') {  // done: the tool put down, and whatever it wrote
     setMode(null);
+    clearSelection();
     clearMeasurement();
     putBack();
     commandRan = false;
@@ -732,6 +821,7 @@ document.getElementById('applyCommand').addEventListener('click', async event =>
     failed = true;
   }
   event.target.disabled = false;
+  if (!failed && runs.some(args => args[0] === 'remove')) clearSelection();  // the copies' numbers change
   putBack();  // the print, redrawn from deli.toml, shows where the part is now
   if (!failed && (mode === 'flat' || mode === 'mirror' || mode === 'turn')) setMode(null);  // the tool is done
   showRan(printed, failed);
@@ -830,28 +920,41 @@ function partHit(x, y) {
 // `deli move` that puts its middle there. Rotate: with that tool, a part dragged around its
 // middle turns about z, its middle staying where it is (as the engine keeps a placed copy's),
 // and gives the `deli rotate` that turns it so; a copy not yet placed is first given the place
-// it has, so that nothing else is arranged afresh around it. The print itself changes only
-// when that is run.
+// it has, so that nothing else is arranged afresh around it. A selected copy takes the whole
+// selection with it, each copy moved as far, or turned as much about its own middle. The
+// print itself changes only when that is run.
 let dragging = null;
+function boxOf(range, points = placed) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
+    minX = Math.min(minX, points[v * 3]); maxX = Math.max(maxX, points[v * 3]);
+    minY = Math.min(minY, points[v * 3 + 1]); maxY = Math.max(maxY, points[v * 3 + 1]);
+  }
+  return { box: [minX, minY, maxX, maxY], middle: [(minX + maxX) / 2, (minY + maxY) / 2] };
+}
 function startDrag(event) {
   const hit = partHit(event.clientX, event.clientY);
   if (!hit) return;
-  const range = rangeOf(hit.faceIndex);
+  const range = rangeOf(hit.faceIndex), ranges = groupOf(range);
   controls.enabled = false;
   renderer.domElement.style.cursor = 'grabbing';
   moving = true;
   showModel();
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
-    minX = Math.min(minX, placed[v * 3]); maxX = Math.max(maxX, placed[v * 3]);
-    minY = Math.min(minY, placed[v * 3 + 1]); maxY = Math.max(maxY, placed[v * 3 + 1]);
-  }
-  const middle = [(minX + maxX) / 2, (minY + maxY) / 2];
-  dragging = { range, plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -hit.point.z), from: hit.point.clone(),
-               middle, box: [minX, minY, maxX, maxY], by: new THREE.Vector3(), turning: mode === 'turn',
+  const { middle } = boxOf(range);
+  const normals = partMesh.geometry.attributes.normal.array;
+  dragging = { range, ranges, plane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -hit.point.z), from: hit.point.clone(),
+               middle, by: new THREE.Vector3(), turning: mode === 'turn',
                startAngle: Math.atan2(hit.point.y - middle[1], hit.point.x - middle[0]), degrees: 0,
-               normals: partMesh.geometry.attributes.normal.array.slice(range.vertex * 3, (range.vertex + range.vertices) * 3) };
-  putBack(range);  // another part moved before goes back where it is
+               each: ranges.map(r => ({ range: r, ...boxOf(r), normals: normals.slice(r.vertex * 3, (r.vertex + r.vertices) * 3) })) };
+  putBack(ranges);  // another part moved before goes back where it is
+}
+// The copies a dragged group may not land on: those outside it.
+const others = ranges => partRanges.filter(other => !ranges.includes(other));
+const onWhat = hit => `${hit.part.count > 1 ? `copy ${hit.copy} of ` : ''}${hit.part.file}`;
+// A copy's move: to a place on its own plate, so a copy only arranged onto this one is kept to it.
+function moveSteps(range, x, y) {
+  const { part, copy } = range;
+  return [...(plate > 1 && part.kept[copy - 1] !== plate ? [['plate', String(plate)]] : []), [number(x), number(y)]];
 }
 function drag(event) {
   raycaster.setFromCamera(new THREE.Vector2(event.clientX / innerWidth * 2 - 1, 1 - event.clientY / innerHeight * 2), camera);
@@ -859,70 +962,90 @@ function drag(event) {
   if (!to) return;
   if (dragging.turning) return turn(event, to);
   dragging.by.subVectors(to, dragging.from).setZ(0);
-  const { range, by } = dragging, position = partMesh.geometry.attributes.position;
-  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
-    position.array[v * 3] = placed[v * 3] + by.x;
-    position.array[v * 3 + 1] = placed[v * 3 + 1] + by.y;
-  }
+  const { ranges, by } = dragging, position = partMesh.geometry.attributes.position;
+  for (const { range } of dragging.each)
+    for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
+      position.array[v * 3] = placed[v * 3] + by.x;
+      position.array[v * 3 + 1] = placed[v * 3 + 1] + by.y;
+    }
   position.needsUpdate = true;
-  const [x, y] = [dragging.middle[0] + by.x, dragging.middle[1] + by.y];
-  const [x0, y0, x1, y1] = dragging.box;
-  if (!onTheBed(x0 + by.x, y0 + by.y, x1 + by.x, y1 + by.y))
-    return showCommand(null, 'Off the bed: it would not be printed there.');
-  const moved = range.hull.map(([hx, hy]) => [hx + by.x, hy + by.y]);
-  const hit = partRanges.find(other => other !== range && overlap(moved, other.hull));
-  if (hit) return showCommand(null, `That is on ${hit.part.count > 1 ? `copy ${hit.copy} of ` : ''}${hit.part.file}; move it clear.`);
-  // A place is on the copy's own plate, so a copy only arranged onto this one is kept to it.
-  const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
-  const steps = [...(plate > 1 && part.kept[copy - 1] !== plate ? [['plate', String(plate)]] : []), [number(x), number(y)]];
-  showCommand(steps.map(step => `deli move ${partName(part)} ${[...which, ...step].join(' ')}`).join(' && '),
-    `to move ${part.count > 1 ? `copy ${copy}` : 'it'} there`, steps.map(step => ['move', part.file, ...which, ...step]));
+  const what = whatIs(ranges);
+  for (const { box: [x0, y0, x1, y1] } of dragging.each)
+    if (!onTheBed(x0 + by.x, y0 + by.y, x1 + by.x, y1 + by.y))
+      return showCommand(null, `Off the bed: ${ranges.length > 1 ? 'some of the selection' : 'it'} would not be printed there.`);
+  for (const { range } of dragging.each) {
+    const moved = range.hull.map(([hx, hy]) => [hx + by.x, hy + by.y]);
+    const hit = others(ranges).find(other => overlap(moved, other.hull));
+    if (hit) return showCommand(null, `That is on ${onWhat(hit)}; move ${what} clear.`);
+  }
+  // Those ahead along the way move first, so that none lands where another still is.
+  const ahead = ({ middle: [x, y] }) => x * by.x + y * by.y;
+  const runs = [], shown = [];
+  for (const { range, middle: [mx, my] } of [...dragging.each].sort((a, b) => ahead(b) - ahead(a))) {
+    const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
+    for (const step of moveSteps(range, mx + by.x, my + by.y)) {
+      runs.push(['move', part.file, ...which, ...step]);
+      shown.push(`deli move ${partName(part)} ${[...which, ...step].join(' ')}`);
+    }
+  }
+  showCommand(shown.join(' && '), `to move ${what} there`, runs);
 }
 function turn(event, to) {
-  const { range, middle: [mx, my] } = dragging;
+  const { ranges, middle: [mx, my] } = dragging;
   const step = event.shiftKey ? 1 : 15;
   const radians = Math.atan2(to.y - my, to.x - mx) - dragging.startAngle;
   const degrees = ((Math.round(radians * 180 / Math.PI / step) * step) % 360 + 360) % 360;
   if (degrees === dragging.degrees && dragging.shown) return;
   dragging.degrees = degrees;
   dragging.shown = true;
-  // Turned about the middle, then shifted so that its middle (of its box) is where it was.
+  // Each turned about its middle, then shifted so that its middle (of its box) is where it was.
   const cos = Math.cos(degrees * Math.PI / 180), sin = Math.sin(degrees * Math.PI / 180);
   const geometry = partMesh.geometry, position = geometry.attributes.position, normal = geometry.attributes.normal;
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (let v = range.vertex, n = 0; v < range.vertex + range.vertices; v++, n += 3) {
-    const dx = placed[v * 3] - mx, dy = placed[v * 3 + 1] - my;
-    const x = mx + dx * cos - dy * sin, y = my + dx * sin + dy * cos;
-    position.array[v * 3] = x;
-    position.array[v * 3 + 1] = y;
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    const [nx, ny] = [dragging.normals[n], dragging.normals[n + 1]];
-    normal.array[v * 3] = nx * cos - ny * sin;
-    normal.array[v * 3 + 1] = nx * sin + ny * cos;
-  }
-  const sx = mx - (minX + maxX) / 2, sy = my - (minY + maxY) / 2;
-  for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
-    position.array[v * 3] += sx;
-    position.array[v * 3 + 1] += sy;
+  const turned = [];
+  for (const { range, middle: [cx, cy], normals } of dragging.each) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let v = range.vertex, n = 0; v < range.vertex + range.vertices; v++, n += 3) {
+      const dx = placed[v * 3] - cx, dy = placed[v * 3 + 1] - cy;
+      const x = cx + dx * cos - dy * sin, y = cy + dx * sin + dy * cos;
+      position.array[v * 3] = x;
+      position.array[v * 3 + 1] = y;
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      const [nx, ny] = [normals[n], normals[n + 1]];
+      normal.array[v * 3] = nx * cos - ny * sin;
+      normal.array[v * 3 + 1] = nx * sin + ny * cos;
+    }
+    const sx = cx - (minX + maxX) / 2, sy = cy - (minY + maxY) / 2;
+    for (let v = range.vertex; v < range.vertex + range.vertices; v++) {
+      position.array[v * 3] += sx;
+      position.array[v * 3 + 1] += sy;
+    }
+    turned.push({ range, box: [minX + sx, minY + sy, maxX + sx, maxY + sy], hull: hull(position.array, range.vertex, range.vertices) });
   }
   position.needsUpdate = normal.needsUpdate = true;
-  const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
-  const what = part.count > 1 ? `copy ${copy}` : 'it';
+  const what = whatIs(ranges);
   if (!degrees) return showCommand(null, `Drag around ${what} to turn it; Shift turns it by single degrees.`);
-  if (!onTheBed(minX + sx, minY + sy, maxX + sx, maxY + sy))
-    return showCommand(null, 'Off the bed: it would not be printed turned so.');
-  const turned = hull(position.array, range.vertex, range.vertices);
-  const hit = partRanges.find(other => other !== range && overlap(turned, other.hull));
-  if (hit) return showCommand(null, `Turned so, it is on ${hit.part.count > 1 ? `copy ${hit.copy} of ` : ''}${hit.part.file}.`);
-  const [rx, ry, rz] = part.turns?.[copy - 1] ?? part.rotate;  // the copy's own, or the part's
-  let z = Math.round((rz + degrees) * 100) / 100 % 360;
-  if (z > 180) z -= 360;
-  const pin = part.at?.[copy - 1] ? [] : [  // a copy only arranged is kept where it is
-    ...(plate > 1 && part.kept[copy - 1] !== plate ? [['move', part.file, ...which, 'plate', String(plate)]] : []),
-    ['move', part.file, ...which, number(mx), number(my)]];
-  const runs = [...pin, ['rotate', part.file, ...which, 'z', number(z)]];
-  showCommand(runs.map(([verb, , ...rest]) => `deli ${verb} ${[partName(part), ...rest].join(' ')}`).join(' && '),
-    `to turn ${what} ${degrees > 180 ? `${360 - degrees}° clockwise` : `${degrees}° anticlockwise`}`, runs);
+  for (const { box: [x0, y0, x1, y1] } of turned)
+    if (!onTheBed(x0, y0, x1, y1))
+      return showCommand(null, `Off the bed: ${ranges.length > 1 ? 'some of the selection' : 'it'} would not be printed turned so.`);
+  for (const [i, one] of turned.entries()) {
+    const hit = others(ranges).find(other => overlap(one.hull, other.hull))
+      ?? turned.slice(i + 1).find(other => overlap(one.hull, other.hull))?.range;
+    if (hit) return showCommand(null, `Turned so, ${ranges.length > 1 ? 'some of the selection is' : 'it is'} on ${onWhat(hit)}.`);
+  }
+  const runs = [], shown = [];
+  for (const { range, middle: [cx, cy] } of dragging.each) {
+    const { part, copy } = range, which = part.count > 1 ? ['--copy', String(copy)] : [];
+    const [, , rz] = part.turns?.[copy - 1] ?? part.rotate;  // the copy's own, or the part's
+    let z = Math.round((rz + degrees) * 100) / 100 % 360;
+    if (z > 180) z -= 360;
+    // A copy only arranged is kept where it is.
+    const steps = [...(part.at?.[copy - 1] ? [] : moveSteps(range, cx, cy).map(step => ['move', ...step])), ['rotate', 'z', number(z)]];
+    for (const [verb, ...rest] of steps) {
+      runs.push([verb, part.file, ...which, ...rest]);
+      shown.push(`deli ${verb} ${[partName(part), ...which, ...rest].join(' ')}`);
+    }
+  }
+  showCommand(shown.join(' && '), `to turn ${what} ${degrees > 180 ? `${360 - degrees}° clockwise` : `${degrees}° anticlockwise`}`, runs);
 }
 // A copy's footprint: the convex hull of its vertices seen from above, as the engine checks
 // copies put by hand against each other.
@@ -972,10 +1095,11 @@ function onTheBed(x0, y0, x1, y1) {
   return [[x0 + e, y0 + e], [x1 - e, y0 + e], [x1 - e, y1 - e], [x0 + e, y1 - e]].every(([x, y]) => inside(x, y))
     && !bed.some(([x, y]) => x > x0 + e && x < x1 - e && y > y0 + e && y < y1 - e);
 }
-function endDrag() {
+function endDrag(event) {
   if (!dragging.by.lengthSq() && !dragging.degrees) {  // a click, not a drag: nothing moved
     moving = false;
     showModel();
+    if (!dragging.turning && event) selectOnly(dragging.range, event.shiftKey);
   }
   controls.enabled = true;
   renderer.domElement.style.cursor = 'grab';
@@ -983,16 +1107,16 @@ function endDrag() {
   partMesh.geometry.computeBoundingBox();
   dragging = null;
 }
-// Every part back where the print has it, but the one given.
-function putBack(except) {
-  if (!except && moving) {
+// Every part back where the print has it, but those given.
+function putBack(except = []) {
+  if (!except.length && moving) {
     moving = false;
     showModel();
   }
   if (!partMesh || !placed) return;
   const position = partMesh.geometry.attributes.position;
   for (const range of partRanges) {
-    if (range === except) continue;
+    if (except.includes(range)) continue;
     position.array.set(placed.subarray(range.vertex * 3, (range.vertex + range.vertices) * 3), range.vertex * 3);
     if (placedNormals) partMesh.geometry.attributes.normal.array.set(
       placedNormals.subarray(range.vertex * 3, (range.vertex + range.vertices) * 3), range.vertex * 3);
@@ -1036,12 +1160,15 @@ function layFlat(x, y) {
 function mirrorAcross(x, y) {
   const hit = partHit(x, y);
   if (!hit) return;
-  const { part } = rangeOf(hit.faceIndex);
+  const range = rangeOf(hit.faceIndex), ranges = groupOf(range);
   const n = hit.face.normal;
   const axis = ['x', 'y', 'z'][[Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)].indexOf(Math.max(Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)))];
-  const back = part.mirror?.includes(axis);
-  showCommand(`deli mirror ${partName(part)} ${axis}`,
-    back ? `to put it back as it is in the file along ${axis}` : `to mirror it along ${axis}`, [['mirror', part.file, axis]]);
+  const parts = [...new Set(ranges.map(r => r.part))];  // a mirror is a part's, every copy's
+  const back = parts.length === 1 && parts[0].mirror?.includes(axis);
+  showCommand(parts.map(part => `deli mirror ${partName(part)} ${axis}`).join(' && '),
+    back ? `to put it back as it is in the file along ${axis}`
+      : `to mirror ${parts.length > 1 ? `the ${parts.length} selected parts` : 'it'} along ${axis}`,
+    parts.map(part => ['mirror', part.file, axis]));
 }
 
 // Pause: the `deli pause` for the layer on the slider, or the one that takes it away.
@@ -1076,7 +1203,7 @@ function describe(state) {
   for (const part of state.parts) {
     if (state.plates > 1 && !copiesOn(part, plate)) continue;
     const count = state.plates > 1 ? copiesOn(part, plate) : part.count;
-    lines.push(`<b>${part.file}</b>${count > 1 ? ` × ${count}` : ''}`
+    lines.push(`<b data-part="${part.file}" title="Click to select it on this plate; Shift adds">${part.file}</b>${count > 1 ? ` × ${count}` : ''}`
       + (state.plates > 1 && count < part.count ? ` <span class="dim">of ${part.count}</span>` : ''));
     if (part.size) lines.push(lengths(part.size, ' × '));
     const s = part.scale, r = part.rotate;

@@ -537,15 +537,31 @@ def arrange(part: dict) -> None:
     part.pop("copy", None)
 
 
-def set_part_count(part: dict, count: int) -> None:
-    """Change how many copies a part has, keeping what each copy that is left has of its own.
-    A part's only copy keeps its place and plate in the part itself, so they move between
-    there and [part.copy.1] as copies come and go."""
+def _copies_own(part: dict) -> list[tuple]:
+    """What each copy has of its own, in order: its place, its plate and its turn, each None
+    when it goes by the part's."""
     tables = _copy_tables(part)
     if part_count(part) == 1:
-        own = [(copy_place(part), None, None)]  # its plate and turn are the part's, for every copy
-    else:
-        own = [(copy_place(part, n), tables.get(str(n), {}).get("plate"), copy_turn(part, n)) for n in range(1, part_count(part) + 1)]
+        return [(copy_place(part), None, None)]  # its plate and turn are the part's, for every copy
+    return [(copy_place(part, n), tables.get(str(n), {}).get("plate"), copy_turn(part, n)) for n in range(1, part_count(part) + 1)]
+
+
+def set_part_count(part: dict, count: int) -> None:
+    """Change how many copies a part has, keeping what each copy that is left has of its own:
+    the last copies go. A part's only copy keeps its place and plate in the part itself, so
+    they move between there and [part.copy.1] as copies come and go."""
+    own = _copies_own(part)[:count]
+    _set_copies(part, own + [(None, None, None)] * (count - len(own)))  # new copies have nothing of their own
+
+
+def remove_copy(part: dict, copy: int) -> None:
+    """Take one copy (from 1) out of a part with copies; those after it move down a number."""
+    own = _copies_own(part)
+    _set_copies(part, own[: copy - 1] + own[copy:])
+
+
+def _set_copies(part: dict, own: list[tuple]) -> None:
+    count = len(own)
     if count == 1 and own[0][2] is not None:
         set_part_transform(part, "rotate", own[0][2])  # the copy left is turned its own way: the part is
     part.pop("copy", None)

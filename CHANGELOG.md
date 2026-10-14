@@ -5,6 +5,26 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+## 0.12.0 (2026-10-13)
+
+- A printer imported from Orca whose profile names no `thumbnails` gets Orca's own default,
+  a 48×48 and a 300×300 picture, so Klipper printers show a picture in Mainsail and Fluidd
+  as they do with Orca's G-code. Before, such a printer got none: Orca's default is built
+  into the program, not written in any profile. A printer already in your library is left
+  as it is; give it the pictures with
+  `deli set --printer <name> thumbnails "48x48/PNG,300x300/PNG"`.
+
+- `deli view` has a selection: click a part to select it, Shift-click to add or take one,
+  or click a part's name in the box for every copy of it on the plate; the empty bed,
+  Clear or Esc selects nothing. Selected copies are drawn blue. A tool used on a selected
+  copy acts on the whole selection, a command per copy: dragging moves them all as far,
+  Rotate turns each about its own middle, Mirror mirrors each selected part; Lay flat and
+  Measure stay with the one clicked. Remove, shown while something is selected, gives
+  the `deli remove` for it.
+- `deli remove <part> --copy N` takes one copy of a part out by its number; the copies
+  after it move down a number, keeping their places, plates and turns. `--count N` still
+  takes the last N.
+
 ## 0.11.0 (2026-10-13)
 
 - `deli mirror [part] x|y|z` makes a part its mirror image along one of the bed's axes, as
