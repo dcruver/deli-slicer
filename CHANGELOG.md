@@ -5,6 +5,14 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- A skill for AI assistants, `skills/deli/SKILL.md`, in the Agent Skills format that
+  Claude Code, Codex, OpenCode, Pi and others read: how deli thinks, the usual workflow,
+  the rules an assistant should keep (never start a print the user did not ask for, never
+  run `deli setup`, let deli validate rather than editing `deli.toml`), with a command
+  reference and a map from what people ask for to PrusaSlicer's setting names. Install
+  it with `npx skills add dcruver/deli-slicer`, or copy the folder; this checkout links it
+  as `.claude/skills/deli`.
+
 ## 0.12.0 (2026-10-13)
 
 - A printer imported from Orca whose profile names no `thumbnails` gets Orca's own default,

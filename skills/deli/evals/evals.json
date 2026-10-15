@@ -1,0 +1,23 @@
+{
+  "skill_name": "deli",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have cube.stl in this folder. Slice it for a Voron 2.4 350 with a 0.4 nozzle in PLA, 0.2 mm layers, 3 walls, 25% gyroid infill, and tell me how long it will take and how much filament it uses. Don't send anything to a printer.",
+      "expected_output": "A deli.toml with the Voron printer, a PLA filament, a 0.20mm process, perimeters 3, fill_density 25%, fill_pattern gyroid; the time and filament from deli slice reported; no deli send run.",
+      "files": ["cube.stl"]
+    },
+    {
+      "id": 2,
+      "prompt": "this bracket (bracket.stl here) keeps breaking at the screw holes and the overhang underneath looks rough. make it stronger and sort out the overhang, then slice it. my printer's already set up.",
+      "expected_output": "Walls and infill raised, supports turned on (deli supports), sliced, with time and filament reported; settings changed through deli set/deli supports, not by editing deli.toml.",
+      "files": ["bracket.stl"]
+    },
+    {
+      "id": 3,
+      "prompt": "What's the nozzle temperature this print will use, and where does that number come from? Then set the print to pause after layer 20 so I can drop a magnet in.",
+      "expected_output": "deli set temperature read and its source (filament profile, config or print) reported in words; deli pause 20 run; nothing sliced or sent unless needed.",
+      "files": ["cube.stl"]
+    }
+  ]
+}

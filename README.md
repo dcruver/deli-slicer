@@ -634,6 +634,26 @@ check the file arrived and start it from the printer's own screen.
 
 `deli <command> --help` has the details.
 
+## Using deli from an AI assistant
+
+deli is a good fit for a coding assistant that runs shell commands: every command
+takes its arguments on the command line, prints plain text and exits, and a print
+is a file the assistant can read. The repository ships a skill, a short briefing in
+[`skills/deli/SKILL.md`](skills/deli/SKILL.md), that tells an assistant how deli
+thinks, the usual workflow, the rules it should keep (never `deli send --print`
+unless asked; never `deli setup`, which asks questions) and where the settings are.
+It follows the [Agent Skills](https://agentskills.io) format, so it works with
+Claude Code, Codex, OpenCode, Pi and the other tools that read `SKILL.md` files.
+To install it for yours:
+
+```
+npx skills add dcruver/deli-slicer          # into whichever agents you have
+```
+
+or copy `skills/deli/` into the folder your tool reads skills from
+(`~/.claude/skills/`, `~/.codex/skills/`, `~/.config/opencode/skills/`, ...).
+Within this checkout, Claude Code finds it through `.claude/skills/deli`.
+
 ## Not done yet
 
 Things that a user would notice, roughly in the order they matter:
