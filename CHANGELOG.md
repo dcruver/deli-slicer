@@ -5,6 +5,8 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+## 0.13.0 (2026-10-17)
+
 - `deli update` installs the latest release from GitHub over the deli in use, the way the
   install script does: it finds the release by the same redirect, picks the wheel for
   your machine and has uv install it. `deli update --check` only says whether there is
