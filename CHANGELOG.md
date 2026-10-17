@@ -5,6 +5,11 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+## 0.14.0 (2026-10-17)
+
+- Nothing changed in deli: a release made to see `deli status` report a newer release
+  and `deli update` install one, from a 0.13.0 installed from its wheel.
+
 ## 0.13.0 (2026-10-17)
 
 - `deli update` installs the latest release from GitHub over the deli in use, the way the
