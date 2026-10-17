@@ -62,6 +62,7 @@ from tomlkit.items import String, StringType, Trivia
 from deli import library
 
 DEFAULT_PRINTER = "printer"  # the top-level key that names the printer new prints start with
+UPDATE_CHECK = "update_check"  # top-level; false stops `deli status` looking for a newer release
 SETTINGS = "settings"  # the table of settings changed for every print
 # The table that holds each kind of profile's tables: `printers` at the top, with each
 # printer's connection, defaults, nozzles and settings, and in a printer's table its
@@ -453,6 +454,15 @@ def default_printer(doc: tomlkit.TOMLDocument | None = None) -> str | None:
     return name
 
 
+def update_check(doc: tomlkit.TOMLDocument | None = None) -> bool:
+    """Whether `deli status` may look for a newer release of deli: yes unless the config says
+    `update_check = false`."""
+    value = (read() if doc is None else doc).get(UPDATE_CHECK, True)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{path()}: '{UPDATE_CHECK}' should be true or false")
+    return value
+
+
 def settings(doc: tomlkit.TOMLDocument | None = None) -> dict[str, str]:
     """The `[settings]` table: what every print changes, as the engine reads values."""
     doc = read() if doc is None else doc
@@ -509,7 +519,7 @@ def split_key(key: str, retired: bool = False) -> tuple[str, str]:
     # A printer's name may itself hold dots: printers.elegoo-centauri-carbon-0.6-nozzle.host
     known = PRINTER_KEYS + RETIRED_KEYS if retired else PRINTER_KEYS
     if len(parts) < 3 or parts[0] != "printers" or parts[-1] not in known:
-        raise ConfigError(f"'{key}' is not a key deli knows; the keys are {DEFAULT_PRINTER} and printers.<printer name>.<" + "|".join(PRINTER_KEYS) + ">")
+        raise ConfigError(f"'{key}' is not a key deli knows; the keys are {DEFAULT_PRINTER}, {UPDATE_CHECK} and printers.<printer name>.<" + "|".join(PRINTER_KEYS) + ">")
     return library.slug(".".join(parts[1:-1])), parts[-1]
 
 
@@ -564,6 +574,8 @@ def nozzle_key(key: str) -> tuple[str, str, str] | None:
 def get(key: str) -> str | list[str] | None:
     if key == DEFAULT_PRINTER:
         return default_printer()
+    if key == UPDATE_CHECK:
+        return None if UPDATE_CHECK not in read() else str(update_check()).lower()
     if found := nozzle_key(key):
         name, size, field_ = found
         nozzle = machine(name).nozzles.get(size)
@@ -582,6 +594,13 @@ def set_value(key: str, value: str) -> None:
     if key == DEFAULT_PRINTER:
         doc = read()
         doc[DEFAULT_PRINTER] = value
+        write(doc)
+        return
+    if key == UPDATE_CHECK:
+        if value.lower() not in ("true", "false"):
+            raise ConfigError(f"'{UPDATE_CHECK}' is true or false, not '{value}'")
+        doc = read()
+        doc[UPDATE_CHECK] = value.lower() == "true"
         write(doc)
         return
     if found := nozzle_key(key):
@@ -619,11 +638,11 @@ def unset(key: str) -> bool:
             del table[field_]
         write(doc)
         return True
-    if key == DEFAULT_PRINTER:
+    if key in (DEFAULT_PRINTER, UPDATE_CHECK):
         doc = read()
-        if DEFAULT_PRINTER not in doc:
+        if key not in doc:
             return False
-        del doc[DEFAULT_PRINTER]
+        del doc[key]
         write(doc)
         return True
     name, field = split_key(key, retired=True)
@@ -646,6 +665,8 @@ def entries() -> list[tuple[str, str | list[str]]]:
     found = []
     if default := default_printer(doc):
         found.append((DEFAULT_PRINTER, default))
+    if UPDATE_CHECK in doc:
+        found.append((UPDATE_CHECK, str(update_check(doc)).lower()))
     printers = doc.get("printers", {})
     if not isinstance(printers, dict):
         raise ConfigError(f"{path()}: 'printers' should be a table with one table per printer")

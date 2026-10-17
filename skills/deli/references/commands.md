@@ -14,7 +14,7 @@ Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 
 | command | what it does |
 |---|---|
-| `deli status` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current`, `out of date: the print has changed since it was sliced`, or `not sliced yet` |
+| `deli status` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current`, `out of date: the print has changed since it was sliced`, or `not sliced yet`; a last line `deli X.Y.Z is out` when a newer release exists (tell the user; do not update unasked) |
 | `deli printer [name]` | choose the printer for this print, or list: the user's printers first (each with its nozzles, the default marked), then the printer's vendor's from Orca |
 | `deli filament [name]` | choose a filament, or list those made for the print's printer, the one in use and the default marked |
 | `deli process [name]` | the same for processes (layer height, speeds, infill) |
@@ -158,10 +158,12 @@ library is `~/.config/deli/`: `printers/<name>.ini`,
 | `deli config KEY` | one value |
 | `deli config KEY VALUE` | set one |
 | `deli config --unset KEY` | remove one |
+| `deli update [--check]` | install the latest release of deli from GitHub over this one (`--check` only says whether there is one). Run it only when the user asks to update deli |
 
 Keys:
 
 - `printer`: the default printer for new prints (also `deli printer X --default`).
+- `update_check`: `false` stops `deli status` looking, once a day, for a newer release of deli.
 - `printers.<name>.host`: where `deli send` sends (`moonraker://voron.local`).
 - `printers.<name>.api_key`: if the host needs one.
 - `printers.<name>.nozzle`: the nozzle in the printer now (`deli nozzle` sets it).

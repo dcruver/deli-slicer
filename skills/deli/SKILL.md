@@ -137,7 +137,9 @@ These keep an agent from doing what a person at the keyboard would not.
   to slicing. `deli slice` is always safe: it touches nothing but the cache.
 - **Do not run `deli setup`.** It asks questions on the terminal and edits
   shell startup files. Do its steps by hand instead (below), with commands
-  that take everything as arguments.
+  that take everything as arguments. Nor `deli update`, which replaces the
+  user's installation, unless the user asks to update deli; `deli update
+  --check` only looks.
 - **Let deli validate; do not edit `deli.toml` by hand.** Every command
   checks names and values against the engine and the chosen profiles, and
   keeps the user's comments in the file. Hand edits skip those checks. Read

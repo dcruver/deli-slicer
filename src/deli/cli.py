@@ -206,11 +206,15 @@ def _block(doc, notes: dict[str, str] | None = None) -> None:
 
 def _status(args: argparse.Namespace) -> int:
     """`deli status`: the print in this directory, as the block shows it."""
+    from deli import update
+
     if not project.FILE.exists():
         default = config.default_printer()
         print("No print in this directory yet; start one with: deli add <file>" + (f". It would start on '{default}'." if default else ""))
-        return 0
-    _block(project.read())
+    else:
+        _block(project.read())
+    if newer := update.newer_release():
+        print(f"{'deli':<9} {newer} is out; you have {update.installed()}. Update with: deli update")
     return 0
 
 
@@ -1955,6 +1959,9 @@ def _config(args: argparse.Namespace) -> int:
         library.find("printer", library.slug(args.value))  # must be in the library
         config.set_value(args.key, library.slug(args.value))
         return 0
+    if args.key == config.UPDATE_CHECK:
+        config.set_value(args.key, args.value)
+        return 0
     config.refuse_setting(args.key, "set")
     name, field = config.split_key(args.key)
     if field in ("filament", "process"):
@@ -2344,6 +2351,36 @@ def _setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _update(args: argparse.Namespace) -> int:
+    """`deli update [VERSION] [--check]`: the latest release from GitHub (or VERSION),
+    installed over this one with uv, as install.sh installs it. Everything the command
+    needs is imported before uv replaces deli's files under it."""
+    from deli import update
+
+    have = update.installed()
+    try:
+        want = (args.version or update.latest()).removeprefix("v")
+        if want == have:
+            print(f"deli {have} is the latest release" if not args.version else f"deli {have} is what you have")
+            return 0
+        newer = update.key(want) > update.key(have)
+        url = update.wheel_url(want)
+        if args.check:
+            print(f"deli {want} is out; you have {have}. Update with: deli update" if newer else f"deli {want} is older than your {have}")
+            return 0
+        how = update.how_installed()
+        if how.kind == "checkout":
+            raise update.UpdateError(f"this deli runs from the checkout at {how.where}, not a release; update it with: git -C {how.where} pull && make -C {how.where} reinstall")
+        if how.kind != "uv-tool":
+            raise update.UpdateError(f"deli was not installed by uv, so deli update cannot replace it; install {url} the way deli was installed")
+        print(f"{'Updating' if newer else 'Going back from'} deli {have} to {want}")
+        update.install(url)
+    except update.UpdateError as err:
+        raise CommandError(str(err)) from None
+    print(f"deli {want} is installed; what changed: https://github.com/{update.REPO}/releases/tag/v{want}")
+    return 0
+
+
 def _completion(args: argparse.Namespace) -> int:
     from deli import complete
 
@@ -2658,7 +2695,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="read or change your deli configuration (~/.config/deli/config.toml)",
         description="Read or change ~/.config/deli/config.toml, which names the printer new prints start with and says "
         "what each printer in your library is connected to and which filament and process a new print on it starts "
-        "with. Keys are printer and printers.<printer>.<host|api_key|filament|process>. "
+        "with. Keys are printer, update_check (false stops deli status looking for a newer release) and printers.<printer>.<host|api_key|filament|process>. "
         "Without a key, list everything; with a key, show it; with a key and a value, set it.",
     )
     config_.add_argument("key", nargs="?", help="such as printers.elegoo-centauri-carbon-0.6-nozzle.host")
@@ -2680,6 +2717,17 @@ def build_parser() -> argparse.ArgumentParser:
     setup_.add_argument("--shell", choices=["bash", "zsh", "fish"], help="set up tab completion for this shell (default: yours, from $SHELL)")
     setup_.add_argument("--no-completion", action="store_true", help="leave tab completion alone")
     setup_.set_defaults(run=_setup)
+
+    update_ = commands.add_parser(
+        "update",
+        help="install the latest release of deli from GitHub",
+        description="Install the latest release of deli from GitHub over this one, with uv, as the install script does; "
+        "or a particular VERSION, newer or older. --check only says whether there is a newer release. A deli running "
+        "from a checkout is left to git.",
+    )
+    update_.add_argument("version", nargs="?", help="a release to install instead of the latest, such as 0.12.0")
+    update_.add_argument("--check", action="store_true", help="say whether there is a newer release; install nothing")
+    update_.set_defaults(run=_update)
 
     completion = commands.add_parser(
         "completion",

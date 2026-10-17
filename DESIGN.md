@@ -147,13 +147,16 @@ they are done once, not while looking at a print. Only the page at the address
 (Until 0.7, the page never sent to a printer; the user changed that once the page had
 become where a print is looked over before it is sent.)
 
-## The network only where it has to be
+## No cloud between you and your printer
 
-deli uses the network to fetch profiles (OrcaSlicer's presets from GitHub, at a release,
-or a file you `deli load` from a URL) and to talk to your printer. What is fetched from a
-release is kept, since a release never changes, so after the first time choosing a
-printer is offline too. Slicing never uses the network, and shell completion never waits
-on it.
+deli sends nothing about you or your prints anywhere: no telemetry, no account, no
+service of its own that a print has to pass through. Ordinary network use is fine: it
+fetches profiles (OrcaSlicer's presets from GitHub, at a release, or a file you
+`deli load` from a URL), talks to your printer, fetches its own releases with
+`deli update`, and `deli status` looks on GitHub once a day for a newer one
+(`update_check = false` in the config stops that). What is fetched from a release is
+kept, since a release never changes, so after the first time choosing a printer is
+offline too. Slicing never uses the network, and shell completion never waits on it.
 
 ## Profiles anyone can share
 

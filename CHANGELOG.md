@@ -5,6 +5,16 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- `deli update` installs the latest release from GitHub over the deli in use, the way the
+  install script does: it finds the release by the same redirect, picks the wheel for
+  your machine and has uv install it. `deli update --check` only says whether there is
+  a newer release, and `deli update 0.11.0` installs that release, newer or older. A deli
+  running from a checkout is told to use git instead, and one installed without uv is
+  told the wheel to install. A `deli view` left running from before an update is
+  replaced by the next `deli view`. `deli status` ends with a line when a newer release
+  is out. It looks on GitHub once a day and keeps the answer, so status stays quick,
+  says nothing when GitHub cannot be reached, and does not look for a deli running from
+  a checkout. `deli config update_check false` turns the look off.
 - A skill for AI assistants, `skills/deli/SKILL.md`, in the Agent Skills format that
   Claude Code, Codex, OpenCode, Pi and others read: how deli thinks, the usual workflow,
   the rules an assistant should keep (never start a print the user did not ask for, never

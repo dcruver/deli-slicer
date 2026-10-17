@@ -1,6 +1,6 @@
 import pytest
 
-from deli import orca_install
+from deli import orca_install, update
 
 
 @pytest.fixture(autouse=True)
@@ -20,4 +20,8 @@ def no_network(monkeypatch):
     def refuse(url):
         raise orca_install.OrcaError(f"tests do not fetch {url}")
 
+    def offline(url, timeout=None):
+        raise OSError(f"tests do not fetch {url}")
+
     monkeypatch.setattr(orca_install, "_fetch", refuse)
+    monkeypatch.setattr(update, "_final_url", offline)

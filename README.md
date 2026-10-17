@@ -60,8 +60,12 @@ curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh
 
 [The script](install.sh) installs the latest release's wheel for your machine with
 [`uv`](https://docs.astral.sh/uv/), installing uv first if you don't have it; uv
-fetches Python 3.12 if you don't have that either. Run it again to upgrade, or with
-`DELI_VERSION=0.4.2` in front of `sh` for a particular release. Then run `deli setup`.
+fetches Python 3.12 if you don't have that either. Then run `deli setup`. Later,
+`deli update` installs the latest release the same way (`--check` only says whether
+there is one; `deli update 0.11.0` a particular release), or run the script again,
+with `DELI_VERSION=0.4.2` in front of `sh` for a particular release. `deli status`
+mentions a newer release when one is out, looking once a day; `deli config
+update_check false` stops it looking.
 
 ### From a release, by hand
 
@@ -611,7 +615,7 @@ check the file arrived and start it from the printer's own screen.
 |---|---|
 | `deli setup` | tab completion, your printer and its address, asked for once |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
-| `deli status` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code |
+| `deli status` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code; and, looked up once a day, whether a newer deli is out (`deli config update_check false` stops that) |
 | `deli nozzle [size]` | the nozzles of this print's printer, or put one in: its profile comes from Orca if need be, and the print moves to it |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
@@ -631,6 +635,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli send [FILE] [--print] [--plate N]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N` |
 | `deli config [key] [value]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile |
 | `deli completion bash\|zsh\|fish` | shell completion |
+| `deli update [version] [--check]` | install the latest release from GitHub over this one, or say whether there is one |
 
 `deli <command> --help` has the details.
 

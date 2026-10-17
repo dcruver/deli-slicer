@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import io
 import http.client
+import importlib.metadata
 import http.server
 import json
 import math
@@ -48,7 +49,9 @@ from deli import _engine, project, send, settings
 PAGES = Path(__file__).parent / "viewer"
 # Which deli a viewer runs: one started before deli was installed afresh may serve from files
 # that are gone, and is replaced rather than found again.
-SOURCE = str(Path(__file__).resolve().parent)
+# Which deli a viewer runs: its files and its version. `deli update` puts a new deli at the
+# same path, so a viewer started before it is one of another install, and is replaced.
+SOURCE = f"{Path(__file__).resolve().parent} {importlib.metadata.version('deli')}"
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 DEFAULT_BED = [[0, 0], [200, 0], [200, 200], [0, 200]]  # drawn when no printer is chosen
 IDLE = 600  # seconds a viewer outlives the last request; an open page asks at least once a minute, even hidden
