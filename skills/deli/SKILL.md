@@ -154,6 +154,16 @@ These keep an agent from doing what a person at the keyboard would not.
   "the filament 'generic-pla' has 220" means no config layer and not the
   print overrides it. `references/settings.md` maps common requests ("stronger",
   "smoother top", "less stringing") to the settings behind them.
+- **Order a batch the way the engine checks it.** `deli set` validates each
+  pair against the print as it stands, so `fill_pattern rectilinear
+  fill_density 100%` must set the pattern first (or in an earlier command):
+  100% is refused while the pattern is still cubic.
+- **After switching materials, check the flow cap.** A config layer can win
+  over a filament's own limit: `deli set filament_max_volumetric_speed`
+  names the layer that wins. If a printer or global layer holds a number meant
+  for another material (30 for a 0.8 nozzle, say), the TPU or PETG profile
+  underneath it is not protecting the print; set the cap for that filament
+  with `deli set --filament NAME filament_max_volumetric_speed ...`.
 - **Report what deli reported.** The print time and filament from
   `deli slice`, the size from `deli add`, and any note under the status
   block ("from your config for this printer", "was X") are what the user
