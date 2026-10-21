@@ -114,7 +114,10 @@ anything from them is counted, not listed ("23 Orca settings have no PrusaSlicer
 equivalent and were left out"), and `-v` or `deli import` gives the detail. Paths are
 shown from `~`. Every error says what to do next. Colour is used only by `deli setup`,
 lightly (bold step titles, a green check, dim hints), only when output is a terminal and
-never with `NO_COLOR` set; everything else is plain text.
+never with `NO_COLOR` set; everything else is plain text. A program reading deli, an AI
+assistant say, gets the same facts as data with `--json` on `deli status` and `deli
+slice`, and exit codes it can branch on from `deli send` (3: the printer cannot be
+reached, 4: it is busy) instead of parsing a message; the lines stay as they are.
 
 ## Build products stay out of sight
 
@@ -174,4 +177,10 @@ not chase a line-for-line match with Orca's G-code for its own sake.
 deli says what it knows and no more. The printers page lists which of Orca's printers
 convert and slice a test cube, and says plainly that slicing is not printing well and
 which printers have actually printed deli's G-code. Something only checked against a
-fake (a printer protocol, say) is described that way.
+fake (a printer protocol, say) is described that way. What the engine has to say comes
+out where it is read: PrusaSlicer's log lines, which it would print on stderr, are
+collected and shown as warnings on stdout after the figures, and `deli slice` says where
+the print lies on the bed and how far from its edges, so that no one has to work it out
+from the G-code. A refusal is checked for before it happens where the protocol allows:
+`deli send` asks the printer what it is doing, and says "the printer is printing X"
+rather than passing on an HTTP 500.

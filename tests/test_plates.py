@@ -95,7 +95,7 @@ def test_slice_writes_a_gcode_file_per_plate(job, capsys):
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "Sliced cube.stl x 5 onto 2 plates"
     assert out[1] == "  plate 1: cube.stl x 4"
-    assert out[3] == "  plate 2: cube.stl"
+    assert "  plate 2: cube.stl" in out  # after plate 1's time, footprint, clearance and warning lines
     gcode = project.fresh_gcode(project.read())
     assert {plate: path.name for plate, path in gcode.items()} == {1: "cube-plate1.gcode", 2: "cube-plate2.gcode"}
 

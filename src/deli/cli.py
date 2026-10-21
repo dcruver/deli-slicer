@@ -8,6 +8,7 @@ import importlib.metadata
 import os
 import re
 import shutil
+import json
 import sys
 from pathlib import Path
 
@@ -191,8 +192,10 @@ def _block(doc, notes: dict[str, str] | None = None) -> None:
     said = ", ".join(f"{n} {where}" for n, where in counts if n)
     rows.append(("Settings", f"{said}  (deli set lists them)" if said else "none changed", None))
     if parts:
-        if project.fresh_gcode(doc):
-            state = "current"
+        if fresh := project.fresh_gcode(doc):
+            files = [fresh[plate] for plate in sorted(fresh)]
+            where = _home_relative(files[0]) if len(files) == 1 else f"{_home_relative(files[0].parent)}/ ({', '.join(f.name for f in files)})"
+            state = f"current  {where}"
         elif project.sliced(doc):
             state = "out of date: the print has changed since it was sliced"
         else:
@@ -204,16 +207,74 @@ def _block(doc, notes: dict[str, str] | None = None) -> None:
             print(f"{'':9} {note}")
 
 
+def _print_info(doc) -> dict:
+    """The print as `deli status --json` reports it: what `_block` shows, as data."""
+    machine = project.machine(doc)
+    printer = project.selected(doc, "printer").get("name")
+    profiles = {}
+    for kind in library.KINDS:
+        chosen = project.selected(doc, kind).get("name")
+        entry: dict = {"name": chosen or None, "summary": None, "in_library": False}
+        if chosen:
+            try:
+                path = library.path_of(kind, chosen, printer if kind != "printer" else None)
+            except library.LibraryError:
+                path = None
+            if path and path.exists():
+                entry["summary"] = _SUMMARIES[kind](library.read_settings(path)) or None
+                entry["in_library"] = True
+                entry["path"] = str(path)
+        profiles[kind] = entry
+    host = None
+    if machine:
+        chosen_printer = project.chosen_profile(doc, "printer")
+        try:
+            found = send.host_for(machine, chosen_printer[1].get("host_type", "") if chosen_printer else "")
+            host = {"kind": found.kind, "url": found.url}
+        except send.SendError:
+            host = None
+    parts = project.parts(doc)
+    fresh = project.fresh_gcode(doc)
+    if not parts:
+        gcode = {"state": None, "files": {}}
+    elif fresh:
+        gcode = {"state": "current", "files": {str(plate): str(fresh[plate]) for plate in sorted(fresh)}}
+    elif project.sliced(doc):
+        gcode = {"state": "out of date", "files": {}}
+    else:
+        gcode = {"state": "not sliced", "files": {}}
+    return {
+        "directory": str(Path.cwd()),
+        "machine": machine,
+        "profiles": profiles,
+        "parts": [{"file": p["file"], "copies": project.part_count(p)} for p in parts],
+        "host": host,
+        "settings": {
+            "print": project.settings(doc),
+            "layers": [{"where": found.where, "kind": found.kind, "name": found.name, "machine": found.machine, "settings": found.settings}
+                       for found in reversed(settings.config_layers(doc))],
+        },
+        "pauses": {str(plate): project.pauses(doc, plate) for plate in sorted({1, *project.paused_plates(doc)}) if project.pauses(doc, plate)},
+        "gcode": gcode,
+    }  # fmt: skip
+
+
 def _status(args: argparse.Namespace) -> int:
     """`deli status`: the print in this directory, as the block shows it."""
     from deli import update
 
+    newer = update.newer_release()
+    if args.json:
+        info = _print_info(project.read()) if project.FILE.exists() else {"directory": str(Path.cwd()), "print": None, "default_printer": config.default_printer()}
+        info["newer_release"] = newer or None
+        print(json.dumps(info, indent=2))
+        return 0
     if not project.FILE.exists():
         default = config.default_printer()
         print("No print in this directory yet; start one with: deli add <file>" + (f". It would start on '{default}'." if default else ""))
     else:
         _block(project.read())
-    if newer := update.newer_release():
+    if newer:
         print(f"{'deli':<9} {newer} is out; you have {update.installed()}. Update with: deli update")
     return 0
 
@@ -928,15 +989,23 @@ def _show(head: str, value: str, note: str = "") -> None:
         _lines(value)
 
 
-def _value(args: argparse.Namespace) -> str:
-    """The value given, or the contents of the file named after @, its line breaks written
-    as \\n, as PrusaSlicer has them."""
-    if not args.value.startswith("@"):
-        return args.value
-    path = Path(args.value[1:]).expanduser()
-    if not path.is_file():
-        raise CommandError(f"no such file: {args.value[1:]}")
-    return path.read_text().replace("\r\n", "\n").replace("\n", "\\n")
+def _value(text: str, read: set[str] | None = None) -> str:
+    """The value given, or the contents of the file named after @ (standard input for `@-`,
+    once), its line breaks written as \\n, as PrusaSlicer has them."""
+    if not text.startswith("@"):
+        return text
+    if text == "@-":
+        if read is not None and "-" in read:
+            raise CommandError("@- reads standard input, which only one value in a command can")
+        if read is not None:
+            read.add("-")
+        content = sys.stdin.read()
+    else:
+        path = Path(text[1:]).expanduser()
+        if not path.is_file():
+            raise CommandError(f"no such file: {text[1:]}")
+        content = path.read_text()
+    return content.replace("\r\n", "\n").replace("\n", "\\n")
 
 
 def _orca_sizes(presets: orca_install.Presets | None, profile: str) -> tuple[str, dict[str, str]]:
@@ -1184,36 +1253,100 @@ def _target(args: argparse.Namespace, doc=None) -> settings.Layer | None:
     return None
 
 
-def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int:
-    """`deli set --global|--printer|--filament|--process`: a setting for every print, or
-    every print with one profile, kept in the config; the print here, if there is one, is
-    left alone, and its own settings still win."""
-    layers = settings.config_layers(doc)
-    # Whether the print here is under that layer; its own layer object stands in for the target then.
-    mine = next((found for found in layers if (found.kind, found.name, found.machine) == (target.kind, target.name, target.machine)), None)
-    overrides = project.settings(doc)
+def _mine(layers: list[settings.Layer], target: settings.Layer) -> settings.Layer | None:
+    """The print's own layer object for the config layer `target` names, when the print here
+    is under it; it then stands in for the target."""
+    return next((found for found in layers if (found.kind, found.name, found.machine) == (target.kind, target.name, target.machine)), None)
 
-    def profile_note(key: str) -> str:
-        return _profile_note(doc, key) if mine or not target.kind else _profile_note_for(target.kind, target.name, key, target.machine)
+
+def _around(doc, target: settings.Layer, layers: list[settings.Layer], key: str) -> str:
+    """What is over and under a config layer's setting for the print here, or for the
+    profile alone when the print is not under that layer."""
+    mine = _mine(layers, target)
+    overrides = project.settings(doc)
+    if mine:
+        over = [f"this print has {_short(overrides[key])}"] if key in overrides else []
+        over += [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers[layers.index(mine) + 1 :]) if key in found.settings]
+        under = [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers[: layers.index(mine)]) if key in found.settings]
+    else:
+        over = []
+        everywhere = layers[0].settings
+        under = [f"your config has {_short(everywhere[key])} for every print"] if target.kind and key in everywhere else []
+    if key in settings.kinds():
+        note = _profile_note(doc, key) if mine or not target.kind else _profile_note_for(target.kind, target.name, key, target.machine)
+        if note:
+            under.append(note)
+    else:
+        under.append("not a setting the engine knows")
+    if over:
+        return f"over it: {'; '.join(over)}" + (f"; under it: {'; '.join(under)}" if under else "")
+    return "; ".join(under)
+
+
+# A material's limit, which set for a printer or for every print would silence every
+# filament's own. The engine applies the print-level cap beside it, the lower winning.
+_FILAMENT_CAP = "filament_max_volumetric_speed"
+_PRINT_CAP = "max_volumetric_speed"
+
+
+def _set_values(args: argparse.Namespace, pairs: list[tuple[str, str]]) -> int:
+    """`deli set NAME VALUE [NAME VALUE ...]`: every pair is checked, each against the print
+    with the pairs before it applied, and all are written at once, so a batch is taken
+    whole or not at all, and a pair may rely on an earlier one (the fill pattern before a
+    density only some patterns allow)."""
+    doc = project.read()
+    target = _target(args, doc)
+    layers = settings.config_layers(doc)
+    if target:
+        mine = _mine(layers, target)
+        if mine and project.FILE.exists():
+            beneath, own = _beneath(doc), _own(doc)
+        else:
+            beneath, own = _profiles_for(target.kind, target.name, target.machine) | layers[0].settings | target.settings, _own(doc, target.settings)
+    else:
+        beneath, own = _beneath(doc) | project.settings(doc), _own(doc)
+
+    checked: dict[str, str] = {}
+    read: set[str] = set()
+    for name, text in pairs:
+        key = settings.resolve(name)
+        if target and target.kind in (None, "printer") and key == _FILAMENT_CAP:
+            raise CommandError(
+                f"{_FILAMENT_CAP} is a filament's limit, and {target.where} it would win over every filament's own; "
+                f"a hotend's limit goes in {_PRINT_CAP}, which the engine applies beside the filament's, the lower winning: "
+                f"deli set {target.option} {_PRINT_CAP} {text}"
+            )
+        checked[key] = settings.check(key, _value(text, read), beneath | checked, own | set(checked) | {key})
+
+    if target:
+        for key, value in checked.items():
+            if target.kind:
+                config.set_profile_setting(target.kind, target.name, key, value, target.machine)
+            else:
+                config.set_setting(key, value)
+            target.settings[key] = value
+        layers = settings.config_layers(doc)  # read again: the notes go by what is in the config now
+        for key, value in checked.items():
+            note = _around(doc, target, layers, key)
+            print(f"{key} = {_short(value)} {target.where}" + (f"  ({note})" if note else ""))
+        return 0
+    for key, value in checked.items():
+        project.set_setting(doc, key, value)
+    _start(doc)
+    project.write(doc)
+    for key, value in checked.items():
+        note = _under(doc, key, layers)
+        print(f"{key} = {_short(value)}" + (f"  ({note})" if note else ""))
+    return 0
+
+
+def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int:
+    """`deli set --global|--printer|--filament|--process` with no value: list a config
+    layer's settings, or show one; `_set_values` changes them."""
+    layers = settings.config_layers(doc)
 
     def around(key: str) -> str:
-        """What is over and under the target for the print here, or for the profile alone."""
-        if mine:
-            over = [f"this print has {_short(overrides[key])}"] if key in overrides else []
-            over += [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers[layers.index(mine) + 1 :]) if key in found.settings]
-            under = [f"your config has {_short(found.settings[key])} {found.where}" for found in reversed(layers[: layers.index(mine)]) if key in found.settings]
-        else:
-            over = []
-            everywhere = layers[0].settings
-            under = [f"your config has {_short(everywhere[key])} for every print"] if target.kind and key in everywhere else []
-        if key in settings.kinds():
-            if note := profile_note(key):
-                under.append(note)
-        else:
-            under.append("not a setting the engine knows")
-        if over:
-            return f"over it: {'; '.join(over)}" + (f"; under it: {'; '.join(under)}" if under else "")
-        return "; ".join(under)
+        return _around(doc, target, layers, key)
 
     if args.setting is None:
         if not target.settings:
@@ -1224,42 +1357,25 @@ def _set_in_config(args: argparse.Namespace, doc, target: settings.Layer) -> int
         return 0
 
     key = settings.resolve(args.setting)
-    if args.value is None:
-        if key in target.settings:
-            print(f"{key} = {_short(target.settings[key])} {target.where}")
-            if "\\n" in target.settings[key]:
-                _lines(target.settings[key])
-        else:
-            print(f"{key} is not changed {target.where}")
-        return 0
-
-    if mine and project.FILE.exists():
-        beneath, own = _beneath(doc), _own(doc)
+    if key in target.settings:
+        print(f"{key} = {_short(target.settings[key])} {target.where}")
+        if "\\n" in target.settings[key]:
+            _lines(target.settings[key])
     else:
-        beneath, own = _profiles_for(target.kind, target.name, target.machine) | layers[0].settings | target.settings, _own(doc, target.settings)
-    value = settings.check(key, _value(args), beneath, own)
-    if target.kind:
-        config.set_profile_setting(target.kind, target.name, key, value, target.machine)
-    else:
-        config.set_setting(key, value)
-    target.settings[key] = value
-    note = around(key)
-    print(f"{key} = {_short(value)} {target.where}" + (f"  ({note})" if note else ""))
+        print(f"{key} is not changed {target.where}")
     return 0
 
 
 def _set(args: argparse.Namespace) -> int:
     """`deli set`: nothing lists, one word shows a setting (or finds those named like it),
-    and pairs of words change settings, as many as given."""
+    and pairs of words change settings, as many as given, checked together."""
     words = args.args
     if len(words) > 2 and len(words) % 2:
         raise CommandError("settings and values come in pairs: deli set <setting> <value> [<setting> <value> ...]")
-    pairs = [(words[i], words[i + 1]) for i in range(0, len(words), 2)] if len(words) > 1 else [(words[0] if words else None, None)]
-    for setting, value in pairs:
-        args.setting, args.value = setting, value
-        if (code := _set_one(args)) != 0:
-            return code
-    return 0
+    if len(words) > 1:
+        return _set_values(args, [(words[i], words[i + 1]) for i in range(0, len(words), 2)])
+    args.setting = words[0] if words else None
+    return _set_one(args)
 
 
 def _search(doc, text: str) -> int:
@@ -1277,8 +1393,9 @@ def _search(doc, text: str) -> int:
 
 
 def _set_one(args: argparse.Namespace) -> int:
+    """`deli set` with no value: list the print's settings, or show one."""
     doc = project.read()
-    if args.setting is not None and args.value is None:
+    if args.setting is not None:
         try:
             settings.resolve(args.setting)
         except settings.SettingError:
@@ -1310,21 +1427,13 @@ def _set_one(args: argparse.Namespace) -> int:
 
     key = settings.resolve(args.setting)
     note = _under(doc, key, layers)
-    if args.value is None:
-        if key in overrides:
-            _show(key, overrides[key], note)
-        else:
-            value, source = settings.effective(doc, key)
-            print(f"{key} is not changed by this print; {source} has {_short(value)}" + (":" if "\\n" in value else ""))
-            if "\\n" in value:
-                _lines(value)
-        return 0
-
-    value = settings.check(key, _value(args), _beneath(doc) | overrides, _own(doc))
-    project.set_setting(doc, key, value)
-    _start(doc)
-    project.write(doc)
-    print(f"{key} = {_short(value)}" + (f"  ({note})" if note else ""))
+    if key in overrides:
+        _show(key, overrides[key], note)
+    else:
+        value, source = settings.effective(doc, key)
+        print(f"{key} is not changed by this print; {source} has {_short(value)}" + (":" if "\\n" in value else ""))
+        if "\\n" in value:
+            _lines(value)
     return 0
 
 
@@ -1456,14 +1565,75 @@ def _write_footer(gcode: Path, footer: str, layers: int) -> None:
 
 
 def _slice(args: argparse.Namespace) -> int:
-    _slice_print(project.read(), Path(args.output) if args.output else None)
+    _slice_print(project.read(), Path(args.output) if args.output else None, as_json=args.json)
     return 0
 
 
-def _slice_print(doc, copy_to: Path | None = None) -> dict[int, Path]:
+def _length(value: float) -> str:
+    return f"{round(value, 1):g}"
+
+
+def _once_each(lines: list[str]) -> list[str]:
+    """Each distinct line once, in order, with how many times it came when more than once."""
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+    return [line if n == 1 else f"{line} ({n} times)" for line, n in counts.items()]
+
+
+def _plate_report(result, plate: int, path: Path, on: list[tuple[str, int]]) -> dict:
+    """One plate's figures, as `deli slice --json` gives them and the lines are made from:
+    time and filament, the pauses, where the print lies on the bed and how far from its
+    edges, and the warnings."""
+    (px0, py0, px1, py1), (fx0, fy0, fx1, fy1), (bx0, by0, bx1, by1) = result.parts, result.footprint, result.bed
+    return {
+        "plate": plate,
+        "gcode": str(path),
+        "parts": [{"file": file, "copies": n} for file, n in on],
+        "print_time": round(result.print_time),
+        "filament_mm": round(result.filament_mm, 1),
+        "filament_g": round(result.filament_g, 1) if result.filament_g else None,
+        "layers": result.layers,
+        "height": round(result.height, 2),
+        "pauses": [{"after_layer": layer, "height": round(height, 2)} for layer, height in result.pauses],
+        "parts_extent": {"x": [round(px0, 1), round(px1, 1)], "y": [round(py0, 1), round(py1, 1)]},
+        "footprint": {"x": [round(fx0, 1), round(fx1, 1)], "y": [round(fy0, 1), round(fy1, 1)], "includes": result.around or None},
+        "bed": {"x": [round(bx0, 1), round(bx1, 1)], "y": [round(by0, 1), round(by1, 1)]},
+        "clearance": {"left": round(fx0 - bx0, 1), "right": round(bx1 - fx1, 1), "front": round(fy0 - by0, 1), "back": round(by1 - fy1, 1)},
+        "warnings": [*result.warnings, *_once_each(result.logged)],
+    }
+
+
+def _report_lines(report: dict) -> list[str]:
+    used = f"{report['filament_mm'] / 1000:.2f} m of filament"
+    if report["filament_g"]:
+        used += f", {report['filament_g']:.1f} g"
+    lines = [f"{_duration(report['print_time'])}, {used}"]
+    for pause in report["pauses"]:
+        lines.append(f"pauses after layer {pause['after_layer']}, at {pause['height']:g} mm")
+    (px0, px1), (py0, py1) = report["parts_extent"]["x"], report["parts_extent"]["y"]
+    (fx0, fx1), (fy0, fy1) = report["footprint"]["x"], report["footprint"]["y"]
+    around = report["footprint"]["includes"]
+    footprint = f"footprint x {_length(fx0)} to {_length(fx1)}, y {_length(fy0)} to {_length(fy1)} mm"
+    if around and (fx0, fy0, fx1, fy1) != (px0, py0, px1, py1):
+        footprint += f", {around} included (the parts {_length(px0)} to {_length(px1)}, {_length(py0)} to {_length(py1)})"
+    lines.append(footprint)
+    clear = report["clearance"]
+    if all(v == clear["left"] for v in clear.values()):
+        lines.append(f"clear of the bed's edges by {_length(clear['left'])} mm all round")
+    else:
+        lines.append("clear of the bed's edges by " + ", ".join(f"{_length(clear[side])}{' mm' if side == 'left' else ''} {side}" for side in ("left", "right", "front", "back")))
+    for side, short in clear.items():
+        if short < 0:
+            lines.append(f"warning: the {around or 'print'} goes {_length(-short)} mm past the bed's {side} edge")
+    lines += [f"warning: {warning}" for warning in report["warnings"]]
+    return lines
+
+
+def _slice_print(doc, copy_to: Path | None = None, as_json: bool = False) -> dict[int, Path]:
     """Slice the print into G-code in deli's cache, one file per plate, where `deli send`
     and `deli view` find it, and with `copy_to` (a file, or a directory to put them in) a
-    copy there too."""
+    copy there too. The figures go out as lines, or with `as_json` as one JSON object."""
     parts = _parts_of(doc)
     merged: dict[str, str] = {}
     for kind in library.KINDS:
@@ -1508,28 +1678,11 @@ def _slice_print(doc, copy_to: Path | None = None) -> dict[int, Path]:
         outputs[plate] = output
     project.keep_gcode(outputs, sources)
 
-    def report(result, indent: str) -> None:
-        used = f"{result.filament_mm / 1000:.2f} m of filament"
-        if result.filament_g:
-            used += f", {result.filament_g:.1f} g"
-        print(f"{indent}{_duration(result.print_time)}, {used}")
-        for layer, height in result.pauses:
-            print(f"{indent}pauses after layer {layer}, at {round(height, 2):g} mm")
-        for warning in result.warnings:
-            print(f"{indent}warning: {warning}")
-
-    if count == 1:
-        print(f"Sliced {what}")
-        report(results[1], "  ")
-    else:
-        print(f"Sliced {what} onto {count} plates")
-        for plate in range(1, count + 1):
-            on = [(p["file"], copies.count(plate)) for p, copies in zip(parts, on_plates) if plate in copies]
-            if not on:
-                print(f"  plate {plate}: nothing on it")
-                continue
-            print(f"  plate {plate}: " + ", ".join(f"{file}{_copies(n)}" for file, n in on))
-            report(results[plate], "    ")
+    reports = {}
+    for plate in sorted(results):
+        on = [(p["file"], copies.count(plate)) for p, copies in zip(parts, on_plates) if plate in copies]
+        reports[plate] = _plate_report(results[plate], plate, outputs[plate], on)
+    copies_written = []
     if copy_to is not None:
         for output in outputs.values():
             target = copy_to / output.name if copy_to.is_dir() else copy_to
@@ -1537,7 +1690,30 @@ def _slice_print(doc, copy_to: Path | None = None) -> dict[int, Path]:
                 shutil.copyfile(output, target)
             except OSError as err:
                 raise CommandError(f"sliced, but cannot write {target}: {err.strerror}") from None
-            print(f"  G-code written to {target}")
+            copies_written.append(target)
+
+    if as_json:
+        print(json.dumps({
+            "parts": [{"file": p["file"], "copies": project.part_count(p)} for p in parts],
+            "plates": list(reports.values()),
+            "copies": [str(target) for target in copies_written],
+        }, indent=2))  # fmt: skip
+        return outputs
+    if count == 1:
+        print(f"Sliced {what}")
+        for line in _report_lines(reports[1]):
+            print(f"  {line}")
+    else:
+        print(f"Sliced {what} onto {count} plates")
+        for plate in range(1, count + 1):
+            if plate not in reports:
+                print(f"  plate {plate}: nothing on it")
+                continue
+            print(f"  plate {plate}: " + ", ".join(f"{on['file']}{_copies(on['copies'])}" for on in reports[plate]["parts"]))
+            for line in _report_lines(reports[plate]):
+                print(f"    {line}")
+    for target in copies_written:
+        print(f"  G-code written to {target}")
     return outputs
 
 
@@ -1912,6 +2088,8 @@ def _send(args: argparse.Namespace) -> int:
             paths = [sliced[args.plate]]
         elif args.start and len(sliced) > 1:
             raise CommandError(f"the print has {len(sliced)} plates, and a printer prints one at a time; say which to start with --plate N")
+        elif args.name and len(sliced) > 1:
+            raise CommandError(f"the print has {len(sliced)} plates, a file each, and --name names one; say which with --plate N")
         else:
             paths = [sliced[plate] for plate in sorted(sliced)]
 
@@ -1924,8 +2102,9 @@ def _send(args: argparse.Namespace) -> int:
             print(f"  {sent / 1e6:.1f} of {total / 1e6:.1f} MB", flush=True)
 
     for path in paths:
-        print(f"Sending {path.name} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
-        send.send(host, path, start=args.start, level=args.level, progress=progress, printer=printer_name)
+        name = send.upload_name(args.name, path)
+        print(f"Sending {path.name}{f' as {name}' if name != path.name else ''} ({_size_of(path)}) to the {host.kind} host at {host.url}", flush=True)
+        send.send(host, path, start=args.start, level=args.level, progress=progress, printer=printer_name, name=args.name)
     if args.start:
         print("Printing started.")
     elif len(paths) > 1:
@@ -2006,7 +2185,7 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
-ENGINE_API = 11  # must match API_VERSION in _engine.cpp
+ENGINE_API = 12  # must match API_VERSION in _engine.cpp
 
 
 def _styled(code: str):
@@ -2481,6 +2660,7 @@ def build_parser() -> argparse.ArgumentParser:
         "`deli send` would send it, how many settings it changes and where, and whether its G-code is current. "
         "`deli printer`, `deli filament`, `deli process` and `deli nozzle` show the same after a change.",
     )
+    status.add_argument("--json", action="store_true", help="the same as JSON: profiles, parts, host, settings by layer, pauses, the G-code's state and files")
     status.set_defaults(run=_status)
 
     nozzle = commands.add_parser(
@@ -2507,7 +2687,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     set_.add_argument("args", nargs="*", metavar="setting [value]",
                       help="a setting's name, such as fill_density, or a short name, such as infill, and its new value, or @FILE to "
-                      "read the value from a file, G-code say; several pairs at once. A name alone shows the setting, or, when "
+                      "read the value from a file, G-code say, or @- from standard input; several pairs at once, checked together "
+                      "and written only when every one passes. A name alone shows the setting, or, when "
                       "no setting is named so, lists those with it in their name")
     where = set_.add_mutually_exclusive_group()
     where.add_argument("--global", dest="everywhere", action="store_true", help="for every print, in your config, not this print")
@@ -2637,6 +2818,7 @@ def build_parser() -> argparse.ArgumentParser:
         "copy where you want it, to put on an SD card, say.",
     )
     slice_.add_argument("-o", "--output", metavar="FILE|DIR", help="also write the G-code here: a file, or a directory to put it in (. for this one)")
+    slice_.add_argument("--json", action="store_true", help="the figures as JSON instead: per plate, the G-code's path, time, filament, layers, where it lies on the bed and the clearance to each edge, and warnings")
     slice_.set_defaults(run=_slice)
 
     view_ = commands.add_parser(
@@ -2688,6 +2870,7 @@ def build_parser() -> argparse.ArgumentParser:
     send_.add_argument("--print", dest="start", action="store_true", help="start printing once it has arrived")
     send_.add_argument("--level", action="store_true", help="with --print on an Elegoo printer: level the bed first")
     send_.add_argument("--plate", type=_plate_number, metavar="N", help="send only this plate's G-code, in a print with several (needed with --print)")
+    send_.add_argument("--name", metavar="NAME", help="what to call the file on the printer (.gcode is added when it has no extension), when its own name is taken or says too little")
     send_.set_defaults(run=_send)
 
     config_ = commands.add_parser(
@@ -2808,4 +2991,4 @@ def main(argv: list[str] | None = None) -> int:
         return args.run(args)
     except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, config.ConfigError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)
-        return 1
+        return getattr(err, "exit_code", 1)

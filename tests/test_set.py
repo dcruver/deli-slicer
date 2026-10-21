@@ -714,3 +714,81 @@ def test_unset_lists_without_a_name_and_takes_several(project, capsys):
     assert main(["unset", "infill", "walls"]) == 0
 
     assert "settings" not in tomllib.loads(project.read_text())
+
+
+# ---------------------------------------------------------------- a batch is taken whole
+
+
+def test_a_batch_is_checked_as_a_whole_so_a_pair_may_rely_on_an_earlier_one(project, capsys):
+    main(["printer", MK3])
+    main(["process", PROCESS])
+    capsys.readouterr()
+
+    assert main(["set", "infill_pattern", "rectilinear", "infill", "100%"]) == 0  # 100% needs the pattern set first
+
+    assert changed(project) == {"fill_pattern": "rectilinear", "fill_density": "100%"}
+    assert capsys.readouterr().out.splitlines() == [f"fill_pattern = rectilinear  (the process '{PROCESS}' has gyroid)", f"fill_density = 100%  (the process '{PROCESS}' has 15%)"]
+
+
+def test_a_batch_with_a_bad_pair_writes_nothing(project, capsys):
+    main(["printer", MK3])
+    main(["process", PROCESS])
+
+    assert main(["set", "walls", "3", "infill", "100%"]) == 1  # the second pair fails: gyroid cannot be solid
+
+    assert "settings" not in tomllib.loads(project.read_text())
+    assert "100% density" in capsys.readouterr().err
+
+
+def test_a_batch_for_the_config_is_taken_whole_too(project, tmp_path, mk3, capsys):
+    main(["printer", mk3])
+    main(["process", PROCESS])
+
+    assert main(["set", "--printer", mk3, "walls", "3", "infill", "100%"]) == 1
+    config_file = tmp_path / "config" / "deli" / "config.toml"
+    assert not config_file.exists() or "perimeters" not in config_file.read_text()  # nothing of the batch was written
+
+    assert main(["set", "--printer", mk3, "infill_pattern", "rectilinear", "infill", "100%"]) == 0
+    assert capsys.readouterr().out.splitlines()[-2:] == [f"fill_pattern = rectilinear for every print on '{mk3}'  (the process '{PROCESS}' has gyroid)", f"fill_density = 100% for every print on '{mk3}'  (the process '{PROCESS}' has 15%)"]
+
+
+def test_a_value_can_come_from_standard_input(project, monkeypatch, capsys):
+    import io
+
+    main(["printer", MK3])
+    monkeypatch.setattr("sys.stdin", io.StringIO("G28\nM104 S200\n"))
+
+    assert main(["set", "start_gcode", "@-"]) == 0
+
+    assert changed(project)["start_gcode"] == "G28\nM104 S200\n"  # a multi-line string in deli.toml, read back with its line breaks
+
+
+def test_standard_input_is_read_for_one_value_only(project, monkeypatch, capsys):
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("G28\n"))
+
+    assert main(["set", "start_gcode", "@-", "end_gcode", "@-"]) == 1
+    assert "only one value" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- the flow cap belongs to a filament
+
+
+def test_a_filaments_flow_cap_is_refused_for_a_printer_or_every_print_and_the_print_level_cap_is_named(project, tmp_path, mk3, capsys):
+    assert main(["set", "--printer", mk3, "filament_max_volumetric_speed", "30"]) == 1
+    err = capsys.readouterr().err
+    assert "filament_max_volumetric_speed is a filament's limit" in err
+    assert f"deli set --printer {mk3} max_volumetric_speed 30" in err
+
+    assert main(["set", "--global", "filament_max_volumetric_speed", "30"]) == 1
+    assert "deli set --global max_volumetric_speed 30" in capsys.readouterr().err
+    assert not (tmp_path / "config" / "deli" / "config.toml").exists() or "volumetric" not in (tmp_path / "config" / "deli" / "config.toml").read_text()
+
+    assert main(["set", "--printer", mk3, "max_volumetric_speed", "30"]) == 0  # the hotend's cap, which the engine applies beside the filament's
+
+
+def test_a_filaments_flow_cap_can_still_be_set_for_a_filament_or_a_print(project, trio, capsys):
+    assert main(["set", "--filament", FILAMENT, "filament_max_volumetric_speed", "3.5"]) == 0
+    assert main(["set", "filament_max_volumetric_speed", "4"]) == 0
+    assert changed(project) == {"filament_max_volumetric_speed": 4}

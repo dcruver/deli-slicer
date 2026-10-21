@@ -61,8 +61,12 @@ Process   0.20mm-standard  layers 0.2 mm, infill 15% cubic, perimeters 3
 Parts     3DBenchy.stl
 Sends to  the moonraker host at http://voron.local
 Settings  2 by this print  (deli set lists them)
-G-code    current
+G-code    current  ~/.cache/deli/gcode/benchy-3f2a9c1d8e7b/3DBenchy.gcode
 ```
+
+`deli status --json` gives the same as one JSON object (profiles, parts, host,
+settings by layer, pauses, the G-code's state and files), when you would
+rather parse than read.
 
 The summaries on the profile lines are the profiles' own values; what the
 print changes is counted on the Settings line and listed by `deli set`.
@@ -77,8 +81,10 @@ printer set up yet: see "Setting up a printer" below.
 ## The usual workflow
 
 Every command below prints what it did, or an error on stderr with exit code 1
-that says what to do next. Read the output; it is written for someone who
-does not know deli, and it is the ground truth for what happened.
+that says what to do next (`deli send` exits 3 when the printer cannot be
+reached and 4 when it is busy, so you can tell those apart without parsing).
+Read the output; it is written for someone who does not know deli, and it is
+the ground truth for what happened.
 
 1. **Add the model.** `deli add part.stl` (also `--count 4` for copies).
    It prints the part's size in mm, a quick sanity check that the file is the
@@ -89,8 +95,13 @@ does not know deli, and it is the ground truth for what happened.
    one. Without a name, each command lists what is available for the print's
    printer and marks the one in use.
 3. **Change settings.** `deli set infill 20% walls 3` takes pairs, checks
-   each name and value against the engine, and prints each with what the
-   profile had. `deli set` alone lists what the print changes; `deli unset
+   them together against the engine, each with the pairs before it applied,
+   writes them only when every one passes, and prints each with what the
+   profile had. So a batch changes nothing when one pair is wrong, and a pair
+   may rely on an earlier one: `deli set infill_pattern rectilinear infill
+   100%` in that order, since 100% needs a pattern that can be solid. A long
+   value such as start G-code can come from a file (`@start.gcode`) or from
+   standard input (`@-`). `deli set` alone lists what the print changes; `deli unset
    <name>` goes back to the profile. A print is meant to hold only what it
    changes, so when a value the user asks for is what the profile already
    has, say so rather than recording it; pin it only when they want it kept
@@ -102,20 +113,28 @@ does not know deli, and it is the ground truth for what happened.
    With more than one part, the part's name goes first (`deli rotate bracket 90`).
    Axes are the bed's as the part lies: z is up. Parts without a place are
    arranged automatically; `deli arrange` forgets every placing.
-5. **Slice.** `deli slice` prints the time and filament for each plate:
+5. **Slice.** `deli slice` prints the time and filament for each plate, where
+   the print lies on the bed, and any warnings:
 
    ```
    Sliced 3DBenchy.stl
      1 h 42 min, 12.9 m of filament, 38.5 g
+     footprint x 142.3 to 207.7, y 150.6 to 199.4 mm, brim included (the parts 145 to 205, 160 to 190)
+     clear of the bed's edges by 142.3 mm left, 142.3 right, 150.6 front, 150.6 back
    ```
 
-   Report these to the user; they are what most people slice to find out.
-   Parts that do not fit on the bed spill onto further plates, one G-code file
-   each, and `deli slice` says what is on each. Read stderr as well as
-   stdout: PrusaSlicer's engine prints its own warnings there (organic
-   supports can report a "lost branch" on awkward geometry) and deli still
-   says "Sliced". A warning like that is a reason to try `snug` or `grid`
-   and compare, and to tell the user.
+   Report the time and filament to the user; they are what most people slice
+   to find out. The footprint is everything the first layer lays down, brim
+   and skirt included, so it answers whether a part fits with its brim and
+   how close it comes to an edge; `deli slice --json` has the same numbers as
+   data (`footprint`, `parts_extent`, `bed`, `clearance`, per plate). Parts
+   that do not fit on the bed spill onto further plates, one G-code file
+   each, and `deli slice` says what is on each. Warnings come after the
+   figures as `warning:` lines on stdout: PrusaSlicer's own (organic
+   supports can report a lost branch on awkward geometry, each message once
+   with how many times it came) and deli's (the brim going past an edge),
+   and deli still says "Sliced". A support warning is a reason to try `snug`
+   or `grid` and compare, and to tell the user.
 6. **Show it.** `deli view` opens the print in the user's browser, served in
    the background, and returns at once. It is for the human, not for you: you
    cannot see it. With `--no-browser` it prints the address instead.
@@ -123,7 +142,12 @@ does not know deli, and it is the ground truth for what happened.
    slicing first if needed. `deli send --print` also starts the print. When
    the status block says `Sends to  nowhere yet`, the printer has a profile
    but no address: tell the user the config line that sets it (the block
-   prints it) and ask for the address rather than guessing one.
+   prints it) and ask for the address rather than guessing one. A printer
+   that is printing is not sent to: `deli send` asks first and says what it
+   is printing and how far along, with exit code 4; tell the user and stop
+   rather than retrying. `--name NAME` calls the file something else on the
+   printer when its name is taken or says too little; do not rename or copy
+   the model file for that.
 
 ## Rules of engagement
 
@@ -154,16 +178,19 @@ These keep an agent from doing what a person at the keyboard would not.
   "the filament 'generic-pla' has 220" means no config layer and not the
   print overrides it. `references/settings.md` maps common requests ("stronger",
   "smoother top", "less stringing") to the settings behind them.
-- **Order a batch the way the engine checks it.** `deli set` validates each
-  pair against the print as it stands, so `fill_pattern rectilinear
-  fill_density 100%` must set the pattern first (or in an earlier command):
-  100% is refused while the pattern is still cubic.
-- **After switching materials, check the flow cap.** A config layer can win
-  over a filament's own limit: `deli set filament_max_volumetric_speed`
-  names the layer that wins. If a printer or global layer holds a number meant
-  for another material (30 for a 0.8 nozzle, say), the TPU or PETG profile
-  underneath it is not protecting the print; set the cap for that filament
-  with `deli set --filament NAME filament_max_volumetric_speed ...`.
+- **Two flow caps, and which layer each belongs to.**
+  `filament_max_volumetric_speed` is the material's limit and belongs to a
+  filament (the profile's own, or `deli set --filament NAME ...` to tune it on
+  this printer); `max_volumetric_speed` is the hotend's limit, whatever the
+  material, and belongs to the printer (`deli set --printer NAME
+  max_volumetric_speed 30`). The engine applies both, the lower winning, so
+  neither silences the other. `deli set` refuses the filament's cap for a
+  printer or for every print, where it would win over every filament's own;
+  a config made before that refusal may still hold one, and `deli set
+  filament_max_volumetric_speed` names the layer that wins, so after
+  switching to TPU or PETG look at that line: a printer or global layer there
+  means the material's profile is not protecting the print, and the number
+  should move to `max_volumetric_speed` on the printer.
 - **Report what deli reported.** The print time and filament from
   `deli slice`, the size from `deli add`, and any note under the status
   block ("from your config for this printer", "was X") are what the user

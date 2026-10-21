@@ -49,7 +49,21 @@ Progress = Callable[[int, int], None]  # bytes sent so far, bytes in all
 
 
 class SendError(Exception):
-    """The host is not set, cannot be reached, or refused the file."""
+    """The host is not set, or refused the file: something in what was asked. Exit code 1."""
+
+    exit_code = 1
+
+
+class Unreachable(SendError):
+    """The printer did not answer. Exit code 3, so a script can tell it from a mistake."""
+
+    exit_code = 3
+
+
+class Busy(SendError):
+    """The printer is printing, or otherwise not free to take the file or start it. Exit code 4."""
+
+    exit_code = 4
 
 
 @dataclass
@@ -131,7 +145,7 @@ def _request(method: str, url: str, body: bytes | None = None, headers: dict[str
         return err.code, err.read()
     except (urllib.error.URLError, OSError) as err:
         reason = getattr(err, "reason", err)
-        raise SendError(f"cannot reach {url}: {reason}") from None
+        raise Unreachable(f"cannot reach {url}: {reason}") from None
 
 
 def _post_file(url: str, fields: dict[str, str], filename: str, data: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
@@ -148,7 +162,47 @@ def _elegoo_check(host: Host) -> None:
         raise SendError(f"{host.url} does not answer like an Elegoo printer (HTTP {status})")
 
 
-def _elegoo_upload(host: Host, path: Path, progress: Progress) -> None:
+# What an Elegoo printer says it is doing, in `CurrentStatus` (SDCP; 8 is what the
+# Centauri reports while it checks a file it was sent).
+_ELEGOO_BUSY = {1: "printing", 2: "receiving a file", 3: "running an exposure test", 4: "testing its devices", 8: "checking a file it was sent"}
+
+
+def _elegoo_status(host: Host) -> dict:
+    """The printer's status message, asked for over its websocket; empty when it does not
+    answer in time (the upload is then tried, and the printer says itself if it will not)."""
+    try:
+        ws = _WebSocket(host.hostname, SDCP_PORT, "/websocket", timeout=5)
+    except SendError:
+        return {}
+    try:
+        ws.send(_sdcp(0, {}))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            message = _parse(ws.receive())
+            if "CurrentStatus" in message.get("Status", {}):
+                return message["Status"]
+    except (SendError, OSError):
+        pass
+    finally:
+        ws.close()
+    return {}
+
+
+def _elegoo_refuse_if_busy(host: Host) -> None:
+    """Say what the printer is doing when it would refuse a file, instead of letting it
+    answer the upload with an HTTP 500 that says nothing."""
+    status = _elegoo_status(host)
+    doing = next((what for code, what in _ELEGOO_BUSY.items() if code in status.get("CurrentStatus", [])), None)
+    if not doing:
+        return
+    info = status.get("PrintInfo", {})
+    if doing == "printing" and info.get("Filename"):
+        name = str(info["Filename"]).rsplit("/", 1)[-1]
+        doing += f" {name}" + (f", layer {info['CurrentLayer']} of {info['TotalLayer']}" if info.get("TotalLayer") else "")
+    raise Busy(f"the printer is {doing}; it takes a file once it is idle")
+
+
+def _elegoo_upload(host: Host, path: Path, name: str, progress: Progress) -> None:
     data = path.read_bytes()
     md5 = hashlib.md5(data).hexdigest().upper()  # noqa: S324 - the printer's checksum, not security
     upload_id = str(uuid.uuid4())
@@ -156,7 +210,7 @@ def _elegoo_upload(host: Host, path: Path, progress: Progress) -> None:
     for offset in range(0, max(total, 1), CHUNK):
         chunk = data[offset : offset + CHUNK]
         fields = {"Check": "1", "S-File-MD5": md5, "Offset": str(offset), "Uuid": upload_id, "TotalSize": str(total)}
-        body, content_type = _multipart(fields, "File", path.name, chunk)
+        body, content_type = _multipart(fields, "File", name, chunk)
         for tries_left in range(RETRIES, -1, -1):  # the piece's offset and the upload's id make sending it again safe
             try:
                 status, answer = _request("POST", host.url + "/uploadFile/upload", body, {"Content-Type": content_type})
@@ -180,9 +234,9 @@ def _elegoo_upload(host: Host, path: Path, progress: Progress) -> None:
 class _WebSocket:
     """Just enough of RFC 6455 to talk SDCP: text frames, one at a time."""
 
-    def __init__(self, hostname: str, port: int, path: str):
+    def __init__(self, hostname: str, port: int, path: str, timeout: float | None = None):
         try:
-            self.sock = socket.create_connection((hostname, port), timeout=TIMEOUT)
+            self.sock = socket.create_connection((hostname, port), timeout=timeout or TIMEOUT)
         except OSError as err:
             raise SendError(f"cannot open the printer's websocket at {hostname}:{port}: {err}") from None
         key = base64.b64encode(os.urandom(16)).decode()
@@ -300,7 +354,8 @@ def _elegoo_start(host: Host, filename: str, level: bool) -> None:
             ack = data.get("Data", {}).get("Ack")
             if ack == 0:
                 return
-            raise SendError(f"the printer did not start the print: {_START_PRINT_ACKS.get(ack, f'error code {ack}')}")
+            said = f"the printer did not start the print: {_START_PRINT_ACKS.get(ack, f'error code {ack}')}"
+            raise Busy(said) if ack == 1 else SendError(said)
         raise SendError("the printer did not answer the start command within 30 s")
     finally:
         ws.close()
@@ -321,21 +376,39 @@ def _key_header() -> dict[str, str]:
     return {"X-Api-Key": api_key()} if api_key() else {}
 
 
-def _moonraker_upload(host: Host, path: Path, start: bool, progress: Progress) -> None:
+def _moonraker_printing(host: Host) -> str | None:
+    """What Moonraker's printer is printing, or paused on, by its file name; None when it is free."""
+    status, answer = _request("GET", host.url + "/printer/objects/query?print_stats", headers=_key_header())
+    if status != 200:
+        return None
+    stats = _parse(answer.decode(errors="replace")).get("result", {}).get("status", {}).get("print_stats", {})
+    if stats.get("state") in ("printing", "paused"):
+        return f"{stats.get('state')} {stats.get('filename') or 'a file'}"
+    return None
+
+
+def _moonraker_upload(host: Host, path: Path, name: str, start: bool, progress: Progress) -> None:
+    # A file can go up while another prints, but a print cannot start then.
+    if start and (doing := _moonraker_printing(host)):
+        raise Busy(f"the printer is {doing}; send without --print to upload only")
     data = path.read_bytes()
     fields = {"root": "gcodes", "print": "true" if start else "false"}
-    status, answer = _post_file(host.url + "/server/files/upload", fields, path.name, data, _key_header())
+    status, answer = _post_file(host.url + "/server/files/upload", fields, name, data, _key_header())
+    if status == 403:
+        raise Busy(f"the printer is printing {name}, which cannot be replaced until it is done; send it under another name with --name")
     if status != 201 and status != 200:
         raise SendError(f"Moonraker refused the upload (HTTP {status}): {answer[:200].decode(errors='replace')}")
     progress(len(data), len(data))
 
 
-def _octoprint_upload(host: Host, path: Path, start: bool, progress: Progress) -> None:
+def _octoprint_upload(host: Host, path: Path, name: str, start: bool, progress: Progress) -> None:
     if not api_key():
         raise SendError("OctoPrint needs an API key; set DELI_API_KEY")
     data = path.read_bytes()
     fields = {"select": "true" if start else "false", "print": "true" if start else "false"}
-    status, answer = _post_file(host.url + "/api/files/local", fields, path.name, data, _key_header())
+    status, answer = _post_file(host.url + "/api/files/local", fields, name, data, _key_header())
+    if status == 409:
+        raise Busy("the printer is printing, or not ready: OctoPrint will not take the file now" if not start else "the printer is printing, or not ready, so OctoPrint will not start another; send without --print to upload only")
     if status != 201:
         raise SendError(f"OctoPrint refused the upload (HTTP {status}): {answer[:200].decode(errors='replace')}")
     progress(len(data), len(data))
@@ -344,20 +417,34 @@ def _octoprint_upload(host: Host, path: Path, start: bool, progress: Progress) -
 # ---------------------------------------------------------------- entry point
 
 
+def upload_name(name: str | None, path: Path) -> str:
+    """What the file is called on the printer: `name`, with `.gcode` added when it has no
+    extension, or the file's own name."""
+    if not name:
+        return path.name
+    name = name.strip()
+    if "/" in name or "\\" in name or name in ("", ".", ".."):
+        raise SendError(f"'{name}' is not a file name the printer can keep; give one without a path")
+    return name if "." in name else name + ".gcode"
+
+
 def send(host: Host, path: Path, start: bool = False, level: bool = False, progress: Progress = lambda sent, total: None,
-         printer: str | None = None) -> None:
-    """Upload `path` to the printer and, if `start`, begin printing it. `printer` is the chosen
-    printer's name, for the API key the config may hold for it."""
+         printer: str | None = None, name: str | None = None) -> None:
+    """Upload `path` to the printer as `name` (its own name when None) and, if `start`, begin
+    printing it. `printer` is the chosen printer's name, for the API key the config may
+    hold for it."""
     global _printer_name
     _printer_name = printer
+    name = upload_name(name, path)
     if host.kind == "elegoo":
         _elegoo_check(host)
-        _elegoo_upload(host, path, progress)
+        _elegoo_refuse_if_busy(host)
+        _elegoo_upload(host, path, name, progress)
         if start:
-            _elegoo_start(host, path.name, level)
+            _elegoo_start(host, name, level)
     elif host.kind == "moonraker":
-        _moonraker_upload(host, path, start, progress)
+        _moonraker_upload(host, path, name, start, progress)
     elif host.kind == "octoprint":
-        _octoprint_upload(host, path, start, progress)
+        _octoprint_upload(host, path, name, start, progress)
     else:
         raise SendError(f"deli cannot send to a {host.kind} host")

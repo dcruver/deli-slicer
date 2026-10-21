@@ -383,7 +383,7 @@ deli mirror x                         # or its mirror image, for the other side 
 deli move 60 80                       # put it there instead of in the middle
 deli pause 40                         # pause once layer 40 is done: change the filament for a two-colour boat
 deli view                             # the Benchy on the bed in your browser, live; the shell stays free
-deli slice                            # how long it takes and how much filament; the view then shows it layer by layer
+deli slice                            # how long it takes, how much filament, and where it lies on the bed; the view then shows it layer by layer
 deli send                             # uploads it, slicing first if needed; add --print to start printing
 deli status                           # the print at a glance: printer, filament, process, parts, where it sends, settings, G-code
 ```
@@ -391,6 +391,11 @@ deli status                           # the print at a glance: printer, filament
 `deli printer`, `deli filament`, `deli process` and `deli nozzle` show the same block
 after a change, with a note under each row that changed: what it was, and why the
 filament or process followed the printer.
+
+Several pairs go in one command, `deli set infill_pattern rectilinear infill 100%`,
+checked together, each against the print with the pairs before it applied, and written
+only when every one passes: a density only some patterns allow may follow its pattern,
+and a batch with a bad pair changes nothing.
 
 `deli set` with nothing after it lists the settings this print changes, each with what
 its profile had, so the few things you changed are never lost among the hundreds you
@@ -465,6 +470,11 @@ deli set --printer voron                             # list a profile's
 A filament's or process's settings are the printer's, as the filament itself is: the
 pressure advance and the volumetric cap that suit a material in one hotend are not
 right in another, so they are kept under the printer (`printers.voron.filaments.generic-pla.settings`).
+A hotend's own limit, the most it can melt whatever the material, is a different
+setting, `max_volumetric_speed`, and goes under the printer (`deli set --printer voron
+max_volumetric_speed 30`): the engine applies it beside the filament's, the lower
+winning. `deli set --printer` refuses the filament's cap, which there would silence
+every filament's own.
 
 They go in your config beside Orca's profile, not into it, so every print with that
 profile has them, and a `deli import` of a newer Orca profile keeps them. This is deli's
@@ -615,14 +625,14 @@ check the file arrived and start it from the printer's own screen.
 |---|---|
 | `deli setup` | tab completion, your printer and its address, asked for once |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
-| `deli status` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code; and, looked up once a day, whether a newer deli is out (`deli config update_check false` stops that) |
+| `deli status [--json]` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code and its file; and, looked up once a day, whether a newer deli is out (`deli config update_check false` stops that). `--json` gives the same as data |
 | `deli nozzle [size]` | the nozzles of this print's printer, or put one in: its profile comes from Orca if need be, and the print moves to it |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
 | `deli add <file> [--count N]` | add a model, or more copies of it |
 | `deli remove <part> [--count N\|--copy N]` | take a part out, or its last N copies, or one copy by its number |
-| `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file |
+| `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; several pairs at once, checked together and written only when every one passes; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file, `@-` from standard input |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis; the axis is the bed's, as the part lies once rotated |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
@@ -630,9 +640,9 @@ check the file arrived and start it from the printer's own screen.
 | `deli move [part] [--copy N] <x> <y>` | where the part's middle goes on the bed, or one copy's; `z -0.25` sinks it, `plate 2` keeps it to plate 2, `auto` has it arranged again. `deli translate` is the same command |
 | `deli arrange [--plate N]` | arrange every part and copy again, or one plate's, forgetting where they were moved |
 | `deli pause [off] [layer ...] [--plate N]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
-| `deli slice [-o FILE\|DIR]` | slice, and say how long it takes and how much filament; `-o` writes a copy of the G-code. Parts that do not fit go on further plates, a file each |
+| `deli slice [-o FILE\|DIR] [--json]` | slice, and say how long it takes, how much filament, where it lies on the bed and how far from the edges; `-o` writes a copy of the G-code, `--json` gives the figures as data. Parts that do not fit go on further plates, a file each |
 | `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
-| `deli send [FILE] [--print] [--plate N]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N` |
+| `deli send [FILE] [--print] [--plate N] [--name NAME]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N`; `--name` for what to call it there. A printer that is printing is said to be, not sent to; exit code 3 when it cannot be reached, 4 when it is busy |
 | `deli config [key] [value]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile |
 | `deli completion bash\|zsh\|fish` | shell completion |
 | `deli update [version] [--check]` | install the latest release from GitHub over this one, or say whether there is one |
@@ -642,8 +652,9 @@ check the file arrived and start it from the printer's own screen.
 ## Using deli from an AI assistant
 
 deli is a good fit for a coding assistant that runs shell commands: every command
-takes its arguments on the command line, prints plain text and exits, and a print
-is a file the assistant can read. The repository ships a skill, a short briefing in
+takes its arguments on the command line, prints plain text and exits (`deli status
+--json` and `deli slice --json` give the same as data), and a print is a file the
+assistant can read. The repository ships a skill, a short briefing in
 [`skills/deli/SKILL.md`](skills/deli/SKILL.md), that tells an assistant how deli
 thinks, the usual workflow, the rules it should keep (never `deli send --print`
 unless asked; never `deli setup`, which asks questions) and where the settings are.

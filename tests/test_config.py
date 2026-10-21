@@ -197,7 +197,7 @@ def test_a_print_for_a_filament_other_than_the_default_is_sent_without_comment(h
     project.keep_gcode({1: gcode}, project.made_from(project.read()))  # as if sliced
     capsys.readouterr()
 
-    assert main(["send", "--print"]) == 1  # only because the address cannot be reached
+    assert main(["send", "--print"]) == 3  # only because the address cannot be reached
 
     out, err = capsys.readouterr()
     assert "spare-pla" not in out + err

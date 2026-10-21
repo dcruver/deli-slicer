@@ -73,14 +73,19 @@ class ElegooHTTP(http.server.BaseHTTPRequestHandler):
 
 
 class FakeSDCP:
-    """A websocket server speaking just enough SDCP: status replies, then a start-print ack."""
+    """A websocket server speaking just enough SDCP: status replies, then a start-print ack.
+    deli connects once before an upload, to ask whether the printer is free (`status` is what
+    it says then, with `info` as its PrintInfo), and once more to start the print; with
+    `checking_first` the printer is still checking the file at that connection's first ask."""
 
-    def __init__(self, ack=0, checking_first=True):
+    def __init__(self, ack=0, checking_first=True, status=(0,), info=None):
         self.ack, self.checking_first = ack, checking_first
+        self.status, self.info = list(status), info or {}
         self.received = []
+        self.connections = 0
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
-        self.sock.listen(1)
+        self.sock.listen(5)
         threading.Thread(target=self.serve, daemon=True).start()
 
     @property
@@ -88,14 +93,23 @@ class FakeSDCP:
         return self.sock.getsockname()[1]
 
     def serve(self):
-        conn, _ = self.sock.accept()
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            index, self.connections = self.connections, self.connections + 1
+            threading.Thread(target=self.talk, args=(conn, index), daemon=True).start()
+
+    def talk(self, conn, index: int):
         request = b""
         while b"\r\n\r\n" not in request:
             request += conn.recv(4096)
         key = next(line.split(b": ", 1)[1] for line in request.split(b"\r\n") if line.lower().startswith(b"sec-websocket-key"))
         accept = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
         conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + b"\r\n\r\n")
-        self.frame(conn, {"Status": {"CurrentStatus": [8] if self.checking_first else [0]}, "Topic": "sdcp/status/x"})  # an unasked-for push
+        checking = self.checking_first and index > 0  # the file is checked after it is uploaded, not before
+        self.frame(conn, {"Status": self.status_message(checking), "Topic": "sdcp/status/x"})  # an unasked-for push
         checks = 0
         while True:
             try:
@@ -106,10 +120,12 @@ class FakeSDCP:
             cmd = message["Data"]["Cmd"]
             if cmd == 0:
                 checks += 1
-                still_checking = self.checking_first and checks == 1
-                self.frame(conn, {"Status": {"CurrentStatus": [8] if still_checking else [0]}})
+                self.frame(conn, {"Status": self.status_message(checking and checks == 1)})
             elif cmd == 128:
                 self.frame(conn, {"Data": {"Cmd": 128, "Data": {"Ack": self.ack}, "RequestID": message["Data"]["RequestID"]}})
+
+    def status_message(self, checking: bool) -> dict:
+        return {"CurrentStatus": [8] if checking else self.status, "PrintInfo": self.info}
 
     @staticmethod
     def frame(conn, message: dict):
@@ -132,11 +148,30 @@ class FakeSDCP:
 
 
 class MoonrakerHTTP(http.server.BaseHTTPRequestHandler):
+    printing = None  # the file the printer is printing, which an upload of the same name is refused for
+    refuse = None  # an HTTP status to answer every upload with
+
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        if self.path.startswith("/printer/objects/query?print_stats"):
+            stats = {"state": "printing", "filename": self.printing} if self.printing else {"state": "standby", "filename": ""}
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"result": {"status": {"print_stats": stats}}}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def do_POST(self):
-        type(self).received.append((self.path, dict(self.headers), form_fields(self)))
+        fields = form_fields(self)
+        type(self).received.append((self.path, dict(self.headers), fields))
+        if self.refuse or (self.printing and fields.get("filename") == self.printing.encode()):
+            self.send_response(self.refuse or 403)
+            self.end_headers()
+            self.wfile.write(b'{"error": {"message": "File is loaded, upload not permitted"}}')
+            return
         self.send_response(201)
         self.end_headers()
         self.wfile.write(b'{"item": {"path": "cube.gcode"}}')
@@ -186,6 +221,15 @@ def elegoo(monkeypatch):
     printer = FakePrinter(ElegooHTTP)
     ElegooHTTP.reply = {"code": "000000"}
     monkeypatch.setenv("DELI_HOST", f"elegoo://{printer.url}")
+    yield printer
+    printer.stop()
+
+
+@pytest.fixture
+def moonraker(monkeypatch):
+    printer = FakePrinter(MoonrakerHTTP)
+    MoonrakerHTTP.printing = MoonrakerHTTP.refuse = None
+    monkeypatch.setenv("DELI_HOST", f"moonraker://{printer.url}")
     yield printer
     printer.stop()
 
@@ -314,12 +358,91 @@ def test_refusal_by_the_printer_is_reported(elegoo, capsys):
     assert "File: disk full" in capsys.readouterr().err
 
 
-def test_unreachable_printer_is_an_error(monkeypatch, capsys):
+def test_unreachable_printer_is_an_error_with_its_own_exit_code(monkeypatch, capsys):
     monkeypatch.setenv("DELI_HOST", "elegoo://127.0.0.1:1")
 
-    assert main(["send"]) == 1
+    assert main(["send"]) == 3
 
     assert "cannot reach" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- a busy printer
+
+
+def test_a_printer_that_is_printing_is_not_sent_to(elegoo, monkeypatch, capsys):
+    sdcp = FakeSDCP(status=[1], info={"Filename": "/local/bracket.gcode", "CurrentLayer": 40, "TotalLayer": 120})
+    monkeypatch.setattr(send, "SDCP_PORT", sdcp.port)
+
+    assert main(["send"]) == 4
+
+    assert "the printer is printing bracket.gcode, layer 40 of 120" in capsys.readouterr().err
+    assert not ElegooHTTP.received  # asked before anything went up
+
+
+def test_a_printer_receiving_a_file_is_not_sent_to(elegoo, monkeypatch, capsys):
+    sdcp = FakeSDCP(status=[2])
+    monkeypatch.setattr(send, "SDCP_PORT", sdcp.port)
+
+    assert main(["send"]) == 4
+    assert "the printer is receiving a file" in capsys.readouterr().err
+
+
+def test_a_printer_whose_websocket_does_not_answer_is_sent_to_anyway(elegoo, monkeypatch):
+    monkeypatch.setattr(send, "SDCP_PORT", 1)  # nothing listens there; the upload says itself if the printer refuses
+
+    assert main(["send"]) == 0
+    assert len(ElegooHTTP.received) == 1
+
+
+def test_the_name_on_the_printer_can_be_chosen(elegoo, monkeypatch, capsys):
+    sdcp = FakeSDCP()
+    monkeypatch.setattr(send, "SDCP_PORT", sdcp.port)
+
+    assert main(["send", "--print", "--name", "bracket v2"]) == 0
+
+    (_, fields), = ElegooHTTP.received
+    assert fields["filename"] == b"bracket v2.gcode"
+    assert [m["Data"] for m in sdcp.received][-1]["Data"]["Filename"] == "/local/bracket v2.gcode"
+    assert "Sending cube.gcode as bracket v2.gcode" in capsys.readouterr().out
+
+
+def test_a_name_with_a_path_in_it_is_refused(elegoo, capsys):
+    assert main(["send", "--name", "../x"]) == 1
+    assert "without a path" in capsys.readouterr().err
+    assert not ElegooHTTP.received
+
+
+def test_moonraker_will_not_start_a_print_while_one_runs(moonraker, capsys):
+    MoonrakerHTTP.printing = "other.gcode"
+
+    assert main(["send", "--print"]) == 4
+    assert "the printer is printing other.gcode; send without --print" in capsys.readouterr().err
+    assert not MoonrakerHTTP.received
+
+    assert main(["send"]) == 0  # the file can go up meanwhile
+    assert len(MoonrakerHTTP.received) == 1
+
+
+def test_moonraker_refusing_to_replace_the_file_being_printed_is_said(moonraker, capsys):
+    MoonrakerHTTP.printing = "cube.gcode"
+
+    assert main(["send"]) == 4
+    assert "the printer is printing cube.gcode, which cannot be replaced" in capsys.readouterr().err
+
+    assert main(["send", "--name", "cube-2"]) == 0
+    assert MoonrakerHTTP.received[-1][2]["filename"] == b"cube-2.gcode"
+
+
+def test_octoprint_conflict_is_the_printer_being_busy(monkeypatch, capsys):
+    printer = FakePrinter(OctoPrintHTTP)
+    OctoPrintHTTP.printing, OctoPrintHTTP.refuse = None, 409
+    monkeypatch.setenv("DELI_HOST", f"octoprint://{printer.url}")
+    monkeypatch.setenv("DELI_API_KEY", "secret")
+
+    assert main(["send"]) == 4
+    assert "the printer is printing, or not ready" in capsys.readouterr().err
+    OctoPrintHTTP.refuse = None
+    printer.stop()
 
 
 # ---------------------------------------------------------------- starting the print
@@ -344,7 +467,7 @@ def test_print_reports_the_printers_refusal(elegoo, monkeypatch, capsys):
     sdcp = FakeSDCP(ack=1, checking_first=False)
     monkeypatch.setattr(send, "SDCP_PORT", sdcp.port)
 
-    assert main(["send", "--print"]) == 1
+    assert main(["send", "--print"]) == 4
 
     assert "the printer is busy" in capsys.readouterr().err
 
@@ -379,17 +502,13 @@ def test_a_print_changed_since_it_was_sliced_is_sliced_again(job, elegoo, capsys
 # ---------------------------------------------------------------- other hosts
 
 
-def test_moonraker_upload(monkeypatch):
-    printer = FakePrinter(MoonrakerHTTP)
-    monkeypatch.setenv("DELI_HOST", f"moonraker://{printer.url}")
-
+def test_moonraker_upload(moonraker):
     assert main(["send", "--print"]) == 0
 
     (path, headers, fields), = MoonrakerHTTP.received
     assert path == "/server/files/upload"
     assert fields["root"] == b"gcodes" and fields["print"] == b"true" and fields["filename"] == b"cube.gcode"
     assert "X-Api-Key" not in headers
-    printer.stop()
 
 
 def test_octoprint_upload_needs_the_api_key(monkeypatch, capsys):

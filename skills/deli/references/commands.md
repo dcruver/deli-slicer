@@ -2,7 +2,9 @@
 
 Every command works on the print in the current directory (`deli.toml`), prints
 what it did, and exits 0; an error goes to stderr with exit code 1 and says what
-to do next. `deli <command> --help` is the authoritative reference for the
+to do next (`deli send` exits 3 when the printer cannot be reached and 4 when it
+is busy or refused, so a script can tell those from a mistake). `deli status --json`
+and `deli slice --json` give their facts as data. `deli <command> --help` is the authoritative reference for the
 installed version.
 
 Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
@@ -14,7 +16,7 @@ Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 
 | command | what it does |
 |---|---|
-| `deli status` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current`, `out of date: the print has changed since it was sliced`, or `not sliced yet`; a last line `deli X.Y.Z is out` when a newer release exists (tell the user; do not update unasked) |
+| `deli status [--json]` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current` (with its file's path), `out of date: the print has changed since it was sliced`, or `not sliced yet`; a last line `deli X.Y.Z is out` when a newer release exists (tell the user; do not update unasked). `--json`: the same as one object (`profiles`, `parts`, `host`, `settings.print` and `settings.layers`, `pauses`, `gcode.state` and `gcode.files` by plate, `newer_release`) |
 | `deli printer [name]` | choose the printer for this print, or list: the user's printers first (each with its nozzles, the default marked), then the printer's vendor's from Orca |
 | `deli filament [name]` | choose a filament, or list those made for the print's printer, the one in use and the default marked |
 | `deli process [name]` | the same for processes (layer height, speeds, infill) |
@@ -50,8 +52,8 @@ several, the name comes first.
 |---|---|
 | `deli set` | list the settings this print changes, each with what its profile had |
 | `deli set NAME` | show one setting and where its value comes from; a partial name lists every setting containing it |
-| `deli set NAME VALUE [NAME VALUE ...]` | change settings, checked against the engine and the chosen profiles |
-| `deli set NAME @FILE` | read the value from a file (for G-code) |
+| `deli set NAME VALUE [NAME VALUE ...]` | change settings, checked against the engine and the chosen profiles; several pairs are checked together, each with the pairs before it applied, and written only when every one passes (so `infill_pattern rectilinear infill 100%` works in that order, and a batch with a bad pair changes nothing) |
+| `deli set NAME @FILE` | read the value from a file (for G-code); `@-` reads standard input, for one value in a command |
 | `deli unset NAME [NAME ...]` | back to the profile's value; alone, lists what there is to unset |
 | `deli supports [on\|off\|grid\|snug\|organic] [--angle N] [--buildplate-only\|--everywhere]` | automatic supports; alone, says what is in force and where it comes from |
 
@@ -115,9 +117,9 @@ separate colour-change command: a pause is where the filament is changed.
 
 | command | what it does |
 |---|---|
-| `deli slice [-o FILE\|DIR]` | slice every part and copy; print the time, filament length and weight per plate. The G-code goes to `~/.cache/deli/gcode/`; `-o .` also writes a copy here |
+| `deli slice [-o FILE\|DIR] [--json]` | slice every part and copy; print the time, filament length and weight per plate, then `footprint x A to B, y C to D mm` (brim and skirt included, the parts' own extent in brackets when those widen it) and `clear of the bed's edges by L mm left, R right, F front, B back`, then `warning:` lines: PrusaSlicer's validation warnings and what its engine logged while slicing (each once, with a count), and the footprint going past an edge. The G-code goes to `~/.cache/deli/gcode/`; `-o .` also writes a copy here. `--json`: `parts`, and per plate `gcode`, `print_time` (s), `filament_mm`, `filament_g`, `layers`, `height`, `pauses`, `parts_extent`, `footprint` (with `includes`: brim, skirt or null), `bed`, `clearance` and `warnings` |
 | `deli view [--no-browser] [--port N] [--stop]` | serve a page showing the parts on the bed and, once sliced, the G-code layer by layer; opens the browser and returns at once. Served in the background until the page has been closed ten minutes, or `--stop` |
-| `deli send [FILE] [--print] [--plate N] [--level]` | upload the print's G-code (every plate's) or FILE to the printer in the config, slicing first if the print changed. `--print` starts it; with several plates `--print` needs `--plate N`. `--level` levels an Elegoo printer's bed first |
+| `deli send [FILE] [--print] [--plate N] [--level] [--name NAME]` | upload the print's G-code (every plate's) or FILE to the printer in the config, slicing first if the print changed. `--print` starts it; with several plates `--print` needs `--plate N`. `--level` levels an Elegoo printer's bed first. `--name` is what the file is called on the printer (`.gcode` added when it has no extension), for when the name is taken or says too little; it names one file, so with several plates it needs `--plate N` |
 
 `deli slice` refuses when a chosen profile is missing from the library or has
 changed since it was chosen (the hash in `deli.toml`); `deli printer|filament|process <name>`
@@ -127,6 +129,14 @@ accepts the new version.
 `DELI_HOST` environment variable, `elegoo://`, `moonraker://` or
 `octoprint://` with an address; the key from `printers.<name>.api_key` or
 `DELI_API_KEY`. Bambu Lab printers cannot be sent to.
+
+Before uploading, `deli send` asks an Elegoo printer what it is doing and stops with
+`the printer is printing bracket.gcode, layer 40 of 120` (or receiving a file,
+checking one) and exit code 4; a Moonraker printer that is printing takes the file
+but is not told to start it (`send without --print to upload only`), and refuses to
+replace the file it is printing (`--name` sends it as another). Exit code 3 means
+the address did not answer. Report these as they are; do not retry a busy printer
+in a loop.
 
 ## Profiles and the library
 

@@ -118,7 +118,7 @@ def test_settings_and_their_short_names():
 
 def test_options_after_a_dash():
     assert complete("add", "-", new_word=False) == ["--count", "--help", "-h"]
-    assert complete("send", "--", new_word=False) == ["--help", "--level", "--plate", "--print"]
+    assert complete("send", "--", new_word=False) == ["--help", "--level", "--name", "--plate", "--print"]
 
 
 def test_config_keys_and_values():

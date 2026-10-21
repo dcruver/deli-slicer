@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from pathlib import Path
@@ -288,3 +289,69 @@ def test_a_footer_must_be_comments(job, capsys):
     assert main(["set", "gcode_footer", "M84"]) == 1
 
     assert "every line must start with ;" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- where it lies on the bed
+
+
+def test_slice_says_where_the_print_lies_and_how_far_from_the_beds_edges(job, capsys):
+    main(["move", "40", "60"])
+    capsys.readouterr()
+
+    assert main(["slice"]) == 0
+
+    out = capsys.readouterr().out.splitlines()
+    # The MK3's bed is 250 x 210 and the profile prints a skirt; the cube's middle is at (40, 60).
+    assert out[2].startswith("  footprint x ") and "skirt included (the parts 30 to 50, 50 to 70)" in out[2]
+    assert re.fullmatch(r"  clear of the bed's edges by [\d.]+ mm left, [\d.]+ right, [\d.]+ front, [\d.]+ back", out[3])
+
+
+def test_slice_json_has_the_figures_the_lines_are_made_from(job, capsys):
+    main(["move", "40", "60"])
+    capsys.readouterr()
+
+    assert main(["slice", "--json"]) == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["parts"] == [{"file": "cube.stl", "copies": 1}]
+    (plate,) = report["plates"]
+    assert plate["plate"] == 1 and plate["gcode"] == str(sliced()) and plate["layers"] == 100
+    assert plate["parts_extent"] == {"x": [30, 50], "y": [50, 70]}
+    assert plate["footprint"]["includes"] == "skirt" and plate["footprint"]["x"][0] < 30
+    assert plate["bed"] == {"x": [0, 250], "y": [0, 210]}
+    assert plate["clearance"]["left"] == round(plate["footprint"]["x"][0] - 0, 1) and plate["clearance"]["back"] == round(210 - plate["footprint"]["y"][1], 1)
+    assert plate["print_time"] > 0 and plate["filament_mm"] > 0 and plate["warnings"] == [] and plate["pauses"] == []
+
+
+def test_what_the_engine_logs_comes_out_as_warnings_on_stdout():
+    from deli.cli import _once_each
+
+    assert _once_each(["Lost area", "Lost area", "Uninitialized support element", "Lost area"]) == ["Lost area (3 times)", "Uninitialized support element"]
+
+
+# ---------------------------------------------------------------- status
+
+
+def test_status_names_the_current_gcode(job, capsys):
+    main(["status"])
+    assert "G-code    not sliced yet" in capsys.readouterr().out
+
+    main(["slice"])
+    capsys.readouterr()
+    assert main(["status"]) == 0
+    assert f"G-code    current  {sliced()}" in capsys.readouterr().out  # under ~ in real life, shown from there
+
+
+def test_status_json(job, capsys):
+    main(["set", "infill", "20%"])
+    main(["slice"])
+    capsys.readouterr()
+
+    assert main(["status", "--json"]) == 0
+
+    info = json.loads(capsys.readouterr().out)
+    assert info["profiles"]["printer"]["name"] == NAMES["printer"] and info["profiles"]["printer"]["in_library"]
+    assert info["parts"] == [{"file": "cube.stl", "copies": 1}]
+    assert info["settings"]["print"] == {"fill_density": "20%"}
+    assert info["gcode"] == {"state": "current", "files": {"1": str(sliced())}}
+    assert info["host"] is None and info["newer_release"] is None

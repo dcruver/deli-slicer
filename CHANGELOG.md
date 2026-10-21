@@ -5,6 +5,36 @@ a command that works differently, are marked **Changed**.
 
 ## Unreleased
 
+- `deli set` with several pairs checks them together, each against the print with the
+  pairs before it applied, and writes them only when every one passes: a fill pattern and
+  a density only that pattern allows go in one command, in that order, and a batch with a
+  bad pair changes nothing. The same for `--global`, `--printer`, `--filament` and
+  `--process`. `deli set NAME @-` reads the value from standard input.
+- **Changed**: `deli set --printer NAME filament_max_volumetric_speed` and `--global` are
+  refused: that is a filament's limit, and set for a printer or every print it would win
+  over every filament's own. A hotend's limit goes in `max_volumetric_speed`, which the
+  engine applies beside the filament's, the lower winning; the refusal gives the command.
+  (One recorded that way before still applies until it is moved: `deli unset --printer
+  NAME filament_max_volumetric_speed`, then `deli set --printer NAME max_volumetric_speed N`.)
+- `deli slice` says where the print lies on the bed: the footprint's x and y, brim and
+  skirt included, the parts' own when those widen it, and how far it is from each of the
+  bed's edges. What PrusaSlicer's engine logs while slicing (a tree support that lost a
+  branch, say), which went to stderr before, comes out on stdout as `warning:` lines after
+  the figures, each once, so that nothing is said where nobody reads.
+- `deli slice --json` and `deli status --json` give the same as data: per plate the G-code's
+  path, time, filament, layers, footprint, clearance and warnings; the print's profiles,
+  parts, host, settings by layer, pauses and the G-code's state and files. The lines stay
+  as they were.
+- `deli status` names the current G-code's file beside `current`.
+- `deli send --name NAME` calls the file that on the printer (`.gcode` added when it has no
+  extension), when its own name is taken or says too little.
+- `deli send` asks an Elegoo printer what it is doing before uploading, and says "the
+  printer is printing bracket.gcode, layer 40 of 120" instead of letting it answer the
+  upload with an HTTP 500 that says nothing; a Moonraker printer that is printing is not
+  told to start another (the file still goes up), and its refusal to replace the file being
+  printed says so, as does OctoPrint's. Exit codes tell these apart: 1 for a mistake in what
+  was asked, 3 when the printer cannot be reached, 4 when it is busy or refused.
+
 ## 0.14.0 (2026-10-17)
 
 - Nothing changed in deli: a release made to see `deli status` report a newer release

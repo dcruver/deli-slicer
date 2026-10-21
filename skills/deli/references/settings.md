@@ -63,7 +63,8 @@ Ask which way it breaks, and offer `deli rotate` before piling on walls.
 | fan | `min_fan_speed`, `max_fan_speed`, `bridge_fan_speed`, `fan_always_on` 1/0, `disable_fan_first_layers` 1 |
 | small layers printing too fast | `slowdown_below_layer_time` (seconds a layer must take; 8 to 15 for PLA), `min_print_speed` |
 | over- or under-extrusion | `extrusion_multiplier` (0.9 to 1.1; a filament setting, so often `deli set --filament <name> extrusion_multiplier 0.95` to keep it with the spool) |
-| flow cap for a hotend | `filament_max_volumetric_speed` (mm³/s) |
+| flow cap for a hotend | `max_volumetric_speed` (mm³/s), the most the hotend melts whatever the material: a printer's, `deli set --printer <name> max_volumetric_speed 30` |
+| flow cap for a material | `filament_max_volumetric_speed` (mm³/s), a filament's own; `deli set --filament <name> ...` tunes it on this printer. The engine applies both caps, the lower winning; `deli set` refuses this one for a printer or every print |
 | a different material | choose a filament profile (`deli filament "generic petg"`) rather than setting temperatures by hand; it brings temperatures, cooling and retraction that fit |
 
 A change that is really about a spool or a machine, not this print, belongs

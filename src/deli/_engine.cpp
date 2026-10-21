@@ -13,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -20,6 +21,11 @@
 #include <tuple>
 #include <vector>
 
+#include <boost/log/core.hpp>
+#include <boost/log/expressions.hpp>
+#include <boost/log/sinks/basic_sink_backend.hpp>
+#include <boost/log/sinks/sync_frontend.hpp>
+#include <boost/log/trivial.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
@@ -67,7 +73,48 @@ struct SliceResult
     std::vector<std::pair<int, double>> pauses; // the layer each pause comes after, and how high the print is by then
     int                      layers;     // as the G-code counts them: see layer_tops
     double                   height;     // of the top of the last one, in mm
+    std::array<double, 4>    parts{};    // x min, y min, x max, y max of the parts on the bed, in mm
+    std::array<double, 4>    footprint{}; // the same for everything laid on the first layer: brim and skirt included
+    std::string              around;     // what widens the footprint past the parts: "brim", "skirt", "brim and skirt", or nothing
+    std::array<double, 4>    bed{};      // x min, y min, x max, y max of the bed's outline
+    std::vector<std::string> logged;     // what libslic3r logged as an error while slicing, in order
 };
+
+// libslic3r reports some of what goes wrong only through its log (a tree support that lost
+// a branch, say), which Boost would print on stderr. This sink keeps the lines instead,
+// for `slice` to hand back with its result, so that nothing is said on a stream nobody reads.
+struct LogCollector : boost::log::sinks::basic_sink_backend<boost::log::sinks::synchronized_feeding>
+{
+    static inline std::mutex                mutex;
+    static inline std::vector<std::string>  lines;
+
+    void consume(const boost::log::record_view &record)
+    {
+        const auto message = record[boost::log::expressions::smessage];
+        if (!message)
+            return;
+        std::lock_guard<std::mutex> lock(mutex);
+        if (lines.size() < 1000)
+            lines.push_back(*message);
+    }
+
+    static std::vector<std::string> take()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::exchange(lines, {});
+    }
+
+    static void install()
+    {
+        boost::log::core::get()->add_sink(boost::make_shared<boost::log::sinks::synchronous_sink<LogCollector>>());
+    }
+};
+
+// The corners of a box, in millimetres, as the result carries them.
+std::array<double, 4> corners(const BoundingBoxf3 &box)
+{
+    return {box.min.x(), box.min.y(), box.max.x(), box.max.y()};
+}
 
 // The settings in `ini` as given, with names from older PrusaSlicer versions updated.
 // PrusaSlicer treats a setting it does not know as an obsolete one and silently drops it.
@@ -658,6 +705,7 @@ SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini,
     MultipleBedsUtils::with_single_bed_model_fff(model, 0, [&]() { print.apply(model, config); });
 
     SliceResult result;
+    LogCollector::take(); // what earlier calls logged is not this slice's
     if (std::string err = print.validate(&result.warnings); !err.empty())
         throw std::runtime_error(err);
     if (print.empty())
@@ -699,6 +747,22 @@ SliceResult slice(const std::vector<Part> &parts, const std::string &config_ini,
     result.print_time  = stats.normal_print_time_seconds;
     result.filament_mm = stats.total_used_filament;
     result.filament_g  = stats.total_weight;
+
+    // Where the print lies on the bed: the parts, and everything the first layer lays down.
+    result.parts = corners(model.bounding_box_exact());
+    const BoundingBox first = get_extents(print.first_layer_convex_hull());
+    result.footprint = first.defined ? std::array<double, 4>{unscale<double>(first.min.x()), unscale<double>(first.min.y()),
+                                                             unscale<double>(first.max.x()), unscale<double>(first.max.y())}
+                                     : result.parts;
+    if (print.has_brim() && print.has_skirt())
+        result.around = "brim and skirt";
+    else if (print.has_brim())
+        result.around = "brim";
+    else if (print.has_skirt())
+        result.around = "skirt";
+    const BoundingBoxf bed(bed_shape);
+    result.bed    = {bed.min.x(), bed.min.y(), bed.max.x(), bed.max.y()};
+    result.logged = LogCollector::take();
     return result;
 }
 
@@ -981,7 +1045,8 @@ NB_MODULE(_engine, m)
     m.attr("SLIC3R_VERSION") = SLIC3R_VERSION;
     // Bumped whenever a call's signature changes, so that Python run against an older
     // build of this module (an editable install after a C++ change) says so plainly.
-    m.attr("API_VERSION") = 11;
+    m.attr("API_VERSION") = 12;
+    LogCollector::install();
 
     nb::class_<SliceResult>(m, "SliceResult")
         .def_ro("gcode_path", &SliceResult::gcode_path, "Path the G-code was written to.")
@@ -991,7 +1056,12 @@ NB_MODULE(_engine, m)
         .def_ro("warnings", &SliceResult::warnings, "Warnings PrusaSlicer raised while validating the print.")
         .def_ro("pauses", &SliceResult::pauses, "For each pause, the layer it comes after and the height of the print by then, in mm.")
         .def_ro("layers", &SliceResult::layers, "How many layers the print has, as the G-code's layer changes count them.")
-        .def_ro("height", &SliceResult::height, "Height of the top of the last layer, in mm.");
+        .def_ro("height", &SliceResult::height, "Height of the top of the last layer, in mm.")
+        .def_ro("parts", &SliceResult::parts, "x min, y min, x max, y max of the parts on the bed, in mm.")
+        .def_ro("footprint", &SliceResult::footprint, "The same for everything the first layer lays down, brim and skirt included.")
+        .def_ro("around", &SliceResult::around, "What widens the footprint past the parts: 'brim', 'skirt', 'brim and skirt', or ''.")
+        .def_ro("bed", &SliceResult::bed, "x min, y min, x max, y max of the bed's outline, in mm.")
+        .def_ro("logged", &SliceResult::logged, "What libslic3r logged as an error while slicing, which it would otherwise print on stderr.");
 
     m.def("slice", &slice, "parts"_a, "config"_a, "output"_a, "pauses"_a = std::vector<int>{}, "plate"_a = 1,
           "Slice the parts of a print and write G-code to `output`.\n\n"
