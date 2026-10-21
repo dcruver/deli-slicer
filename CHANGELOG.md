@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.15.0 (2026-10-21)
 
 - `deli set` with several pairs checks them together, each against the print with the
   pairs before it applied, and writes them only when every one passes: a fill pattern and
