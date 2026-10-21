@@ -221,3 +221,13 @@ def test_the_check_can_be_turned_off_in_the_config(github, installed_from_a_whee
     assert cli.main(["config", "--unset", "update_check"]) == 0
     assert cli.main(["status"]) == 0
     assert LINE in capsys.readouterr().out
+
+
+def test_update_check_refreshes_what_status_knows(github, installed_from_a_wheel, capsys):
+    """A stale note of an older release does not keep status quiet once update has looked."""
+    update._remember("0.0.1", update.time.time())
+
+    assert cli.main(["update", "--check"]) == 0
+    assert update.json.loads(update._checked().read_text())["version"] == "99.0.0"
+    assert cli.main(["status"]) == 0
+    assert LINE in capsys.readouterr().out

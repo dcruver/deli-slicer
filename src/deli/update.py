@@ -94,7 +94,8 @@ def _final_url(url: str, timeout: float = TIMEOUT) -> str:
 
 
 def latest(timeout: float = TIMEOUT) -> str:
-    """The latest release's version, without its v. Pre-releases are not the latest."""
+    """The latest release's version, without its v. Pre-releases are not the latest.
+    What it finds is noted for `deli status`, so a check and the status line agree."""
     try:
         url = _final_url(LATEST, timeout)
     except (OSError, urllib.error.URLError) as err:
@@ -102,6 +103,7 @@ def latest(timeout: float = TIMEOUT) -> str:
     _, found, tag = url.rpartition("/tag/")
     if not found or not tag:
         raise UpdateError("there is no release of deli yet")
+    _remember(tag.removeprefix("v"))  # so `deli status` agrees with what was just learnt
     return tag.removeprefix("v")
 
 
@@ -142,6 +144,18 @@ def _checked() -> Path:
     return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "deli" / "latest-release.json"
 
 
+def _remember(version: str | None, now: float | None = None) -> dict:
+    """Note what a look for the latest release found, and when; None for a look that failed.
+    `deli status` reads it rather than asking again."""
+    note = {"checked": time.time() if now is None else now, "version": version}
+    try:
+        _checked().parent.mkdir(parents=True, exist_ok=True)
+        _checked().write_text(json.dumps(note))
+    except OSError:
+        pass
+    return note
+
+
 def newer_release(have: str | None = None, now: float | None = None) -> str | None:
     """The release newer than this deli that `deli status` mentions, if there is one. GitHub
     is asked once a day (an hour after a failure), briefly, and never for a checkout, which
@@ -164,13 +178,8 @@ def newer_release(have: str | None = None, now: float | None = None) -> str | No
         fresh = False
     if not fresh:
         try:
-            note = {"checked": now, "version": latest(timeout=5)}
+            note = _remember(latest(timeout=5), now)
         except UpdateError:
-            note = {"checked": now, "version": None}
-        try:
-            _checked().parent.mkdir(parents=True, exist_ok=True)
-            _checked().write_text(json.dumps(note))
-        except OSError:
-            pass
+            note = _remember(None, now)
     version = note.get("version")
     return version if isinstance(version, str) and key(version) > key(have) else None
