@@ -24,7 +24,7 @@ deli send --print         # to the printer, and start it
 ```
 
 Status: early. Everything above works; deli converts and slices for most of the
-printers OrcaSlicer knows, but has printed on only one so far. See "Not done yet" at the
+printers OrcaSlicer knows, but has printed on only two so far. See "Not done yet" at the
 end.
 
 ## Motivation
@@ -62,8 +62,8 @@ curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh
 [`uv`](https://docs.astral.sh/uv/), installing uv first if you don't have it; uv
 fetches Python 3.12 if you don't have that either. Then run `deli setup`. Later,
 `deli update` installs the latest release the same way (`--check` only says whether
-there is one; `deli update 0.11.0` a particular release), or run the script again,
-with `DELI_VERSION=0.4.2` in front of `sh` for a particular release. `deli status`
+there is one; `deli update 0.14.0` a particular release), or run the script again,
+with `DELI_VERSION=0.14.0` in front of `sh` for a particular release. `deli status`
 mentions a newer release when one is out, looking once a day; `deli config
 update_check false` stops it looking.
 
@@ -73,17 +73,17 @@ You need Python 3.12 or newer and `uv` (or `pipx`).
 
 Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
 platform with the engine inside; nothing else needs building. Install the one for your
-machine (for 0.10.0):
+machine (for 0.15.0):
 
 ```
 # Linux, x86-64 (most PCs)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-manylinux_2_28_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-manylinux_2_28_x86_64.whl
 # Linux, ARM64 (Raspberry Pi 4/5 on a 64-bit OS, ARM servers)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-manylinux_2_28_aarch64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-manylinux_2_28_aarch64.whl
 # macOS, Apple Silicon (M1 and later)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-macosx_11_0_arm64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-macosx_11_0_arm64.whl
 # macOS, Intel
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.10.0/deli-0.10.0-cp312-abi3-macosx_10_15_x86_64.whl
+uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-macosx_10_15_x86_64.whl
 ```
 
 (`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
@@ -296,7 +296,8 @@ signing in, and is then kept like the rest.
 ### Without OrcaSlicer's presets
 
 `deli load` takes a PrusaSlicer INI file from a path, a `file://` URL or an `https://`
-URL, including a link to a file's page on GitHub:
+URL, including a link to a file's page on GitHub; `--printer NAME` says which printer a
+filament or process is for (default: the print's, else your default printer):
 
 ```
 deli load printer  ~/Downloads/my-printer.ini --name my-printer   # a PrusaSlicer export, say
@@ -489,10 +490,26 @@ A print can hold several models, each added the same way, and copies of one:
 than one model, `scale`, `rotate`, `mirror` and `move` take the model's name first
 (`deli scale 3DBenchy 150%`).
 
+A model can come from the web: `deli add <url>` fetches it into the directory, adds it
+like any file, and records the address as the part's `source` in `deli.toml`. The
+address may be of the model file itself, of a zip holding model files, or of a page
+linking to them, such as a file's or a folder's page on GitHub; with several model files
+to choose from, deli lists them and `--file NAME` picks one. Adding the same address
+again adds a copy. A Printables model's page (`printables.com/model/...`) works too:
+the page itself only opens in a browser, but deli asks the site's API for the model's
+files and their links, which it hands out without a login. Other model sites do not have
+such a route: Thingiverse's pages and links refuse anything but a browser, and
+MakerWorld, Thangs, Cults3D and MyMiniFactory want an account before handing out a file.
+For those, download the file in your browser and `deli add` it; support for a site is
+added when it turns out to have a way in like Printables', one site at a time.
+
 The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
 `deli send` and `deli view` find it there, and `deli send` slices again by itself when
 the print has changed since. `deli slice -o FILE` (or `-o DIR`, `-o .` for here) also
 writes a copy where you want it, to put on an SD card or open in another program.
+After the time and filament, `deli slice` says where the print lies on the bed and how
+far it is from each edge, and prints as `warning:` lines anything PrusaSlicer's engine
+complained about while slicing (a tree support that lost a branch, say), each once.
 
 Supports are PrusaSlicer's automatic ones. `deli supports on` uses the style the
 process came with (Orca's tuning for the printer carries over); `organic`, `snug` or `grid` pick one and turn them on; `--angle 45` supports
@@ -624,17 +641,17 @@ check the file arrived and start it from the printer's own screen.
 
 | | |
 |---|---|
-| `deli setup` | tab completion, your printer and its address, asked for once |
+| `deli setup [--printer NAME] [--host ADDRESS] [--shell bash\|zsh\|fish] [--no-completion]` | tab completion, your printer and its address, asked for once; the options answer the questions in advance |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
 | `deli status [--json]` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code and its file; and, looked up once a day, whether a newer deli is out (`deli config update_check false` stops that). `--json` gives the same as data |
 | `deli nozzle [size]` | the nozzles of this print's printer, or put one in: its profile comes from Orca if need be, and the print moves to it |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
-| `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
+| `deli load <kind> <source> [--name NAME] [--printer NAME]` | copy a PrusaSlicer INI file into your library, under its own name or `--name`; a filament or process under the printer it is for |
 | `deli add <file\|url> [--count N] [--file NAME]` | add a model, or more copies of it; a URL is fetched here first, `--file` choosing among several in an archive, on a page or in a Printables model |
 | `deli remove <part> [--count N\|--copy N]` | take a part out, or its last N copies, or one copy by its number |
 | `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; several pairs at once, checked together and written only when every one passes; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file, `@-` from standard input |
-| `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |
+| `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports; `--angle N`, `--buildplate-only` or `--everywhere` |
 | `deli scale [part] [x\|y\|z] <factor>` | `110%`, `1.1`, or `30mm` with an axis; the axis is the bed's, as the part lies once rotated |
 | `deli rotate [part] [x\|y\|z] <degrees>` | about z when no axis is given |
 | `deli mirror [part] [x\|y\|z\|off]` | the part's mirror image along the bed's axis, as it lies once rotated; the same axis again, or `off`, puts it back |
@@ -642,9 +659,9 @@ check the file arrived and start it from the printer's own screen.
 | `deli arrange [--plate N]` | arrange every part and copy again, or one plate's, forgetting where they were moved |
 | `deli pause [off] [layer ...] [--plate N]` | pause after a layer, counted as the slider in `deli view` counts them; also how to change filament mid-print |
 | `deli slice [-o FILE\|DIR] [--json]` | slice, and say how long it takes, how much filament, where it lies on the bed and how far from the edges; `-o` writes a copy of the G-code, `--json` gives the figures as data. Parts that do not fit go on further plates, a file each |
-| `deli view [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop` |
-| `deli send [FILE] [--print] [--plate N] [--name NAME]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N`; `--name` for what to call it there. A printer that is printing is said to be, not sent to; exit code 3 when it cannot be reached, 4 when it is busy |
-| `deli config [key] [value]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile |
+| `deli view [--port N] [--no-browser] [--stop]` | the parts on the bed in your browser; after `deli slice`, the sliced print with its supports, layer by layer. Served in the background until the page has been closed for ten minutes, or `--stop`; `--no-browser` prints the address instead of opening one |
+| `deli send [FILE] [--print] [--level] [--plate N] [--name NAME]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N`; `--name` for what to call it there; `--level` with `--print` has an Elegoo printer level its bed first. A printer that is printing is said to be, not sent to; exit code 3 when it cannot be reached, 4 when it is busy |
+| `deli config [key] [value] [--unset KEY]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile; `--unset` removes a key |
 | `deli completion bash\|zsh\|fish` | shell completion |
 | `deli update [version] [--check]` | install the latest release from GitHub over this one, or say whether there is one |
 
@@ -709,6 +726,10 @@ Things that a user would notice, roughly in the order they matter:
 - **One filament per print.** A change by hand at a `deli pause` is the only kind;
   filament-change G-code for multi-material printers is not converted.
 - **No STEP files.** PrusaSlicer reads them through a library deli does not ship.
+- **Only Printables among the model sites.** `deli add <url>` takes any address that
+  serves a model file, a zip or a page linking to files, and Printables through its API.
+  Thingiverse needs a browser, and MakerWorld, Thangs, Cults3D and MyMiniFactory an
+  account; a site is added when it has a way in without one.
 - **Hosts:** PrusaLink, Duet and the others PrusaSlicer knows are not supported by
   `deli send`; the Centauri Carbon 2's newer protocol is not either.
 
