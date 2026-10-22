@@ -87,10 +87,13 @@ def stored_path(path: Path) -> str:
         return path.as_posix()
 
 
-def add_part(doc: tomlkit.TOMLDocument, file: str, count: int = 1) -> None:
+def add_part(doc: tomlkit.TOMLDocument, file: str, count: int = 1, source: str | None = None) -> None:
+    """A new `[[part]]`; `source` is the URL a fetched model came from, kept for the record."""
     parts(doc)
     part = tomlkit.table()
     part["file"] = file
+    if source:
+        part["source"] = source
     if count > 1:
         part["count"] = count
     if "part" not in doc:

@@ -372,6 +372,7 @@ In a new directory:
 
 ```
 deli add 3DBenchy.stl                 # STL, OBJ, 3MF or AMF; the print starts with your default printer, filament and process
+deli add https://example.com/boat.zip # or fetched from the web: a model file, a zip of them, a page linking to them, or a Printables model (--file picks one of several)
 deli printer "bambu p1s 0.4"          # another printer for this print, by any words of its name; its filament and process come with it
 deli filament "generic petg"          # another filament than its default, converted for this printer
 deli set infill 20%                   # or any PrusaSlicer setting by name
@@ -630,7 +631,7 @@ check the file arrived and start it from the printer's own screen.
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source>` | copy a PrusaSlicer INI file into your library |
-| `deli add <file> [--count N]` | add a model, or more copies of it |
+| `deli add <file\|url> [--count N] [--file NAME]` | add a model, or more copies of it; a URL is fetched here first, `--file` choosing among several in an archive, on a page or in a Printables model |
 | `deli remove <part> [--count N\|--copy N]` | take a part out, or its last N copies, or one copy by its number |
 | `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; several pairs at once, checked together and written only when every one passes; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file, `@-` from standard input |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports, `--angle`, `--buildplate-only` |

@@ -15,7 +15,7 @@ from pathlib import Path
 import textwrap
 import webbrowser
 
-from deli import _engine, config, library, orca_install, project, send, settings, view
+from deli import _engine, config, fetch, library, orca_install, project, send, settings, view
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -455,14 +455,42 @@ def _copies(count: int) -> str:
     return f" x {count}" if count > 1 else ""
 
 
+def _fetched(url: str, want: str | None) -> tuple[Path, bool]:
+    """A model fetched from a URL into this directory, as its own file name, and whether
+    it was written now; one already here with the same content is reused, so adding the
+    URL again adds copies."""
+    found = fetch.fetch(url, want)
+    if found.choices:
+        raise CommandError(
+            f"{found.holder} at {url} holds {len(found.choices)} model files; say which with --file NAME:\n  "
+            + "\n  ".join(found.choices)
+        )
+    path = Path(found.name)
+    if path.exists():
+        if path.is_file() and path.read_bytes() == found.data:
+            return path, False
+        raise CommandError(f"{found.name} is already here and is not the file at {url}; move it out of the way or rename it")
+    path.write_bytes(found.data)
+    print(f"Fetched {found.name} ({_size_of(path)})")
+    return path, True
+
+
 def _add(args: argparse.Namespace) -> int:
     doc = project.read()
     parts = project.parts(doc)
-    path = Path(args.file).expanduser()
-    if not path.is_file():
-        raise project.ProjectError(f"no such file: {args.file}")
     if args.count < 1:
         raise CommandError("--count must be 1 or more")
+    source = None
+    fetched = False
+    if fetch.is_url(args.file):
+        source = args.file
+        path, fetched = _fetched(args.file, args.model_file)
+    elif args.model_file is not None:
+        raise CommandError("--file chooses among the model files at a URL; give the file itself as the argument")
+    else:
+        path = Path(args.file).expanduser()
+        if not path.is_file():
+            raise project.ProjectError(f"no such file: {args.file}")
     stored = project.stored_path(path)
 
     if existing := next((part for part in parts if part["file"] == stored), None):
@@ -475,10 +503,12 @@ def _add(args: argparse.Namespace) -> int:
     try:
         size = _engine.model_size(str(path))
     except RuntimeError as err:
-        raise project.ProjectError(f"cannot read {args.file} as a model: {err}") from None
+        if fetched:
+            path.unlink()  # not left lying about: it was fetched for nothing
+        raise project.ProjectError(f"cannot read {stored} as a model: {err}") from None
 
     others = len(parts)  # `parts` is the live list in the document and grows below
-    project.add_part(doc, stored, args.count)
+    project.add_part(doc, stored, args.count, source)
     _start(doc)
     project.write(doc)
     print(f"Added {stored}{_copies(args.count)}")
@@ -2635,10 +2665,13 @@ def build_parser() -> argparse.ArgumentParser:
     add = commands.add_parser(
         "add",
         help="add a model to this print",
-        description="Add a model file to the print in this directory.",
+        description="Add a model file to the print in this directory. A URL is fetched into the directory first: a model "
+        "file, or one of the model files in the archive or on the page it serves, chosen with --file when there are several. "
+        "A page that lists its files with scripts, or a site that asks for a login before a download, is not supported.",
     )
-    add.add_argument("file", help="an STL, OBJ, 3MF or AMF file")
+    add.add_argument("file", help="an STL, OBJ, 3MF or AMF file, or a URL: of such a file, of a zip archive holding one, or of a page linking to one")
     add.add_argument("--count", type=int, default=1, metavar="N", help="add N copies of it (adding a part again adds more)")
+    add.add_argument("--file", dest="model_file", metavar="NAME", help="which model file, when the URL's archive or page holds several (deli add URL lists them)")
     add.set_defaults(run=_add)
 
     remove = commands.add_parser(
@@ -2989,6 +3022,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.command != "__complete":
             _migrate_library()
         return args.run(args)
-    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, config.ConfigError, CommandError) as err:
+    except (library.LibraryError, project.ProjectError, settings.SettingError, orca_install.OrcaError, send.SendError, config.ConfigError, fetch.FetchError, CommandError) as err:
         print(f"deli: {err}", file=sys.stderr)
         return getattr(err, "exit_code", 1)

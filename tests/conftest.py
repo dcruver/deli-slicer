@@ -1,6 +1,6 @@
 import pytest
 
-from deli import orca_install, update
+from deli import fetch, orca_install, update
 
 
 @pytest.fixture(autouse=True)
@@ -25,3 +25,5 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr(orca_install, "_fetch", refuse)
     monkeypatch.setattr(update, "_final_url", offline)
+    monkeypatch.setattr(fetch, "_open", offline)
+    monkeypatch.setattr(fetch, "_post_json", lambda url, body, timeout=None: offline(url))

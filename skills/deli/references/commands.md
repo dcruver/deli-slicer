@@ -39,7 +39,7 @@ and that printer's default filament and process.
 
 | command | what it does |
 |---|---|
-| `deli add FILE [--count N]` | add a model (STL, OBJ, 3MF, AMF; no STEP), or more copies of one already added; prints its size in mm |
+| `deli add FILE\|URL [--count N] [--file NAME]` | add a model (STL, OBJ, 3MF, AMF; no STEP), or more copies of one already added; prints its size in mm. A URL is fetched into the directory first (the part's `source`): a model file, a zip holding one, a page linking to one, or a Printables model page (`printables.com/model/N-...`, read through the site's API); with several, it lists them and exits 1, and `--file NAME` picks one (a Printables file by the name listed). Other pages that list files with scripts or need a login (Thingiverse, MakerWorld) are not supported: download the file and add it |
 | `deli remove PART [--count N \| --copy N]` | take a part out, or its last N copies, or one copy by number |
 
 A part is named by its file, with or without the extension (`3DBenchy` or

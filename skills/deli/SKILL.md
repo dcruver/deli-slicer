@@ -86,7 +86,10 @@ reached and 4 when it is busy, so you can tell those apart without parsing).
 Read the output; it is written for someone who does not know deli, and it is
 the ground truth for what happened.
 
-1. **Add the model.** `deli add part.stl` (also `--count 4` for copies).
+1. **Add the model.** `deli add part.stl` (also `--count 4` for copies), or
+   `deli add https://.../part.stl` to fetch it here first (a zip, a page or a
+   Printables model with several model files lists them for `--file NAME`;
+   other sites that need a login or scripts to list files are not supported).
    It prints the part's size in mm, a quick sanity check that the file is the
    right one and in the right units.
 2. **Choose profiles if the defaults are wrong.** `deli printer "voron 350 0.4"`,

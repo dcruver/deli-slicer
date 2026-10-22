@@ -3,6 +3,16 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- `deli add <url>` fetches a model from the web into the print's directory and adds it,
+  recording the URL as the part's `source`. The URL may be of the model file itself, of a
+  zip archive holding model files, or of a page linking to them; several are listed for
+  `--file NAME` to choose one. A Printables model's address is answered through the API
+  its pages use, which lists the files and hands out their links without a login; any
+  other page that lists its files with scripts, or asks for a login before a download,
+  is reported as not supported.
+
 ## 0.15.0 (2026-10-21)
 
 - `deli set` with several pairs checks them together, each against the print with the
