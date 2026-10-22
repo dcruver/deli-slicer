@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.16.0 (2026-10-22)
 
 - `deli add <url>` fetches a model from the web into the print's directory and adds it,
   recording the URL as the part's `source`. The URL may be of the model file itself, of a
