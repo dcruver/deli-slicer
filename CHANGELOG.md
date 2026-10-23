@@ -10,7 +10,9 @@ a command that works differently, are marked **Changed**.
   alone names the parts, `deli load foo` names the kinds it takes.
 - `deli printer <name> --remove` takes a printer out of your config and your library, its
   filaments and processes with it. A profile another of your printers runs stays; the print
-  in the current directory has to be on another printer first.
+  in the current directory has to be on another printer first. `deli filament|process
+  <name> --remove` takes one of this print's printer's (else your default printer's) out,
+  with its settings and its place as a default in your config; not one this print uses.
 - `deli update` run in the minutes between a release appearing on GitHub and PyPI serving
   it says so and asks you to try again shortly, instead of showing uv's resolver message.
   The release workflow now publishes to PyPI before it creates the GitHub release, so

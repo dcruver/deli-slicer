@@ -420,7 +420,7 @@ def _choose(args: argparse.Namespace) -> int:
     if remove:
         if args.default:
             raise CommandError("--remove and --default cannot go together")
-        return _remove_printer(doc, args.name)
+        return _remove_printer(doc, args.name) if kind == "printer" else _remove_profile(doc, kind, args.name)
 
     name_as = args.name_as and library.slug(args.name_as)
     if kind == "printer":
@@ -2035,6 +2035,28 @@ def _remove_printer(doc, wanted: str) -> int:
     return 0
 
 
+def _remove_profile(doc, kind: str, wanted: str) -> int:
+    """`deli filament|process NAME --remove`: one of the print's printer's (else the default
+    printer's) out of the library, and out of the config its settings and the default naming
+    it. Refused when this print chose it; a print elsewhere that did is refused by `deli
+    slice` until it chooses another."""
+    machine, profile = _printer_for_layer(doc)
+    name = _in_library(kind, wanted, profile)
+    if not name:
+        names = library.names(kind, profile)
+        mine = f" (it has: {', '.join(names)})" if names else ""
+        raise CommandError(f"no {kind} '{wanted}' for '{profile}' in your library{mine}")
+    if project.FILE.exists() and project.selected(doc, kind).get("name") == name:
+        raise CommandError(f"this print uses the {kind} '{name}'; choose another first with: deli {kind} <name>")
+    library.path_of(kind, name, profile).unlink(missing_ok=True)
+    line = f"Removed '{name}', a {kind} of '{profile}', from your library"
+    if config.remove_profile(kind, name, machine, profile):
+        line += f"; it was what new prints on '{machine}' started with, set another with: deli {kind} <name> --default"
+    print(line)
+    print(f"A print that chose it is refused by deli slice until it chooses another: deli {kind} <name>")
+    return 0
+
+
 def _machine_named(wanted: str) -> str | None:
     """The config's printer someone typed the name of, or words of it; None when none is
     like it, an error when several are."""
@@ -2806,10 +2828,10 @@ def build_parser() -> argparse.ArgumentParser:
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library, or Orca's name for one, or part of either")
         choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
-        if kind == "printer":
-            choose.add_argument("--remove", action="store_true",
-                                help="take it out of your config and your library instead, its filaments and processes with it; "
-                                "not the printer of the print in this directory")
+        choose.add_argument("--remove", action="store_true",
+                            help="take it out of your config and your library instead, its filaments and processes with it; "
+                            "not the printer of the print in this directory" if kind == "printer" else
+                            f"take it out of your library instead, with its settings and defaults in your config; not this print's {kind}")
         choose.add_argument("--name", dest="name_as", metavar="NAME",
                             help="a name of your own for the printer this profile is for, such as voron; a printer named so already gets it as another nozzle"
                             if kind == "printer" else f"the name to keep an imported {kind} under in your library, instead of Orca's")
