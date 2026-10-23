@@ -21,6 +21,7 @@ Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 | `deli` | alone: the installed version, a newer release if one is out, and the commands |
 | `deli status [--json]` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current` (with its file's path), `out of date: the print has changed since it was sliced`, or `not sliced yet`; a last line `deli X.Y.Z is out` when a newer release exists (tell the user; do not update unasked). `--json`: the same as one object (`profiles`, `parts`, `host`, `settings.print` and `settings.layers`, `pauses`, `gcode.state` and `gcode.files` by plate, `newer_release`) |
 | `deli printer [name]` | choose the printer for this print, or list: the user's printers first (each with its nozzles, the default marked), then the printer's vendor's from Orca |
+| `deli printer <name> --remove` | take a printer out of the config and the library, its filaments and processes with it (a profile another printer runs stays; refused for the print in this directory). Deletes the user's files: only when the user asks to remove a printer |
 | `deli filament [name]` | choose a filament, or list those made for the print's printer, the one in use and the default marked |
 | `deli process [name]` | the same for processes (layer height, speeds, infill) |
 | `deli nozzle [size]` | the print's printer's nozzles, or put one in (its profile imported from Orca if need be; the print moves to it) |

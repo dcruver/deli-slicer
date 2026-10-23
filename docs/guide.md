@@ -181,6 +181,18 @@ all go by the printer's name, whatever nozzle is in. Each nozzle keeps its own p
 and the filament and process a new print starts with. `deli setup` names a printer after
 its host name. A printer you never named is one named after its profile, as before.
 
+To part with a printer:
+
+```
+deli printer voron --remove
+```
+
+takes it out of your config (its address, settings, nozzles and defaults) and its
+profiles out of your library, with the filaments and processes converted for them. A
+profile another printer of yours runs stays. The print in the current directory has to be
+on another printer first, and a print elsewhere that chose it is refused by `deli slice`
+until it chooses another, since nothing changes under a print.
+
 ### Tell deli where your printer is
 
 To send prints to it, deli needs its address:

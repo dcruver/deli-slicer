@@ -412,10 +412,15 @@ def _choose(args: argparse.Namespace) -> int:
     kind = args.command
     doc = project.read()
 
-    if args.name is None and args.default:
-        raise CommandError(f"name the {kind} to make the default: deli {kind} <name> --default")
+    remove = getattr(args, "remove", False)
+    if args.name is None and (args.default or remove):
+        raise CommandError(f"name the {kind} to remove: deli {kind} <name> --remove" if remove else f"name the {kind} to make the default: deli {kind} <name> --default")
     if args.name is None:
         return _list_kind(doc, kind)
+    if remove:
+        if args.default:
+            raise CommandError("--remove and --default cannot go together")
+        return _remove_printer(doc, args.name)
 
     name_as = args.name_as and library.slug(args.name_as)
     if kind == "printer":
@@ -1988,6 +1993,48 @@ def _for_this_printer(doc, kind: str, name: str, from_printer: str, printer: str
     return name
 
 
+def _remove_printer(doc, wanted: str) -> int:
+    """`deli printer NAME --remove`: one of your printers out of the config, its address,
+    settings, nozzles and defaults with it, and its profiles out of the library, each with
+    the filaments and processes converted for it; or a library profile no printer of yours
+    runs. A profile another printer runs stays. Refused for the print in this directory,
+    which chooses another first; a print elsewhere that chose it is refused by `deli slice`
+    until it does (nothing changes under a print)."""
+    machine = _machine_named(wanted)
+    if machine:
+        profiles = [nozzle.profile for nozzle in config.machine(machine).nozzles.values()]
+    else:
+        profile = _in_library("printer", wanted)
+        if not profile:
+            raise CommandError(f"no printer '{wanted}' in your config or library; deli printer lists them")
+        if other := config.machine_of(profile):
+            size = config.machine(other).for_profile(profile).size
+            raise CommandError(
+                f"'{profile}' is the {size} nozzle of your printer '{other}'; remove the printer with: deli printer {other} --remove, "
+                f"or the nozzle alone with: deli config --unset printers.{other}.{config.NOZZLES}.{size}.profile"
+            )
+        profiles = [profile]
+    others = [name for name in config.machines() if name != machine]
+    kept = {profile: other for profile in profiles if (other := next((name for name in others if config.machine(name).for_profile(profile)), None))}
+    going = [profile for profile in profiles if profile not in kept]
+    if project.FILE.exists():
+        on = project.machine(doc)
+        if (machine and on == machine) or project.selected(doc, "printer").get("name") in going:
+            raise CommandError(f"this print is on '{on}'; choose another printer for it first with: deli printer <name>")
+    if config.remove_machine(machine or profiles[0]):
+        print(f"Removed '{machine or profiles[0]}' from your config; you have no default printer now, set one with: deli printer <name> --default")
+    elif machine:
+        print(f"Removed '{machine}' from your config")
+    for profile in going:
+        counts = library.remove_printer(profile)
+        went = [f"{n} {_PLURALS[kind] if n != 1 else kind}" for kind, n in counts.items() if n]
+        print(f"Removed '{profile}' from your library" + (f", with its {' and '.join(went)}" if went else ""))
+    for profile, other in kept.items():
+        print(f"'{profile}' stays in your library: '{other}' runs it")
+    print("A print that chose it is refused by deli slice until it chooses another: deli printer <name>")
+    return 0
+
+
 def _machine_named(wanted: str) -> str | None:
     """The config's printer someone typed the name of, or words of it; None when none is
     like it, an error when several are."""
@@ -2759,6 +2806,10 @@ def build_parser() -> argparse.ArgumentParser:
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library, or Orca's name for one, or part of either")
         choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
+        if kind == "printer":
+            choose.add_argument("--remove", action="store_true",
+                                help="take it out of your config and your library instead, its filaments and processes with it; "
+                                "not the printer of the print in this directory")
         choose.add_argument("--name", dest="name_as", metavar="NAME",
                             help="a name of your own for the printer this profile is for, such as voron; a printer named so already gets it as another nozzle"
                             if kind == "printer" else f"the name to keep an imported {kind} under in your library, instead of Orca's")

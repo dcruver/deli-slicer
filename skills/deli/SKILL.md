@@ -172,6 +172,10 @@ These keep an agent from doing what a person at the keyboard would not.
   user's installation, unless the user asks to update deli; `deli` alone
   says which version is installed and whether a newer one is out, and
   changes nothing.
+- **Do not remove a printer unasked.** `deli printer <name> --remove` deletes
+  the printer's profiles, filaments and processes from the user's library and
+  its table from the config; run it only when the user asks to remove that
+  printer.
 - **Let deli validate; do not edit `deli.toml` by hand.** Every command
   checks names and values against the engine and the chosen profiles, and
   keeps the user's comments in the file. Hand edits skip those checks. Read

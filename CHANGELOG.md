@@ -8,6 +8,9 @@ a command that works differently, are marked **Changed**.
 - A wrong or missing argument gets one line that says what to do next, with exit code 2,
   in place of argparse's usage dump: `deli slcie` suggests `deli slice`, `deli remove`
   alone names the parts, `deli load foo` names the kinds it takes.
+- `deli printer <name> --remove` takes a printer out of your config and your library, its
+  filaments and processes with it. A profile another of your printers runs stays; the print
+  in the current directory has to be on another printer first.
 - `deli update` run in the minutes between a release appearing on GitHub and PyPI serving
   it says so and asks you to try again shortly, instead of showing uv's resolver message.
   The release workflow now publishes to PyPI before it creates the GitHub release, so

@@ -224,6 +224,22 @@ def machine_of(profile: str, doc: tomlkit.TOMLDocument | None = None) -> str | N
     return next((name for name in names if machine(name, doc).for_profile(profile)), None)
 
 
+def remove_machine(name: str) -> bool:
+    """Take a printer's table out of the config, its address, settings, nozzles and defaults
+    with it, and the default printer when it was this one; True when the default went."""
+    doc = read()
+    printers = doc.get("printers", {})
+    if name in printers:
+        del printers[name]
+        if not printers:
+            del doc["printers"]
+    was_default = doc.get(DEFAULT_PRINTER) == name
+    if was_default:
+        del doc[DEFAULT_PRINTER]
+    write(doc)
+    return was_default
+
+
 def _long_form(table, name: str) -> None:
     """Write a printer's table the long way, a table per nozzle, keeping what it says."""
     if NOZZLES in table:
