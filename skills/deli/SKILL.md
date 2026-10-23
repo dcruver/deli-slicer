@@ -2,7 +2,7 @@
 name: deli
 description: Slice and print 3D models from the shell with deli, a CLI slicer front end (PrusaSlicer's engine, OrcaSlicer's printer profiles, no GUI). Use this skill whenever the user wants to slice an STL, OBJ, 3MF or AMF file, set up or inspect a print, change slicer settings (infill, walls, layer height, supports, temperatures, speeds, brim, retraction...), scale, rotate, mirror or place parts on the bed, estimate print time or filament, choose a printer, filament or process profile, add a pause or a filament change, preview G-code, or send a print to a Klipper/Moonraker, Elegoo or OctoPrint printer, even when they do not say "deli", and whenever the working directory holds a deli.toml.
 license: AGPL-3.0-only
-compatibility: Needs the `deli` command on PATH (Linux, macOS, or Windows in WSL) and a shell to run it in. Install from https://github.com/dcruver/deli-slicer.
+compatibility: Needs the `deli` command on PATH (Linux, macOS, or Windows in WSL) and a shell to run it in. Install with `uv tool install deli-slicer`; see https://github.com/dcruver/deli-slicer.
 metadata:
   author: Don Cruver
   homepage: https://github.com/dcruver/deli-slicer
@@ -73,7 +73,8 @@ print changes is counted on the Settings line and listed by `deli set`.
 Pauses are not in the block: `deli pause` alone lists them.
 
 If `deli` is not found, say so and point the user at the install line in the
-README (`curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh`);
+README (`uv tool install deli-slicer`, or without uv
+`curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh`);
 do not try to build it from source for them. If the status block says
 `Printer   none; choose one with: deli printer <name>`, the user has no
 printer set up yet: see "Setting up a printer" below.

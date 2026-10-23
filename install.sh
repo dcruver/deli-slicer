@@ -3,9 +3,10 @@
 #
 #   curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh
 #
-# Picks the wheel for this machine, installs uv first if it is not there, and installs
-# deli with uv, which fetches a Python 3.12 or newer if there is none. Run it again to
-# upgrade. DELI_VERSION=0.4.2 installs that release instead of the latest.
+# Installs uv first if it is not there, then the deli-slicer package from PyPI with uv,
+# which fetches a Python 3.12 or newer if there is none. Run it again to upgrade.
+# DELI_VERSION=0.17.0 installs that release instead of the latest; a release from before
+# deli was on PyPI (0.16.0 and earlier) is its wheel on GitHub.
 
 set -eu
 
@@ -35,12 +36,27 @@ latest() {
     echo "${tag#v}"
 }
 
+# What uv installs for a version: the package from PyPI, or for a release from before deli
+# was there (0.16.0 and earlier) its wheel on GitHub, named for the package's old name.
+target() {
+    version=$1
+    numbers=${version%%-*}
+    major=${numbers%%.*}
+    rest=${numbers#*.}
+    minor=${rest%%.*}
+    if [ "$major" -eq 0 ] && [ "$minor" -lt 17 ]; then
+        echo "https://github.com/$REPO/releases/download/v$version/deli-$version-cp312-abi3-$wheel_platform.whl"
+    else
+        echo "deli-slicer==$version"
+    fi
+}
+
 main() {
     command -v curl >/dev/null || fail "curl is needed"
     wheel_platform=$(platform)
     version=${DELI_VERSION:-$(latest)}
     version=${version#v}
-    wheel="https://github.com/$REPO/releases/download/v$version/deli-$version-cp312-abi3-$wheel_platform.whl"
+    what=$(target "$version")
 
     if ! command -v uv >/dev/null; then
         say "Installing uv, which installs deli and the Python it runs on"
@@ -50,7 +66,16 @@ main() {
     fi
 
     say "Installing deli $version"
-    uv tool install --force --python '>=3.12' "$wheel"
+    uv tool install --force --python '>=3.12' "$what"
+
+    # A deli from before the package was deli-slicer ran in a tool environment named deli;
+    # its deli command is now the new one's, and the environment only takes space. It is
+    # removed by hand: `uv tool uninstall deli` would take the command with it.
+    old="$(uv tool dir)/deli"
+    if [ -f "$old/uv-receipt.toml" ]; then
+        rm -rf "$old"
+        say "Removed $old, the environment of the old 'deli' package"
+    fi
 
     say ""
     if command -v deli >/dev/null; then

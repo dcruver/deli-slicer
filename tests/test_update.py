@@ -1,5 +1,5 @@
-"""`deli update`: the latest release found by GitHub's redirect, the wheel for this machine
-installed with uv over the deli in use. Nothing here reaches GitHub or runs uv."""
+"""`deli update`: the latest release found by GitHub's redirect, installed from PyPI with uv
+over the deli in use. Nothing here reaches GitHub, PyPI or uv."""
 
 import importlib.metadata
 
@@ -7,7 +7,7 @@ import pytest
 
 from deli import cli, update
 
-HAVE = importlib.metadata.version("deli")
+HAVE = importlib.metadata.version("deli-slicer")
 
 
 @pytest.fixture
@@ -32,8 +32,7 @@ def uv(monkeypatch):
 def test_a_newer_release_is_installed_with_uv(github, uv, capsys):
     assert cli.main(["update"]) == 0
 
-    assert uv == [["/usr/bin/uv", "tool", "install", "--force", "--python", ">=3.12",
-                   f"https://github.com/{update.REPO}/releases/download/v99.0.0/deli-99.0.0-cp312-abi3-manylinux_2_28_x86_64.whl"]]
+    assert uv == [["/usr/bin/uv", "tool", "install", "--force", "--python", ">=3.12", "deli-slicer==99.0.0"]]
     out = capsys.readouterr().out
     assert out.startswith(f"Updating deli {HAVE} to 99.0.0\n")
     assert f"deli 99.0.0 is installed; what changed: https://github.com/{update.REPO}/releases/tag/v99.0.0" in out
@@ -59,10 +58,39 @@ def test_check_says_what_is_out_and_installs_nothing(github, uv, capsys):
 
 
 def test_a_particular_release_can_be_installed_even_an_older_one(github, uv, capsys):
+    """One from before deli was on PyPI is its wheel on GitHub, under the old package name."""
     assert cli.main(["update", "v0.1.0"]) == 0
 
-    assert uv[0][-1].endswith("/v0.1.0/deli-0.1.0-cp312-abi3-manylinux_2_28_x86_64.whl")
+    assert uv[0][-1] == f"https://github.com/{update.REPO}/releases/download/v0.1.0/deli-0.1.0-cp312-abi3-manylinux_2_28_x86_64.whl"
     assert capsys.readouterr().out.startswith(f"Going back from deli {HAVE} to 0.1.0\n")
+
+
+def test_releases_on_pypi_are_installed_by_version(monkeypatch):
+    monkeypatch.setattr(update, "platform_tag", lambda: "manylinux_2_28_x86_64")
+
+    assert update.install_target("0.17.0") == "deli-slicer==0.17.0"
+    assert update.install_target("0.17.0-rc1") == "deli-slicer==0.17.0-rc1"
+    assert update.install_target("1.2.3") == "deli-slicer==1.2.3"
+    assert update.install_target("0.16.0").endswith("/v0.16.0/deli-0.16.0-cp312-abi3-manylinux_2_28_x86_64.whl")
+
+
+def test_the_old_deli_environment_goes_once_the_new_one_is_in(tmp_path):
+    """A deli from 0.16.0 or before ran in a uv tool environment named deli; only that one,
+    with uv's receipt in it, is removed."""
+    old = tmp_path / "tools" / "deli"
+    old.mkdir(parents=True)
+    (old / "uv-receipt.toml").write_text("")
+    new = tmp_path / "tools" / "deli-slicer"
+    new.mkdir()
+    (new / "uv-receipt.toml").write_text("")
+    bare = tmp_path / "other" / "deli"
+    bare.mkdir(parents=True)
+
+    assert update.remove_old_environment(update.Install("uv-tool", str(new))) is None
+    assert update.remove_old_environment(update.Install("uv-tool", str(bare))) is None
+    assert update.remove_old_environment(update.Install("checkout", str(old))) is None
+    assert update.remove_old_environment(update.Install("uv-tool", str(old))) == str(old)
+    assert not old.exists() and new.exists() and bare.exists()
 
 
 def test_a_checkout_is_left_to_git(github, uv, monkeypatch, capsys):
@@ -84,8 +112,7 @@ def test_a_deli_not_installed_by_uv_is_told_the_wheel(github, uv, monkeypatch, c
 
     assert uv == []
     err = capsys.readouterr().err
-    assert err.startswith("deli: deli was not installed by uv, so deli update cannot replace it; install https://github.com/")
-    assert err.endswith("manylinux_2_28_x86_64.whl the way deli was installed\n")
+    assert err == "deli: deli was not installed by uv, so deli update cannot replace it; install deli-slicer==99.0.0 the way deli was installed\n"
 
 
 def test_uv_failing_is_an_error(github, uv, monkeypatch, capsys):
@@ -121,7 +148,7 @@ def test_versions_order_numerically():
     assert update.key("0.2.0-rc1") < update.key("0.2.0")
 
 
-def test_the_wheel_is_named_as_the_workflow_names_it(monkeypatch):
+def test_an_old_wheel_is_named_as_the_workflow_named_it(monkeypatch):
     monkeypatch.setattr(update.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(update.platform, "machine", lambda: "arm64")
 
@@ -137,7 +164,7 @@ def test_a_machine_without_a_wheel_is_refused(monkeypatch):
 
 
 def test_the_platforms_are_install_scripts():
-    """install.sh and deli update must pick the same wheel for a machine."""
+    """install.sh and deli update must know the same machines."""
     from pathlib import Path
 
     script = Path(__file__).resolve().parent.parent / "install.sh"

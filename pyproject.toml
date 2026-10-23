@@ -1,5 +1,5 @@
 [project]
-name = "deli"
+name = "deli-slicer"  # the command, and the import package, are deli; PyPI's deli is another project
 version = "0.16.0"
 description = "CLI-first slicer front end for 3D printing"
 readme = "README.md"
@@ -26,7 +26,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dcruver/deli-slicer"
+Homepage = "https://dcruver.github.io/deli-slicer/"
+Repository = "https://github.com/dcruver/deli-slicer"
 Changelog = "https://github.com/dcruver/deli-slicer/blob/main/CHANGELOG.md"
 Issues = "https://github.com/dcruver/deli-slicer/issues"
 Printers = "https://github.com/dcruver/deli-slicer/blob/main/PRINTERS.md"
@@ -43,6 +44,8 @@ build-backend = "scikit_build_core.build"
 build-dir = "build/{wheel_tag}"
 # One wheel per platform: the module uses Python's stable ABI.
 wheel.py-api = "cp312"
+# The package is deli, not the distribution's deli_slicer, which scikit-build-core would look for.
+wheel.packages = ["src/deli"]
 wheel.exclude = ["**/*.cpp"]
 # libslic3r's largest sources need several GB each to compile.
 build.tool-args = ["-j8"]

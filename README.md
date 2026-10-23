@@ -22,7 +22,7 @@ from an AI assistant"). When something needs seeing, `deli view` shows the parts
 the sliced G-code in your browser, and even there every change it makes is a deli
 command you could have typed.
 
-![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy, deli status, slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](docs/images/demo.gif)
+![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy, deli status, slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](https://raw.githubusercontent.com/dcruver/deli-slicer/main/docs/images/demo.gif)
 
 ```
 deli setup                # once: tab completion, your printer, and how to reach it
@@ -60,45 +60,40 @@ The longer story, with clips of each part, is in the blog post
 
 ## Install
 
-deli is a Python package with PrusaSlicer's slicing engine compiled in. On Linux
-(and Windows, in WSL: see below) or macOS, in one line:
+deli is a Python package with PrusaSlicer's slicing engine compiled in, on PyPI as
+[`deli-slicer`](https://pypi.org/project/deli-slicer/). On Linux (and Windows, in WSL:
+see below) or macOS, with [`uv`](https://docs.astral.sh/uv/):
+
+```
+uv tool install deli-slicer
+```
+
+(`pipx install deli-slicer` does the same.) Without uv, one line installs it first,
+then deli:
 
 ```
 curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh
 ```
 
-[The script](install.sh) installs the latest release's wheel for your machine with
-[`uv`](https://docs.astral.sh/uv/), installing uv first if you don't have it; uv
-fetches Python 3.12 if you don't have that either. Then run `deli setup`. Later,
+Either way uv fetches Python 3.12 if you don't have it. Then run `deli setup`. Later,
 `deli update` installs the latest release the same way (`--check` only says whether
-there is one; `deli update 0.14.0` a particular release), or run the script again,
-with `DELI_VERSION=0.14.0` in front of `sh` for a particular release. `deli status`
-mentions a newer release when one is out, looking once a day; `deli config
-update_check false` stops it looking.
+there is one; `deli update 0.17.0` a particular release), or run [the
+script](install.sh) again, with `DELI_VERSION=0.17.0` in front of `sh` for a particular
+release. `deli status` mentions a newer release when one is out, looking once a day;
+`deli config update_check false` stops it looking.
 
-### From a release, by hand
+### The wheels
 
-You need Python 3.12 or newer and `uv` (or `pipx`).
+Each release is four wheels, one per platform with the engine inside, on PyPI and on
+the [release](https://github.com/dcruver/deli-slicer/releases) page; nothing needs
+building, and `pip install deli-slicer` in an environment of your own takes them too.
+The Linux wheels need glibc 2.28 or newer, which most distributions from 2019 on have:
+Debian 10, Ubuntu 18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. The macOS wheels need
+macOS 11 (Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer.
 
-Each [release](https://github.com/dcruver/deli-slicer/releases) has a wheel for each
-platform with the engine inside; nothing else needs building. Install the one for your
-machine (for 0.15.0):
-
-```
-# Linux, x86-64 (most PCs)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-manylinux_2_28_x86_64.whl
-# Linux, ARM64 (Raspberry Pi 4/5 on a 64-bit OS, ARM servers)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-manylinux_2_28_aarch64.whl
-# macOS, Apple Silicon (M1 and later)
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-macosx_11_0_arm64.whl
-# macOS, Intel
-uv tool install https://github.com/dcruver/deli-slicer/releases/download/v0.15.0/deli-0.15.0-cp312-abi3-macosx_10_15_x86_64.whl
-```
-
-(`pipx install` takes the same URLs.) That puts `deli` on your PATH. The Linux wheels
-need glibc 2.28 or newer, which most distributions from 2019 on have: Debian 10,
-Ubuntu 18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. The macOS wheels need macOS 11
-(Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer.
+Releases up to 0.16.0 were on GitHub only, under the package name `deli`, which on PyPI
+is another project. A deli that old cannot `deli update` past it: run the install line
+above once more, which also clears the old package's environment away.
 
 ### On Windows, in WSL
 
@@ -512,7 +507,7 @@ MakerWorld, Thangs, Cults3D and MyMiniFactory want an account before handing out
 For those, download the file in your browser and `deli add` it; support for a site is
 added when it turns out to have a way in like Printables', one site at a time.
 
-![deli add given a Printables model's address lists its two files, fetches the one named with --file, then deli supports organic, deli slice and deli view](docs/images/demo-printables.gif)
+![deli add given a Printables model's address lists its two files, fetches the one named with --file, then deli supports organic, deli slice and deli view](https://raw.githubusercontent.com/dcruver/deli-slicer/main/docs/images/demo-printables.gif)
 
 The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
 `deli send` and `deli view` find it there, and `deli send` slices again by itself when
@@ -613,7 +608,7 @@ The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
 `deli slice` draws one into the G-code for the printer's screen.
 
-![deli view in a browser: a sliced model with organic supports building up layer by layer, coloured by what each extrusion is for; the supports hidden and shown again from the legend; then one layer at a time with "only this layer"](docs/images/demo-view-supports.gif)
+![deli view in a browser: a sliced model with organic supports building up layer by layer, coloured by what each extrusion is for; the supports hidden and shown again from the legend; then one layer at a time with "only this layer"](https://raw.githubusercontent.com/dcruver/deli-slicer/main/docs/images/demo-view-supports.gif)
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli mirror`, `deli move` and `deli pause` without arguments show what

@@ -18,7 +18,7 @@ def test_version_is_the_installed_packages(capsys):
         main(["--version"])
 
     assert exit.value.code == 0
-    assert capsys.readouterr().out == f"deli {importlib.metadata.version('deli')}\n"
+    assert capsys.readouterr().out == f"deli {importlib.metadata.version('deli-slicer')}\n"
 
 
 def test_an_engine_older_than_the_python_is_refused(monkeypatch, capsys):

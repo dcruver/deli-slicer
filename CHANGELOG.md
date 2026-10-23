@@ -3,6 +3,16 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- **Changed:** deli is on PyPI as `deli-slicer`: `uv tool install deli-slicer` (or
+  `pipx install deli-slicer`) installs it, and `deli update` and the install script
+  install from there, by version. The package was named `deli` before, which on PyPI is
+  another project, so the wheels are now named `deli_slicer-...`, and a deli 0.16.0 or
+  older cannot `deli update` to this release: run the install line once more, which also
+  removes the old package's tool environment (`deli update` from this release on does the
+  same). The `deli` command, the import package and `deli.toml` are as they were.
+
 ## 0.16.0 (2026-10-22)
 
 - `deli add <url>` fetches a model from the web into the print's directory and adds it,

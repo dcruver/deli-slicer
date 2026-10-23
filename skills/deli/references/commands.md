@@ -168,7 +168,7 @@ library is `~/.config/deli/`: `printers/<name>.ini`,
 | `deli config KEY` | one value |
 | `deli config KEY VALUE` | set one |
 | `deli config --unset KEY` | remove one |
-| `deli update [--check]` | install the latest release of deli from GitHub over this one (`--check` only says whether there is one). Run it only when the user asks to update deli |
+| `deli update [--check]` | install the latest release of deli from PyPI over this one (`--check` only says whether there is one). Run it only when the user asks to update deli |
 
 Keys:
 

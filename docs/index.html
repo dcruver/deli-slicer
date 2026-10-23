@@ -106,9 +106,11 @@ deli send --print         <span class="comment"># to the printer, and start it</
 
 <section id="install">
   <h2>Install</h2>
-  <p>On Linux, in WSL on Windows, or on macOS, in one line. It installs the release built for this machine with <a href="https://docs.astral.sh/uv/">uv</a>.</p>
+  <p>On Linux, in WSL on Windows, or on macOS. deli is on PyPI as <a href="https://pypi.org/project/deli-slicer/">deli-slicer</a>, with the engine inside, so <a href="https://docs.astral.sh/uv/">uv</a> (or pipx) installs it:</p>
+  <pre><code>uv tool install deli-slicer</code></pre>
+  <p>Without uv, one line installs it first, then deli:</p>
   <pre><code>curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh</code></pre>
-  <p>Each <a href="https://github.com/dcruver/deli-slicer/releases">release</a> has a wheel per platform if you would rather install one yourself. Then <code>deli setup</code>.</p>
+  <p>Then <code>deli setup</code>. The same wheels are on each <a href="https://github.com/dcruver/deli-slicer/releases">release</a>.</p>
 </section>
 
 <section id="update">

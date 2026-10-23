@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "deli"
+name = "deli-slicer"
 version = "0.16.0"
 source = { editable = "." }
 dependencies = [

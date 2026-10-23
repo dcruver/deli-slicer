@@ -1,6 +1,7 @@
 # Builds deli's wheels, one per platform (the engine uses Python's stable ABI, so a wheel
 # serves every Python from 3.12 on), and runs the tests against each on a clean machine.
-# A tag vX.Y.Z also publishes them as a GitHub release; its version must be pyproject's.
+# A tag vX.Y.Z also publishes them as a GitHub release and to PyPI as deli-slicer; its
+# version must be pyproject's.
 name: wheels
 
 on:
@@ -346,12 +347,13 @@ jobs:
         run: |
           ls -l wheelhouse
           cat > notes.md <<NOTES
-          Install the wheel for your platform with pip or uv, for example:
+          Install or update with uv (or pipx), from PyPI:
 
-              pip install https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME/<wheel file>
-              uv tool install https://github.com/$GH_REPO/releases/download/$GITHUB_REF_NAME/<wheel file>
+              uv tool install --force deli-slicer==${GITHUB_REF_NAME#v}
 
-          Each wheel serves Python 3.12 and later. The Linux wheels need glibc 2.28 or later
+          or \`deli update\` from a deli already installed. The wheels below are the same ones
+          PyPI has, one per platform; \`uv tool install <wheel URL>\` takes one directly. Each
+          serves Python 3.12 and later. The Linux wheels need glibc 2.28 or later
           (most distributions from 2019 on); the macOS wheels need macOS 11 (Apple Silicon)
           or 10.15 (Intel).
           NOTES
@@ -359,3 +361,26 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; *) pre= ;; esac
           gh release create "$GITHUB_REF_NAME" wheelhouse/*.whl --verify-tag --title "deli ${GITHUB_REF_NAME#v}" \
             --notes-file notes.md --generate-notes $pre
+
+  # The same wheels on PyPI, as deli-slicer, through PyPI's trusted publishing: this
+  # repository's wheels.yml, run in the `pypi` environment, is registered on PyPI as the
+  # project's publisher, so no token is kept here. A tag with a - is a pre-release there too,
+  # which pip and uv skip unless asked for.
+  pypi:
+    name: PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test-linux, test-wsl, test-macos]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: wheelhouse
+          merge-multiple: true
+      - run: ls -l wheelhouse
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse

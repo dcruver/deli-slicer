@@ -1,10 +1,11 @@
-"""`deli update`: the latest release from GitHub, installed the way install.sh installs it.
+"""`deli update`: the latest release, installed from PyPI the way install.sh installs it.
 
-The latest release is found as install.sh finds it, by the redirect of the releases/latest
-page, which needs no GitHub API call and so has no rate limit. The wheel for this machine
-is the one install.sh would pick, and uv installs it over the one in use, so a deli that
-install.sh put in place updates itself. A deli running from a checkout (`make install`)
-is left to git; one installed some other way is told the wheel to install.
+The latest release is found as install.sh finds it, by the redirect of GitHub's
+releases/latest page, which needs no API call and so has no rate limit. uv installs that
+version of the package over the one in use, so a deli that install.sh put in place updates
+itself. A release from before deli was on PyPI is its wheel on GitHub. A deli running from
+a checkout (`make install`) is left to git; one installed some other way is told what to
+install.
 """
 
 from __future__ import annotations
@@ -23,12 +24,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = "dcruver/deli-slicer"
+PACKAGE = "deli-slicer"  # on PyPI; the command, and the import package, are deli
+ON_PYPI_SINCE = "0.17.0"  # earlier releases are wheels on GitHub only, named deli-<version>
 LATEST = f"https://github.com/{REPO}/releases/latest"
 TIMEOUT = 30
 DAY = 24 * 3600  # how often `deli status` looks for a release
 RETRY = 3600  # how soon it looks again after GitHub could not be reached
 
-# What install.sh picks for each machine; the wheel workflow builds these four.
+# The machines the wheel workflow builds for, as install.sh names them: a machine not here
+# is told so, rather than left to uv's "no matching distribution".
 PLATFORMS = {
     ("Linux", "x86_64"): "manylinux_2_28_x86_64",
     ("Linux", "aarch64"): "manylinux_2_28_aarch64",
@@ -50,14 +54,14 @@ class Install:
 
 
 def installed() -> str:
-    return importlib.metadata.version("deli")
+    return importlib.metadata.version(PACKAGE)
 
 
 def how_installed() -> Install:
     """A checkout is an editable install (`make install`); a uv tool environment carries
     uv's receipt beside its lib; anything else is "other"."""
     try:
-        text = importlib.metadata.distribution("deli").read_text("direct_url.json")
+        text = importlib.metadata.distribution(PACKAGE).read_text("direct_url.json")
         direct = json.loads(text) if text else {}
     except (importlib.metadata.PackageNotFoundError, ValueError):
         direct = {}
@@ -82,8 +86,18 @@ def platform_tag() -> str:
 
 
 def wheel_url(version: str, tag: str | None = None) -> str:
+    """A release's wheel for this machine on GitHub, named as the workflow named it before
+    the package was deli-slicer."""
     tag = tag or platform_tag()
     return f"https://github.com/{REPO}/releases/download/v{version}/deli-{version}-cp312-abi3-{tag}.whl"
+
+
+def install_target(version: str) -> str:
+    """What uv installs for a version: the package from PyPI, or for a release from before
+    deli was there its wheel on GitHub. A pre-release of the first PyPI version is on PyPI."""
+    if key(version)[0] >= key(ON_PYPI_SINCE)[0]:
+        return f"{PACKAGE}=={version}"
+    return wheel_url(version)
 
 
 def _final_url(url: str, timeout: float = TIMEOUT) -> str:
@@ -123,20 +137,32 @@ def uv() -> str:
     return found
 
 
-def install_command(url: str) -> list[str]:
-    return [uv(), "tool", "install", "--force", "--python", ">=3.12", url]
+def install_command(target: str) -> list[str]:
+    return [uv(), "tool", "install", "--force", "--python", ">=3.12", target]
 
 
-def install(url: str) -> None:
-    """Install the wheel at `url` over this deli. uv's own output is shown, since it may
-    take a while and say why it failed."""
-    command = install_command(url)
+def install(target: str) -> None:
+    """Install `target`, a package version or a wheel's URL, over this deli. uv's own
+    output is shown, since it may take a while and say why it failed."""
+    command = install_command(target)
     try:
         finished = subprocess.run(command, check=False)
     except OSError as err:
         raise UpdateError(f"could not run uv ({err})") from None
     if finished.returncode:
-        raise UpdateError(f"uv could not install {url} (exit code {finished.returncode})")
+        raise UpdateError(f"uv could not install {target} (exit code {finished.returncode})")
+
+
+def remove_old_environment(how: Install) -> str | None:
+    """The tool environment a deli from before the package was deli-slicer runs in is
+    named deli; once deli-slicer is installed, its `deli` command is the new one's, and the
+    old environment only takes space. It is removed by hand, after the install: `uv tool
+    uninstall deli` would take the `deli` command with it (checked). Returns what was
+    removed."""
+    if how.kind == "uv-tool" and Path(how.where).name == "deli" and Path(how.where, "uv-receipt.toml").exists():
+        shutil.rmtree(how.where, ignore_errors=True)
+        return how.where
+    return None
 
 
 def _checked() -> Path:

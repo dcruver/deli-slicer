@@ -2561,9 +2561,9 @@ def _setup(args: argparse.Namespace) -> int:
 
 
 def _update(args: argparse.Namespace) -> int:
-    """`deli update [VERSION] [--check]`: the latest release from GitHub (or VERSION),
-    installed over this one with uv, as install.sh installs it. Everything the command
-    needs is imported before uv replaces deli's files under it."""
+    """`deli update [VERSION] [--check]`: the latest release (or VERSION), installed over
+    this one with uv from PyPI, as install.sh installs it. Everything the command needs is
+    imported before uv replaces deli's files under it."""
     from deli import update
 
     have = update.installed()
@@ -2573,17 +2573,20 @@ def _update(args: argparse.Namespace) -> int:
             print(f"deli {have} is the latest release" if not args.version else f"deli {have} is what you have")
             return 0
         newer = update.key(want) > update.key(have)
-        url = update.wheel_url(want)
         if args.check:
             print(f"deli {want} is out; you have {have}. Update with: deli update" if newer else f"deli {want} is older than your {have}")
             return 0
+        update.platform_tag()  # a machine without a wheel is told so here, in deli's words
+        target = update.install_target(want)
         how = update.how_installed()
         if how.kind == "checkout":
             raise update.UpdateError(f"this deli runs from the checkout at {how.where}, not a release; update it with: git -C {how.where} pull && make -C {how.where} reinstall")
         if how.kind != "uv-tool":
-            raise update.UpdateError(f"deli was not installed by uv, so deli update cannot replace it; install {url} the way deli was installed")
+            raise update.UpdateError(f"deli was not installed by uv, so deli update cannot replace it; install {target} the way deli was installed")
         print(f"{'Updating' if newer else 'Going back from'} deli {have} to {want}")
-        update.install(url)
+        update.install(target)
+        if removed := update.remove_old_environment(how):
+            print(f"Removed {removed}, the environment of the old 'deli' package; the package is deli-slicer now")
     except update.UpdateError as err:
         raise CommandError(str(err)) from None
     print(f"deli {want} is installed; what changed: https://github.com/{update.REPO}/releases/tag/v{want}")
@@ -2612,7 +2615,7 @@ def _complete(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="deli", description="CLI-first slicer front end for 3D printing.")
-    parser.add_argument("--version", action="version", version=f"deli {importlib.metadata.version('deli')}")
+    parser.add_argument("--version", action="version", version=f"deli {importlib.metadata.version('deli-slicer')}")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     load = commands.add_parser(

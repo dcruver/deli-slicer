@@ -63,7 +63,7 @@ both. Keep the page to what the README's first screen says; the README stays the
 documentation. The install line and the five commands on it match the README's.
 
 
-`docs/images/demo.gif` is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`
+`docs/images/demo.gif` (linked from the README by its raw.githubusercontent address, so PyPI shows it too) is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`
 against `demo/fake_moonraker.py` (a stand-in Klipper printer), adds and slices a Benchy
 (`demo/readme.tape`), records the viewer frame by frame (`demo/viewer.py`), sends the
 print (`demo/send.tape`) and joins the three. It needs [VHS](https://github.com/charmbracelet/vhs)
@@ -91,4 +91,7 @@ deli's wheels is listed, with its licences, in
 
 For the maintainer: set `version` in `pyproject.toml`, move CHANGELOG.md's Unreleased
 section under that version, commit, and push a tag `vX.Y.Z` with the same version. The
-workflow builds and tests every platform's wheel and publishes the release.
+workflow builds and tests every platform's wheel, publishes the GitHub release, and
+uploads the wheels to PyPI as `deli-slicer` through trusted publishing (the `pypi` job
+and environment; PyPI's project settings name this repository and workflow as the
+publisher, so no token is kept anywhere).
