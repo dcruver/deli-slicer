@@ -90,6 +90,9 @@ building, and `pip install deli-slicer` in an environment of your own takes them
 The Linux wheels need glibc 2.28 or newer, which most distributions from 2019 on have:
 Debian 10, Ubuntu 18.10, RHEL/Alma/Rocky 8, Fedora 29 and later. The macOS wheels need
 macOS 11 (Apple Silicon) or 10.15 (Intel). All of them need Python 3.12 or newer.
+uv itself runs on any of those Linuxes but needs macOS 13; on an older Intel Mac,
+install Python 3.12 and use `pipx install deli-slicer`, or `pip install deli-slicer` in a
+virtual environment of your own.
 
 Releases up to 0.16.0 were on GitHub only, under the package name `deli`, which on PyPI
 is another project. A deli that old cannot `deli update` past it: run the install line
