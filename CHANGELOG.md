@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.17.0 (2026-10-23)
 
 - **Changed:** deli is on PyPI as `deli-slicer`: `uv tool install deli-slicer` (or
   `pipx install deli-slicer`) installs it, and `deli update` and the install script
