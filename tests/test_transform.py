@@ -542,6 +542,14 @@ def test_arrange_forgets_every_place_and_plate(job, capsys):
     assert capsys.readouterr().out == "Every part is already placed automatically\n"
 
 
+def test_remove_without_a_part_names_the_parts(job, capsys):
+    with pytest.raises(SystemExit) as exit:
+        main(["remove"])
+
+    assert exit.value.code == 2
+    assert capsys.readouterr().err == "deli: usage: deli remove <part> [--count N|--copy N]; the parts here: cube\n"
+
+
 @pytest.mark.parametrize(("args", "message"), [(["far", "50"], "not a distance"), (["1", "2", "3"], "usage"), (["50"], "usage")])
 def test_bad_moves_are_refused(job, capsys, args, message):
     assert main(["move", *args]) == 1

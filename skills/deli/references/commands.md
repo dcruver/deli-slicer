@@ -4,8 +4,10 @@ Every command works on the print in the current directory (`deli.toml`), prints
 what it did, and exits 0; an error goes to stderr with exit code 1 and says what
 to do next (`deli send` exits 3 when the printer cannot be reached and 4 when it
 is busy or refused, so a script can tell those from a mistake). `deli status --json`
-and `deli slice --json` give their facts as data. `deli <command> --help` is the authoritative reference for the
-installed version.
+and `deli slice --json` give their facts as data. A wrong or missing argument is one line too, with exit code 2 (`deli slcie`
+suggests `deli slice`; `deli remove` alone names the parts). `deli` alone prints the
+installed version and whether a newer release is out. `deli <command> --help` is the
+authoritative reference for the installed version.
 
 Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 [placing parts](#placing-parts) · [pauses](#pauses) · [slicing, viewing, sending](#slicing-viewing-sending) ·
@@ -169,7 +171,7 @@ library is `~/.config/deli/`: `printers/<name>.ini`,
 | `deli config KEY` | one value |
 | `deli config KEY VALUE` | set one |
 | `deli config --unset KEY` | remove one |
-| `deli update [--check]` | install the latest release of deli from PyPI over this one (`--check` only says whether there is one). Run it only when the user asks to update deli |
+| `deli update [--check]` | install the latest release of deli from PyPI over this one (`--check`, or `deli` alone, only says whether there is one). Run it only when the user asks to update deli |
 
 Keys:
 

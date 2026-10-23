@@ -123,6 +123,42 @@ def test_uv_failing_is_an_error(github, uv, monkeypatch, capsys):
     assert capsys.readouterr().err.endswith("(exit code 2)\n")
 
 
+def test_a_release_pypi_does_not_serve_yet_is_said(github, uv, monkeypatch, capsys):
+    """A release is on GitHub minutes before PyPI serves it; uv's resolver message is not the
+    answer."""
+    import urllib.error
+
+    def final(url, timeout=None):
+        if "pypi.org" in url:
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+        return f"https://github.com/{update.REPO}/releases/tag/v99.0.0"
+
+    monkeypatch.setattr(update, "_final_url", final)
+
+    assert cli.main(["update"]) == 1
+
+    assert uv == []
+    assert capsys.readouterr().err == (
+        "deli: deli 99.0.0 is released, but PyPI does not serve it yet; "
+        "a release reaches PyPI a few minutes after GitHub, so try again shortly\n"
+    )
+
+    assert cli.main(["update", "0.17.0"]) == 1
+    assert capsys.readouterr().err == f"deli: PyPI has no deli-slicer 0.17.0; the releases are at https://github.com/{update.REPO}/releases\n"
+
+
+def test_pypi_out_of_reach_is_left_to_uv(github, uv, monkeypatch):
+    def final(url, timeout=None):
+        if "pypi.org" in url:
+            raise OSError("no route to host")
+        return f"https://github.com/{update.REPO}/releases/tag/v99.0.0"
+
+    monkeypatch.setattr(update, "_final_url", final)
+
+    assert cli.main(["update"]) == 0
+    assert len(uv) == 1
+
+
 def test_github_out_of_reach_is_an_error(monkeypatch, capsys):
     def down(url, timeout=None):
         raise OSError("no route to host")

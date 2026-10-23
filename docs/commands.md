@@ -28,4 +28,4 @@ in depth; `deli <command> --help` is the authoritative list for the version you 
 | `deli send [FILE] [--print] [--level] [--plate N] [--name NAME]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N`; `--name` for what to call it there; `--level` with `--print` has an Elegoo printer level its bed first. A printer that is printing is said to be, not sent to; exit code 3 when it cannot be reached, 4 when it is busy |
 | `deli config [key] [value] [--unset KEY]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile; `--unset` removes a key |
 | `deli completion bash\|zsh\|fish` | shell completion |
-| `deli update [version] [--check]` | install the latest release from GitHub over this one, or say whether there is one |
+| `deli update [version] [--check]` | install the latest release over this one, from PyPI; `--check` only says whether there is one, as `deli` alone does |
