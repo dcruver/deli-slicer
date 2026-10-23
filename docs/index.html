@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deli slicer</title>
+<meta name="description" content="A CLI-first slicer front end for 3D printing. A print is a deli.toml in a folder, sliced in-process by PrusaSlicer's libslic3r with OrcaSlicer's printer profiles, neither slicer installed.">
+<meta property="og:title" content="deli: a slicer that lives in your shell">
+<meta property="og:description" content="A print is a deli.toml in a folder, sliced by PrusaSlicer's engine with OrcaSlicer's printer profiles, neither installed. Plain text and --json out; a small web view for what needs seeing.">
+<meta property="og:image" content="https://raw.githubusercontent.com/dcruver/deli-slicer/main/docs/images/demo.gif">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1f24; --muted: #5d6370; --line: #e3e1da;
+    --card: #ffffff; --code-bg: #f1efe8; --accent: #b4511c; --accent-fg: #ffffff; --link: #9a4315;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171c; --fg: #e8e6e1; --muted: #9aa0ab; --line: #2b2f37;
+      --card: #1c1f26; --code-bg: #0f1115; --accent: #e3804c; --accent-fg: #15171c; --link: #f0a070;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171c; --fg: #e8e6e1; --muted: #9aa0ab; --line: #2b2f37;
+    --card: #1c1f26; --code-bg: #0f1115; --accent: #e3804c; --accent-fg: #15171c; --link: #f0a070;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 0 16px 48px; }
+  a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  header { padding: 56px 0 8px; }
+  header h1 { font-size: 2.6rem; line-height: 1.1; margin: 0 0 10px; letter-spacing: -0.01em; }
+  header h1 small { display: block; font-size: 1.15rem; font-weight: 500; color: var(--muted); margin-top: 8px; letter-spacing: 0; }
+  .lede { font-size: 1.15rem; max-width: 42em; margin: 18px 0 22px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 36px; }
+  .button {
+    display: inline-block; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); text-decoration: none; font-weight: 500;
+  }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  figure { margin: 0 0 12px; }
+  figure img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); background: #1e1e2e; }
+  figcaption { color: var(--muted); font-size: 0.92rem; margin-top: 8px; }
+  pre, code { font: 0.92em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: 10px; overflow-x: auto; margin: 0; }
+  pre code { background: none; padding: 0; }
+  .comment { color: var(--muted); }
+  section { margin-top: 44px; }
+  h2 { font-size: 1.45rem; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .points { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+  .points li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .points b { display: block; margin-bottom: 4px; }
+  .points p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .status { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; color: var(--muted); }
+  .two { display: grid; grid-template-columns: 1fr; gap: 28px; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+  footer p { margin: 6px 0; }
+  @media (max-width: 480px) {
+    header { padding-top: 36px; }
+    header h1 { font-size: 2.1rem; }
+    body { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>deli<small>A CLI-first slicer front end for 3D printing</small></h1>
+  <p class="lede">A print is a <code>deli.toml</code> in a folder, sliced in-process by PrusaSlicer's engine with
+  OrcaSlicer's printer profiles, neither slicer installed. Plain text and <code>--json</code> out, so it is simple
+  to use directly or through an AI. A small web view for what needs seeing.</p>
+  <div class="actions">
+    <a class="button primary" href="#install">Install</a>
+    <a class="button" href="https://github.com/dcruver/deli-slicer">GitHub</a>
+    <a class="button" href="https://github.com/dcruver/deli-slicer#readme">README</a>
+    <a class="button" href="https://hullabalooing.cruver.ai/side-projects/posts/deli-a-3d-printer-slicer-that-lives-in-my-shell/">The story</a>
+  </div>
+</header>
+
+<figure>
+  <img src="images/demo.gif" alt="deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy, deli status, slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print" width="1280" height="720">
+  <figcaption>Setting up a printer by its address, adding and slicing a Benchy, watching it build up in <code>deli view</code>, and sending it.</figcaption>
+</figure>
+
+<pre><code>deli setup                <span class="comment"># once: tab completion, your printer, and how to reach it</span>
+deli add 3DBenchy.stl
+deli slice                <span class="comment"># how long it will take, and how much filament</span>
+deli view                 <span class="comment"># the sliced Benchy in your browser, layer by layer</span>
+deli send --print         <span class="comment"># to the printer, and start it</span></code></pre>
+
+<section>
+  <h2>What it is</h2>
+  <ul class="points">
+    <li><b>Lives in your shell</b><p>Each command does one thing to the print in the current directory and exits. No REPL, no TUI, no window to keep open.</p></li>
+    <li><b>A print is a text file</b><p><code>deli.toml</code> holds the parts, the profiles and only the settings you changed. Come back months later and <code>deli send --print</code> prints the same thing.</p></li>
+    <li><b>No slicer to install</b><p>PrusaSlicer's <code>libslic3r</code> is compiled in, and the printer profiles are converted from OrcaSlicer's repository. The printers Orca knows are a <code>deli setup</code> away.</p></li>
+    <li><b>Settings by name</b><p><code>deli set infill 20%</code>. When the name is not quite right, deli suggests the ones that are close. Defaults never get in the way.</p></li>
+    <li><b>Simple directly or through an AI</b><p>Plain text and <code>--json</code> out, exit codes you can branch on, and a skill that briefs an assistant. Nothing in deli calls a model or needs one.</p></li>
+    <li><b>Your printer, not a cloud</b><p>Sends to Klipper's Moonraker, Elegoo's and OctoPrint's own interfaces on your network. No account, no telemetry.</p></li>
+  </ul>
+</section>
+
+<section id="install">
+  <h2>Install</h2>
+  <p>On Linux, in WSL on Windows, or on macOS, in one line. It installs the release built for this machine with <a href="https://docs.astral.sh/uv/">uv</a>.</p>
+  <pre><code>curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh</code></pre>
+  <p>Each <a href="https://github.com/dcruver/deli-slicer/releases">release</a> has a wheel per platform if you would rather install one yourself. Then <code>deli setup</code>.</p>
+</section>
+
+<section>
+  <h2>A print is a text file you can read</h2>
+  <p>Everything about the print is here, and nothing that stayed at its default. Edit it, comment it, commit it.</p>
+  <pre><code><span class="comment"># deli.toml</span>
+[printer]
+name = "voron-2.4-350-0.4-nozzle"
+
+[[part]]
+file = "3DBenchy.stl"
+scale = [1.5, 1.5, 1.5]
+rotate = [0, 0, 45]
+at = [60, 80]
+
+[settings]
+fill_density = "20%"
+support_material = 1
+support_material_style = "organic"</code></pre>
+</section>
+
+<section>
+  <h2>Models from the web, and what needs seeing</h2>
+  <div class="two">
+    <figure>
+      <img src="images/demo-printables.gif" alt="deli add given a Printables model's address lists its two files, fetches the one named with --file, then deli supports organic, deli slice and deli view" width="1280" height="720" loading="lazy">
+      <figcaption><code>deli add</code> takes a model's address: a file, a zip, a page linking to files, or a Printables model, whose files it lists and fetches through the site's own API.</figcaption>
+    </figure>
+    <figure>
+      <img src="images/demo-view-supports.gif" alt="deli view in a browser: a sliced model with organic supports building up layer by layer, coloured by what each extrusion is for; the supports hidden and shown again from the legend; then one layer at a time" width="1280" height="720" loading="lazy">
+      <figcaption><code>deli view</code> shows the sliced G-code in your browser: every move coloured by what it is for, a slider through the layers, and tools that write the deli command you could have typed.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <h2>Where it stands</h2>
+  <p class="status">Early. Everything above works. deli converts and slices for most of the printers OrcaSlicer knows,
+  but has printed on two so far: a Voron 2.4 and an Elegoo Centauri Carbon. The README's
+  <a href="https://github.com/dcruver/deli-slicer#not-done-yet">Not done yet</a> says what is missing, and an
+  <a href="https://github.com/dcruver/deli-slicer/issues">issue</a> about your printer is welcome.</p>
+</section>
+
+<footer>
+  <p>deli is free software under the <a href="https://github.com/dcruver/deli-slicer/blob/main/LICENSE">AGPL-3.0</a>, because it links
+  <a href="https://github.com/prusa3d/PrusaSlicer">PrusaSlicer</a>'s <code>libslic3r</code>. Printer profiles come from
+  <a href="https://github.com/SoftFever/OrcaSlicer">OrcaSlicer</a>. Neither project is affiliated with deli.</p>
+  <p>Made by <a href="https://github.com/dcruver">Don Cruver</a>.</p>
+</footer>
+</main>
+</body>
+</html>

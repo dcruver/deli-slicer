@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Record images/demo.gif, the README's clip: choosing a printer, adding and slicing a
+# Record docs/images/demo.gif, the README's clip: choosing a printer, adding and slicing a
 # Benchy (readme.tape), the sliced Benchy in deli view (viewer.py), and sending it to a
 # printer (send.tape, against fake_moonraker.py). Needs VHS with ttyd, ffmpeg, and
 # Python with Playwright for the viewer (PYTHON, default python3). Run from anywhere.
@@ -22,5 +22,5 @@ vhs send.tape
 # viewer's colours survive.
 ffmpeg -v error -y -i work/part1.mp4 -i work/part2.mp4 -i work/part3.mp4 -filter_complex \
   "[0]fps=10,scale=1280:720,setsar=1[a];[1]fps=10,scale=1280:720,setsar=1[b];[2]fps=10,scale=1280:720,setsar=1[c];[a][b][c]concat=n=3:v=1[v];[v]split[x][y];[x]palettegen=stats_mode=full[p];[y][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" \
-  ../images/demo.gif
-ls -l ../images/demo.gif
+  ../docs/images/demo.gif
+ls -l ../docs/images/demo.gif

@@ -5,15 +5,24 @@ A CLI-first slicer front end for 3D printing.
 `deli` keeps a print job as a plain-text `deli.toml` in the current directory. Each
 subcommand edits that file and exits, so a print is set up with a few commands in a
 shell and a file you can read, with nothing else to open. Slicing
-is done in-process by PrusaSlicer's `libslic3r`, so no slicer application needs to be
-installed.
+is done in-process by PrusaSlicer's `libslic3r`, and the printer profiles come from
+OrcaSlicer's repository, converted by deli, so neither slicer needs to be installed:
+the printers OrcaSlicer knows are a `deli setup` away on a machine that has never had a
+slicer on it.
 
 A folder of models is the project, and there is nothing to save: every command
 updates `deli.toml` as it goes. Come back months later, `cd` into the folder, and
 `deli send --print` prints the same parts, placed the same way, with the same profiles
 and settings.
 
-![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy, deli status, slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](images/demo.gif)
+Everything deli prints is plain text, with `--json` where a program wants data, and
+every command is one a shell runs. That makes deli simple for humans to use directly or
+through an AI: the repository ships a skill that briefs an assistant (see "Using deli
+from an AI assistant"). When something needs seeing, `deli view` shows the parts and
+the sliced G-code in your browser, and even there every change it makes is a deli
+command you could have typed.
+
+![deli setup asking a Klipper printer at its address what it is and choosing the Voron 2.4 that fits, then adding a Benchy, deli status, slicing it, the sliced Benchy building up layer by layer in deli view, and deli send --print](docs/images/demo.gif)
 
 ```
 deli setup                # once: tab completion, your printer, and how to reach it
@@ -503,6 +512,8 @@ MakerWorld, Thangs, Cults3D and MyMiniFactory want an account before handing out
 For those, download the file in your browser and `deli add` it; support for a site is
 added when it turns out to have a way in like Printables', one site at a time.
 
+![deli add given a Printables model's address lists its two files, fetches the one named with --file, then deli supports organic, deli slice and deli view](docs/images/demo-printables.gif)
+
 The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
 `deli send` and `deli view` find it there, and `deli send` slices again by itself when
 the print has changed since. `deli slice -o FILE` (or `-o DIR`, `-o .` for here) also
@@ -602,7 +613,7 @@ The page is served in the background until it has been closed for ten
 minutes, or until `deli view --stop`. When the printer's profile asks for a thumbnail,
 `deli slice` draws one into the G-code for the printer's screen.
 
-![deli view in a browser: a sliced 3DBenchy on the printer's bed, coloured by what each extrusion is for, with the layer slider below](images/deli-view-1.png)
+![deli view in a browser: a sliced model with organic supports building up layer by layer, coloured by what each extrusion is for; the supports hidden and shown again from the legend; then one layer at a time with "only this layer"](docs/images/demo-view-supports.gif)
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli mirror`, `deli move` and `deli pause` without arguments show what

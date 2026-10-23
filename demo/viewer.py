@@ -2,7 +2,7 @@
 
     deli view --no-browser     # in a sliced print's directory; note the address
     python demo/viewer.py http://127.0.0.1:PORT/ frames [ZOOM] [--turn]
-    ffmpeg -framerate 25 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p images/demo-viewer.mp4
+    ffmpeg -framerate 25 -i frames/%05d.png -c:v libx264 -pix_fmt yuv420p docs/images/demo-viewer.mp4
 
 Needs Playwright (`pip install playwright && playwright install chromium`). It takes a
 screenshot per frame rather than recording in real time, so a slow renderer does not make

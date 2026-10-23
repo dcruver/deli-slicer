@@ -56,13 +56,22 @@ build and of how the engine is bound.
 
 ## The README's clip
 
-`images/demo.gif` is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`
+`docs/images/demo.gif` is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`
 against `demo/fake_moonraker.py` (a stand-in Klipper printer), adds and slices a Benchy
 (`demo/readme.tape`), records the viewer frame by frame (`demo/viewer.py`), sends the
 print (`demo/send.tape`) and joins the three. It needs [VHS](https://github.com/charmbracelet/vhs)
 with `ttyd`, `ffmpeg`, and Python with Playwright and its Chromium, and `deli` on the
 PATH (`make install`). Re-record it when a command in the clip changes what it prints.
 `demo/terminal.tape` records a second clip of a print's commands on its own.
+
+`demo/record-printables.sh` records the README's two other clips: `docs/images/demo-printables.gif`
+(`demo/printables.tape`: a Printables model added by its address, the file chosen with
+`--file`, organic supports, `deli slice`) and `docs/images/demo-view-supports.gif`
+(`demo/viewer_supports.py`: the result in `deli view`, built up layer by layer, the
+supports hidden and shown from the legend, then "only this layer"). It uses the home
+`record-readme.sh` set up, so run that first, and fetches the model from Printables, so it
+needs the network. Its tapes run `deli` from `demo/work/bin`, a wrapper that runs this
+checkout, so a change here is what gets recorded.
 
 ## Licence
 

@@ -12,6 +12,16 @@ running gets out of the way: `deli view` serves its page from a background proce
 gives the terminal back at once, stopping by itself when the page has been closed for a
 while.
 
+## Simple to use directly or through an AI
+
+deli is CLI-first, and that is what makes it simple to use through an AI assistant as
+well as directly: nothing in it is built for one. Output is plain text a reader
+understands first time, and `--json` where a program wants the same facts as data; exit
+codes say what went wrong; nothing asks a question except `deli setup`, which only runs
+when someone is there. An assistant uses deli the way a person does, through the same
+commands, and `skills/deli/` is the briefing that tells it how. Nothing in deli calls a
+model or needs one.
+
 ## A print is a text file you can read
 
 Everything about a print is in `deli.toml`: the parts and where they go, the printer,
@@ -117,7 +127,8 @@ lightly (bold step titles, a green check, dim hints), only when output is a term
 never with `NO_COLOR` set; everything else is plain text. A program reading deli, an AI
 assistant say, gets the same facts as data with `--json` on `deli status` and `deli
 slice`, and exit codes it can branch on from `deli send` (3: the printer cannot be
-reached, 4: it is busy) instead of parsing a message; the lines stay as they are.
+reached, 4: it is busy) instead of parsing a message; the lines stay as they are (see
+"Simple to use directly or through an AI").
 
 ## Build products stay out of sight
 

@@ -1,6 +1,6 @@
 # A print's commands: a Benchy with a setting changed, a pause, sliced and viewed. Run
 # from demo/ with VHS after record-readme.sh, which leaves a printer chosen:  vhs terminal.tape
-Output ../images/demo-terminal.gif
+Output ../docs/images/demo-terminal.gif
 
 Set Shell "bash"
 Set FontSize 17
