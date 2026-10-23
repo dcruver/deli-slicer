@@ -6,6 +6,26 @@ slices with, a print and everything in its `deli.toml`, and the viewer. The
 lists every command and its options; the [FAQ](faq.md) has platforms, Windows, building
 from source and what is not done yet.
 
+- [Set up a printer](#set-up-a-printer)
+  - [1. Find your printer](#1-find-your-printer)
+  - [2. Choose it](#2-choose-it)
+  - [3. Other filaments and processes](#3-other-filaments-and-processes)
+  - [`deli import`: more control](#deli-import-more-control)
+  - [Where the presets come from](#where-the-presets-come-from)
+  - [Without OrcaSlicer's presets](#without-orcaslicers-presets)
+  - [Name your printer](#name-your-printer)
+  - [Tell deli where your printer is](#tell-deli-where-your-printer-is)
+- [Print something](#print-something)
+  - [Settings](#settings)
+  - [Settings for every print, or for a profile](#settings-for-every-print-or-for-a-profile)
+  - [Several models, copies, and models from the web](#several-models-copies-and-models-from-the-web)
+  - [Slicing, and where the G-code goes](#slicing-and-where-the-g-code-goes)
+  - [Supports](#supports)
+  - [Where parts go, and plates](#where-parts-go-and-plates)
+  - [Pauses, and changing filament](#pauses-and-changing-filament)
+  - [`deli view`](#deli-view)
+  - [What `deli.toml` holds](#what-delitoml-holds)
+
 ## Set up a printer
 
 To slice, deli needs three things for your printer: the **printer** itself (bed size,
@@ -227,6 +247,8 @@ checked together, each against the print with the pairs before it applied, and w
 only when every one passes: a density only some patterns allow may follow its pattern,
 and a batch with a bad pair changes nothing.
 
+### Settings
+
 `deli set` with nothing after it lists the settings this print changes, each with what
 its profile had, so the few things you changed are never lost among the hundreds you
 didn't. Settings that come from the printer, filament or process are not in that list;
@@ -271,6 +293,8 @@ end G-code are one value per extruder in PrusaSlicer, `;` between them; a value 
 one extruder's, comments and all, and several extruders' are written quoted as PrusaSlicer
 does (`"..." ; "..."`).
 
+### Settings for every print, or for a profile
+
 A setting you want on every print, whichever printer, goes in your config instead of
 the print, with `--global`:
 
@@ -313,6 +337,8 @@ before: the chosen profiles; your global settings; the printer's; the filament's
 process's; the print's own. A name can be any part of it that only one profile in your
 library has.
 
+### Several models, copies, and models from the web
+
 A print can hold several models, each added the same way, and copies of one:
 `deli add 3DBenchy.stl --count 4` prints four, arranged on the bed for you. With more
 than one model, `scale`, `rotate`, `mirror` and `move` take the model's name first
@@ -333,6 +359,8 @@ added when it turns out to have a way in like Printables', one site at a time.
 
 ![deli add given a Printables model's address lists its two files, fetches the one named with --file, then deli supports organic, deli slice and deli view](images/demo-printables.gif)
 
+### Slicing, and where the G-code goes
+
 The G-code is kept in deli's cache (`~/.cache/deli/gcode/`), not beside `deli.toml`:
 `deli send` and `deli view` find it there, and `deli send` slices again by itself when
 the print has changed since. `deli slice -o FILE` (or `-o DIR`, `-o .` for here) also
@@ -341,12 +369,16 @@ After the time and filament, `deli slice` says where the print lies on the bed a
 far it is from each edge, and prints as `warning:` lines anything PrusaSlicer's engine
 complained about while slicing (a tree support that lost a branch, say), each once.
 
+### Supports
+
 Supports are PrusaSlicer's automatic ones. `deli supports on` uses the style the
 process came with (Orca's tuning for the printer carries over); `organic`, `snug` or `grid` pick one and turn them on; `--angle 45` supports
 overhangs steeper than that, and `--buildplate-only` keeps them off the part itself.
 `deli supports` alone says what is in force and where it comes from. Underneath these
 are ordinary settings (`support_material`, `support_material_style`, ...), so
 `deli set` shows them and `deli unset supports` turns them off.
+
+### Where parts go, and plates
 
 Parts are arranged on the bed for you, a single part in the middle. `deli move 60 80`
 puts the middle of a part at x 60, y 80 instead, in millimetres from the bed's origin
@@ -372,6 +404,8 @@ the first plate it fits on again. A print that fits on one plate never
 mentions plates. `deli send` uploads every plate; `deli send --plate 2 --print` uploads
 plate 2 and starts it, since a printer prints one plate at a time.
 
+### Pauses, and changing filament
+
 `deli pause 30` has the printer pause once layer 30 is done, to drop in a magnet or a
 nut, or to change the filament: deli has no separate colour-change command, because a
 pause is where you change it. What is written is the printer's own pause G-code (on
@@ -381,6 +415,8 @@ them, so slide to the last layer you want printed before the pause and use that
 number. `deli slice` reports each pause with its height, and refuses a pause after a
 layer the print does not have. On a print with several plates, `deli pause 30 --plate 2`
 pauses plate 2; without `--plate` a pause is the first plate's.
+
+### `deli view`
 
 `deli view` opens a page in your browser and gives the shell straight back; the page
 follows the print as you change it. It shows the parts on the bed and, once `deli slice`
@@ -433,6 +469,8 @@ minutes, or until `deli view --stop`. When the printer's profile asks for a thum
 `deli slice` draws one into the G-code for the printer's screen.
 
 ![deli view in a browser: a sliced model with organic supports building up layer by layer, coloured by what each extrusion is for; the supports hidden and shown again from the legend; then one layer at a time with "only this layer"](images/demo-view-supports.gif)
+
+### What `deli.toml` holds
 
 `deli printer`, `deli filament`, `deli process`, `deli set`, `deli supports`,
 `deli scale`, `deli rotate`, `deli mirror`, `deli move` and `deli pause` without arguments show what

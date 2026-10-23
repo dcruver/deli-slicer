@@ -82,8 +82,8 @@ script](https://github.com/dcruver/deli-slicer/blob/main/install.sh) again, with
 release. `deli status` mentions a newer release when one is out, looking once a day;
 `deli config update_check false` stops it looking.
 
-On Windows, deli runs in WSL; which Linuxes and Macs the wheels run on, building from
-source, and shell completion by hand are in the [FAQ](https://github.com/dcruver/deli-slicer/blob/main/docs/faq.md).
+On Windows, deli runs in WSL; that, which Linuxes and Macs the wheels run on, and
+building from source are in the [FAQ](https://github.com/dcruver/deli-slicer/blob/main/docs/faq.md).
 
 Then let deli set itself up:
 
@@ -102,6 +102,22 @@ address kept for `deli send`. A printer deli cannot reach is found by any words 
 name instead. A Bambu Lab printer is recognised, but deli cannot send to one yet. Run it
 again to add or change a printer. Everything it does can also be done step by step, as
 the [guide](https://github.com/dcruver/deli-slicer/blob/main/docs/guide.md) shows.
+
+### Tab completion
+
+Completion covers commands, options, your printers and their nozzles, printers,
+filaments and processes (yours and OrcaSlicer's), the parts of the current print,
+setting names and their short names, and config keys. `deli setup` sets it up; by hand, it is one of:
+
+```
+eval "$(deli completion bash)"      # in ~/.bashrc
+eval "$(deli completion zsh)"       # in ~/.zshrc
+deli completion fish > ~/.config/fish/completions/deli.fish
+```
+
+`deli setup` puts bash's in `~/.local/share/bash-completion/completions/` when the
+bash-completion package is installed, which loads it with nothing in `~/.bashrc`, and
+adds the line to `~/.zshrc` only if you say yes.
 
 ## A print, in a few commands
 
@@ -215,8 +231,8 @@ with a printer that has not printed deli's G-code yet, please say how it went.
 - [Guide](https://github.com/dcruver/deli-slicer/blob/main/docs/guide.md): setting up a printer, your library, settings and their
   layers, parts, copies and plates, pauses, the viewer, sending.
 - [Commands](https://github.com/dcruver/deli-slicer/blob/main/docs/commands.md): every command and its options.
-- [FAQ](https://github.com/dcruver/deli-slicer/blob/main/docs/faq.md): platforms, Windows, building from source, completion, and
-  what is not done yet.
+- [FAQ](https://github.com/dcruver/deli-slicer/blob/main/docs/faq.md): platforms, Windows, building from source, and what is
+  not done yet.
 - [PRINTERS.md](https://github.com/dcruver/deli-slicer/blob/main/PRINTERS.md): which of OrcaSlicer's printers convert and slice.
 - [CHANGELOG.md](https://github.com/dcruver/deli-slicer/blob/main/CHANGELOG.md): what changed in each release.
 

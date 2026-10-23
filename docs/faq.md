@@ -29,7 +29,14 @@ Linux x86-64 wheel. In PowerShell, once:
 wsl --install
 ```
 
-Then, in the Ubuntu terminal it opens:
+Then, in the Ubuntu terminal it opens, install as on Linux. With uv (its own installer is
+`curl -LsSf https://astral.sh/uv/install.sh | sh`):
+
+```
+uv tool install deli-slicer
+```
+
+or with deli's script, which installs uv first:
 
 ```
 curl -LsSf https://raw.githubusercontent.com/dcruver/deli-slicer/main/install.sh | sh
@@ -71,22 +78,6 @@ make install
 `make install` installs `deli` as a `uv` tool pointing at the checkout, so `git pull`
 updates it; after a change to the C++ binding, `make reinstall`. `make wheel` builds
 a wheel in `dist/` to give to someone else.
-
-## How do I set up shell completion?
-
-Completion covers commands, options, your printers and their nozzles, printers,
-filaments and processes (yours and OrcaSlicer's), the parts of the current print,
-setting names and their short names, and config keys. `deli setup` sets it up; by hand, it is one of:
-
-```
-eval "$(deli completion bash)"      # in ~/.bashrc
-eval "$(deli completion zsh)"       # in ~/.zshrc
-deli completion fish > ~/.config/fish/completions/deli.fish
-```
-
-`deli setup` puts bash's in `~/.local/share/bash-completion/completions/` when the
-bash-completion package is installed, which loads it with nothing in `~/.bashrc`, and
-adds the line to `~/.zshrc` only if you say yes.
 
 ## What is not done yet?
 

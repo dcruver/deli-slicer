@@ -61,8 +61,8 @@ build and of how the engine is bound.
 https://dcruver.github.io/deli-slicer/: `docs/index.html`, one hand-written page with no
 build step, and `docs/images/`, which the README's clips live in too, so one copy serves
 both. The documentation is there as well: `docs/guide.md` (the commands in depth),
-`docs/commands.md` (the table) and `docs/faq.md` (platforms, Windows, source builds,
-completion, what is not done yet). The README is the short version, which PyPI shows:
+`docs/commands.md` (the table) and `docs/faq.md` (platforms, Windows, source builds, what
+is not done yet). The README is the short version, which PyPI shows:
 the description, the motivation, install, a tour, and links; it links the repository's
 files by their github.com addresses, since PyPI cannot resolve relative ones. Keep the
 page to what the README's first screen says; the install line and the five commands on
