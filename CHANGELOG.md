@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.17.1 (2026-10-23)
 
 - The README is the short version: what deli is, why, how to install it, a tour, and
   links. The rest moved to `docs/`: the [guide](docs/guide.md) (every command in depth),
