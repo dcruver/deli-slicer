@@ -54,7 +54,14 @@ build and of how the engine is bound.
   uv run python ci/sweep.py --orca orca/resources/profiles --label "OrcaSlicer 2.4.2" --ref v2.4.2 --out PRINTERS.md
   ```
 
-## The README's clip
+## The site and the README's clips
+
+`docs/` is the project's page, served by GitHub Pages from `main` at
+https://dcruver.github.io/deli-slicer/: `docs/index.html`, one hand-written page with no
+build step, and `docs/images/`, which the README's clips live in too, so one copy serves
+both. Keep the page to what the README's first screen says; the README stays the
+documentation. The install line and the five commands on it match the README's.
+
 
 `docs/images/demo.gif` is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`
 against `demo/fake_moonraker.py` (a stand-in Klipper printer), adds and slices a Benchy
