@@ -42,7 +42,8 @@ build and of how the engine is bound.
 - Add or change tests with the code. The tests never use the network: OrcaSlicer's
   GitHub and printers are faked (`tests/conftest.py`, `tests/test_import.py`,
   `tests/test_send.py`).
-- Update [README.md](README.md) when a command changes, and the Unreleased section of
+- Update the [guide](docs/guide.md) and the [commands page](docs/commands.md) when a
+  command changes (the README only when its short tour or install line is affected), and the Unreleased section of
   [CHANGELOG.md](CHANGELOG.md), marking anything that changes how an existing command
   works as **Changed**.
 - After a change to the converter, run the printer sweep against Orca's presets to see
@@ -59,8 +60,13 @@ build and of how the engine is bound.
 `docs/` is the project's page, served by GitHub Pages from `main` at
 https://dcruver.github.io/deli-slicer/: `docs/index.html`, one hand-written page with no
 build step, and `docs/images/`, which the README's clips live in too, so one copy serves
-both. Keep the page to what the README's first screen says; the README stays the
-documentation. The install line and the five commands on it match the README's.
+both. The documentation is there as well: `docs/guide.md` (the commands in depth),
+`docs/commands.md` (the table) and `docs/faq.md` (platforms, Windows, source builds,
+completion, what is not done yet). The README is the short version, which PyPI shows:
+the description, the motivation, install, a tour, and links; it links the repository's
+files by their github.com addresses, since PyPI cannot resolve relative ones. Keep the
+page to what the README's first screen says; the install line and the five commands on
+it match the README's.
 
 
 `docs/images/demo.gif` (linked from the README by its raw.githubusercontent address, so PyPI shows it too) is recorded, not drawn: `demo/record-readme.sh` runs `deli setup`

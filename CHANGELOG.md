@@ -3,6 +3,13 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- The README is the short version: what deli is, why, how to install it, a tour, and
+  links. The rest moved to `docs/`: the [guide](docs/guide.md) (every command in depth),
+  the [commands](docs/commands.md) table and the [FAQ](docs/faq.md) (platforms, Windows,
+  building from source, completion, what is not done yet). Nothing was dropped.
+
 ## 0.17.0 (2026-10-23)
 
 - **Changed:** deli is on PyPI as `deli-slicer`: `uv tool install deli-slicer` (or
