@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.18.0 (2026-10-23)
 
 - `deli` alone says which version is installed, whether a newer release is out, and lists
   the commands, instead of only an error that a command is missing.

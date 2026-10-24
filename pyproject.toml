@@ -1,6 +1,6 @@
 [project]
 name = "deli-slicer"  # the command, and the import package, are deli; PyPI's deli is another project
-version = "0.17.1"
+version = "0.18.0"
 description = "CLI-first slicer front end for 3D printing"
 readme = "README.md"
 license = "AGPL-3.0-only"
