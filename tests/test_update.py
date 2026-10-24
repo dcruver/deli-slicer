@@ -194,6 +194,19 @@ def test_status_mentions_a_newer_release(github, installed_from_a_wheel, capsys)
     assert capsys.readouterr().out == "No print in this directory yet; start one with: deli add <file>\n" + LINE
 
 
+def test_deli_alone_says_which_it_is_and_whether_a_newer_is_out(github, installed_from_a_wheel, capsys):
+    assert cli.main([]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"deli {HAVE}; 99.0.0 is out, update with: deli update\n\nusage: deli ")
+    assert "add a model to this print" in out  # the commands follow
+
+
+def test_deli_alone_is_only_the_version_and_help_when_this_is_the_latest(github, installed_from_a_wheel, capsys):
+    github["tag"] = f"v{HAVE}"
+    assert cli.main([]) == 0
+    assert capsys.readouterr().out.startswith(f"deli {HAVE}\n\nusage: deli ")
+
+
 def test_status_says_nothing_when_this_is_the_latest(github, installed_from_a_wheel, capsys):
     github["tag"] = f"v{HAVE}"
     assert cli.main(["status"]) == 0

@@ -5,6 +5,7 @@ in depth; `deli <command> --help` is the authoritative list for the version you 
 
 | | |
 |---|---|
+| `deli` | which deli this is, whether a newer release is out, and the commands |
 | `deli setup [--printer NAME] [--host ADDRESS] [--shell bash\|zsh\|fish] [--no-completion]` | tab completion, your printer and its address, asked for once; the options answer the questions in advance |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
 | `deli status [--json]` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code and its file; and, looked up once a day, whether a newer deli is out (`deli config update_check false` stops that). `--json` gives the same as data |
@@ -12,7 +13,7 @@ in depth; `deli <command> --help` is the authoritative list for the version you 
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
 | `deli import orca <kind> "<name>"` | convert an OrcaSlicer preset into your library without choosing it |
 | `deli load <kind> <source> [--name NAME] [--printer NAME]` | copy a PrusaSlicer INI file into your library, under its own name or `--name`; a filament or process under the printer it is for |
-| `deli add <file\|url> [--count N] [--file NAME]` | add a model, or more copies of it; a URL is fetched here first, `--file` choosing among several in an archive, on a page or in a Printables model |
+| `deli add <file\|url> [--count N] [--file NAME\|PATTERN]... [--all]` | add a model, or more copies of it; a URL is fetched here first, its model files ticked off in a list at the terminal, or chosen with `--file` (a name or a pattern, as often as needed) or `--all` |
 | `deli remove <part> [--count N\|--copy N]` | take a part out, or its last N copies, or one copy by its number |
 | `deli set [setting] [value]` / `deli unset` | change, show or list this print's settings; several pairs at once, checked together and written only when every one passes; `--global`, `--printer NAME`, `--filament NAME` or `--process NAME` for every print's with that profile, in your config; `@FILE` reads a value, G-code say, from a file, `@-` from standard input |
 | `deli supports [on\|off\|organic\|snug\|grid]` | automatic supports; `--angle N`, `--buildplate-only` or `--everywhere` |

@@ -3,6 +3,23 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- `deli` alone says which version is installed, whether a newer release is out, and lists
+  the commands, instead of only an error that a command is missing.
+- `deli add <url>`, given an archive, a page or a Printables model with several model
+  files, shows them as a list to tick off at the terminal (the arrows move, Space ticks,
+  a ticks every one, Enter adds what is ticked, Esc adds nothing) instead of only listing
+  them. In a script or a pipe it lists them as before. `--file` now also takes a pattern
+  (`--file 'R*.stl'`) and can be given more than once, and `--all` adds every file; files
+  the print already has are left out when several are added at once.
+- `deli view` lists a print's parts in a panel of their own on the right, which scrolls,
+  so a print of many parts no longer pushes the page's buttons off the bottom. Parts are selected from the list as
+  from a file manager (click, Ctrl-click to add or take one, Shift-click for a range, All
+  for every part), and a row under the list acts on the selection without a click on the
+  model: Rotate by a number of degrees, Mirror x, Mirror y, Scale to a percentage, and
+  Remove.
+
 ## 0.17.1 (2026-10-23)
 
 - The README is the short version: what deli is, why, how to install it, a tour, and

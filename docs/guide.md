@@ -348,7 +348,11 @@ A model can come from the web: `deli add <url>` fetches it into the directory, a
 like any file, and records the address as the part's `source` in `deli.toml`. The
 address may be of the model file itself, of a zip holding model files, or of a page
 linking to them, such as a file's or a folder's page on GitHub; with several model files
-to choose from, deli lists them and `--file NAME` picks one. Adding the same address
+to choose from, deli shows them as a list to tick off when you are at a terminal (the
+arrows move, Space ticks one, a every one, Enter adds what is ticked, Esc adds nothing),
+and lists them otherwise; `--file NAME` picks one without asking, a pattern such as
+`--file 'R*.stl'` every name it matches, `--file` again another, and `--all` every one.
+Several added at once leave out the files the print already has. Adding the same address
 again adds a copy. A Printables model's page (`printables.com/model/...`) works too:
 the page itself only opens in a browser, but deli asks the site's API for the model's
 files and their links, which it hands out without a login. Other model sites do not have
@@ -440,9 +444,14 @@ Overhangs shows in red the faces supports would hold up (at the print's
 `support_material_threshold`, or the angle PrusaSlicer works out when it is 0).
 
 Click a part to select it, Shift-click to add another, or click a part's name in the box
-for every copy of it; a tool used on a selected part acts on the whole selection, one
-command per copy, and Remove gives the `deli remove` that takes the selection out. Click the
-empty bed, Clear or Esc to select nothing.
+for every copy of it (Ctrl-click adds or takes one, Shift-click every part down to it from
+the last clicked, and All takes every part; the parts are listed in a panel of their own on
+the right, which scrolls). A tool used on a selected part acts on the whole selection, one command per copy,
+and the row under the list acts on it without a click on the model: Rotate turns each
+selected copy on the bed by the degrees beside it, Mirror x and Mirror y mirror each
+selected part, Scale makes each selected part the percentage beside it, and Remove gives
+the `deli remove` that takes the selection out. Click the empty bed, Clear or Esc to
+select nothing.
 
 Dragging, Rotate, Lay flat and Mirror change the print with deli's own commands: drag a part over
 the bed for its `deli move` (a copy is moved by itself, with `--copy`; a drag that would put

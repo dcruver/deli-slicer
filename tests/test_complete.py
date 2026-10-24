@@ -117,7 +117,7 @@ def test_settings_and_their_short_names():
 
 
 def test_options_after_a_dash():
-    assert complete("add", "-", new_word=False) == ["--count", "--file", "--help", "-h"]
+    assert complete("add", "-", new_word=False) == ["--all", "--count", "--file", "--help", "-h"]
     assert complete("send", "--", new_word=False) == ["--help", "--level", "--name", "--plate", "--print"]
 
 

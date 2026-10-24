@@ -79,7 +79,7 @@ Either way uv fetches Python 3.12 if you don't have it. Then run `deli setup`. L
 `deli update` installs the latest release the same way (`--check` only says whether
 there is one; `deli update 0.17.0` a particular release), or run [the
 script](https://github.com/dcruver/deli-slicer/blob/main/install.sh) again, with `DELI_VERSION=0.17.0` in front of `sh` for a particular
-release. `deli status` mentions a newer release when one is out, looking once a day;
+release. `deli` alone and `deli status` mention a newer release when one is out, looking once a day;
 `deli config update_check false` stops it looking.
 
 On Windows, deli runs in WSL; that, which Linuxes and Macs the wheels run on, and

@@ -16,6 +16,7 @@ Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 
 | command | what it does |
 |---|---|
+| `deli` | alone: the installed version, a newer release if one is out, and the commands |
 | `deli status [--json]` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current` (with its file's path), `out of date: the print has changed since it was sliced`, or `not sliced yet`; a last line `deli X.Y.Z is out` when a newer release exists (tell the user; do not update unasked). `--json`: the same as one object (`profiles`, `parts`, `host`, `settings.print` and `settings.layers`, `pauses`, `gcode.state` and `gcode.files` by plate, `newer_release`) |
 | `deli printer [name]` | choose the printer for this print, or list: the user's printers first (each with its nozzles, the default marked), then the printer's vendor's from Orca |
 | `deli filament [name]` | choose a filament, or list those made for the print's printer, the one in use and the default marked |
@@ -39,7 +40,7 @@ and that printer's default filament and process.
 
 | command | what it does |
 |---|---|
-| `deli add FILE\|URL [--count N] [--file NAME]` | add a model (STL, OBJ, 3MF, AMF; no STEP), or more copies of one already added; prints its size in mm. A URL is fetched into the directory first (the part's `source`): a model file, a zip holding one, a page linking to one, or a Printables model page (`printables.com/model/N-...`, read through the site's API); with several, it lists them and exits 1, and `--file NAME` picks one (a Printables file by the name listed). Other pages that list files with scripts or need a login (Thingiverse, MakerWorld) are not supported: download the file and add it |
+| `deli add FILE\|URL [--count N] [--file NAME\|PATTERN]... [--all]` | add a model (STL, OBJ, 3MF, AMF; no STEP), or more copies of one already added; prints its size in mm. A URL is fetched into the directory first (the part's `source`): a model file, a zip holding one, a page linking to one, or a Printables model page (`printables.com/model/N-...`, read through the site's API); with several, it lists them and exits 1 (at a terminal it shows a list to tick off instead, which you will not see), and `--file NAME` picks one (a Printables file by the name listed), `--file 'R*.stl'` every name a pattern matches (case aside), `--file` repeated several, `--all` every one; several added at once leave out files the print already has. Other pages that list files with scripts or need a login (Thingiverse, MakerWorld) are not supported: download the file and add it |
 | `deli remove PART [--count N \| --copy N]` | take a part out, or its last N copies, or one copy by number |
 
 A part is named by its file, with or without the extension (`3DBenchy` or

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import difflib
 import importlib.metadata
 import os
@@ -15,7 +16,7 @@ from pathlib import Path
 import textwrap
 import webbrowser
 
-from deli import _engine, config, fetch, library, orca_install, project, send, settings, view
+from deli import _engine, config, fetch, library, orca_install, pick, project, send, settings, view
 
 
 def _printer_summary(settings: dict[str, str]) -> str:
@@ -455,16 +456,10 @@ def _copies(count: int) -> str:
     return f" x {count}" if count > 1 else ""
 
 
-def _fetched(url: str, want: str | None) -> tuple[Path, bool]:
-    """A model fetched from a URL into this directory, as its own file name, and whether
-    it was written now; one already here with the same content is reused, so adding the
-    URL again adds copies."""
-    found = fetch.fetch(url, want)
-    if found.choices:
-        raise CommandError(
-            f"{found.holder} at {url} holds {len(found.choices)} model files; say which with --file NAME:\n  "
-            + "\n  ".join(found.choices)
-        )
+def _written(found: fetch.Fetched, url: str) -> tuple[Path, bool]:
+    """A model fetched from a URL written into this directory, as its own file name, and
+    whether it was written now; one already here with the same content is reused, so adding
+    the URL again adds copies."""
     path = Path(found.name)
     if path.exists():
         if path.is_file() and path.read_bytes() == found.data:
@@ -475,30 +470,79 @@ def _fetched(url: str, want: str | None) -> tuple[Path, bool]:
     return path, True
 
 
+_GLOB = re.compile(r"[*?\[]")
+
+
+def _names_to_add(listing: fetch.Listing, wanted: list[str] | None, every: bool) -> list[str] | None:
+    """Which of a URL's model files to add: every one with --all; those --file names, a
+    pattern taking every name it matches (case aside); the only one; or those ticked at the
+    terminal, None when the list was left without choosing."""
+    names = listing.names
+    if every:
+        return list(names)
+    if wanted:
+        chosen: list[str] = []
+        for want in wanted:
+            if _GLOB.search(want):
+                hits = [name for name in names if fnmatch.fnmatchcase(name.lower(), want.lower())]
+                if not hits:
+                    raise CommandError(f"{listing.holder or 'the file'} at {listing.url} has no model file matching {want}; it has: " + ", ".join(names))
+            elif want in names:
+                hits = [want]
+            else:
+                listing.get(want)  # raises, saying what it has
+            chosen += [hit for hit in hits if hit not in chosen]
+        return chosen
+    if len(names) == 1:
+        return list(names)
+    title = f"{listing.holder} at {listing.url} holds {len(names)} model files"
+    if pick.available():
+        return pick.pick(names, title)
+    raise CommandError(
+        f"{title}; say which with --file NAME (a pattern such as --file 'R*.stl', or --file again for more), or add every one with --all:\n  "
+        + "\n  ".join(names)
+    )
+
+
 def _add(args: argparse.Namespace) -> int:
     doc = project.read()
-    parts = project.parts(doc)
     if args.count < 1:
         raise CommandError("--count must be 1 or more")
-    source = None
-    fetched = False
-    if fetch.is_url(args.file):
-        source = args.file
-        path, fetched = _fetched(args.file, args.model_file)
-    elif args.model_file is not None:
-        raise CommandError("--file chooses among the model files at a URL; give the file itself as the argument")
-    else:
+    if not fetch.is_url(args.file):
+        if args.model_file is not None or args.all:
+            option = "--file" if args.model_file is not None else "--all"
+            raise CommandError(f"{option} chooses among the model files at a URL; give the file itself as the argument")
         path = Path(args.file).expanduser()
         if not path.is_file():
             raise project.ProjectError(f"no such file: {args.file}")
-    stored = project.stored_path(path)
+        return _add_one(doc, path, args.count, None, False, False)
+    listing = fetch.look(args.file)
+    names = _names_to_add(listing, args.model_file, args.all)
+    if not names:
+        print("Nothing added.")
+        return 0
+    # Several chosen at once leave out those the print already has, rather than adding copies.
+    several = len(names) > 1 or args.all or any(_GLOB.search(want) for want in args.model_file or [])
+    for name in names:
+        path, fetched = _written(listing.get(name), args.file)
+        if code := _add_one(doc, path, args.count, args.file, fetched, several):
+            return code
+    return 0
 
+
+def _add_one(doc, path: Path, count: int, source: str | None, fetched: bool, among_several: bool) -> int:
+    """One model file into the print: a new part, or more copies of one already there."""
+    parts = project.parts(doc)
+    stored = project.stored_path(path)
     if existing := next((part for part in parts if part["file"] == stored), None):
+        if among_several:
+            print(f"{stored} is already in the print")
+            return 0
         # Adding a part again adds copies of it, arranged around those already there.
-        count = project.part_count(existing) + args.count
-        project.set_part_count(existing, count)
+        total = project.part_count(existing) + count
+        project.set_part_count(existing, total)
         project.write(doc)
-        print(f"Added {args.count} more of {stored}: now x {count}")
+        print(f"Added {count} more of {stored}: now x {total}")
         return 0
     try:
         size = _engine.model_size(str(path))
@@ -508,10 +552,10 @@ def _add(args: argparse.Namespace) -> int:
         raise project.ProjectError(f"cannot read {stored} as a model: {err}") from None
 
     others = len(parts)  # `parts` is the live list in the document and grows below
-    project.add_part(doc, stored, args.count, source)
+    project.add_part(doc, stored, count, source)
     _start(doc)
     project.write(doc)
-    print(f"Added {stored}{_copies(args.count)}")
+    print(f"Added {stored}{_copies(count)}")
     print(f"  {_size_text(size)}")
     if others:
         print(f"  {others + 1} parts in this print")
@@ -2669,12 +2713,18 @@ def build_parser() -> argparse.ArgumentParser:
         "add",
         help="add a model to this print",
         description="Add a model file to the print in this directory. A URL is fetched into the directory first: a model "
-        "file, or one of the model files in the archive or on the page it serves, chosen with --file when there are several. "
-        "A page that lists its files with scripts, or a site that asks for a login before a download, is not supported.",
+        "file, or the model files in the archive or on the page it serves; with several, they are ticked off in a list at the "
+        "terminal, or chosen with --file (a name or a pattern, as often as needed) or --all. Several added at once leave out "
+        "those the print already has. A page that lists its files with scripts, or a site that asks for a login before a "
+        "download, is not supported.",
     )
     add.add_argument("file", help="an STL, OBJ, 3MF or AMF file, or a URL: of such a file, of a zip archive holding one, or of a page linking to one")
     add.add_argument("--count", type=int, default=1, metavar="N", help="add N copies of it (adding a part again adds more)")
-    add.add_argument("--file", dest="model_file", metavar="NAME", help="which model file, when the URL's archive or page holds several (deli add URL lists them)")
+    add.add_argument(
+        "--file", dest="model_file", metavar="NAME", action="append",
+        help="which model file, when the URL holds several: a name, or a pattern such as 'R*.stl' for every name it matches; again for more",
+    )
+    add.add_argument("--all", action="store_true", help="every model file the URL holds")
     add.set_defaults(run=_add)
 
     remove = commands.add_parser(
@@ -3009,11 +3059,24 @@ def _migrate_library() -> None:
         print(f"deli: your library's filaments and processes are now kept under their printers ({'; '.join(what)}; see: deli filament)", file=sys.stderr)
 
 
+def _bare(parser: argparse.ArgumentParser) -> int:
+    """`deli` alone: which deli this is, whether a newer release is out, and the commands."""
+    from deli import update
+
+    newer = update.newer_release()
+    print(f"deli {update.installed()}" + (f"; {newer} is out, update with: deli update" if newer else ""))
+    print()
+    parser.print_help()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if getattr(_engine, "API_VERSION", 1) != ENGINE_API:
         print("deli: the engine was built from older code than the rest of deli; rebuild it with: make reinstall", file=sys.stderr)
         return 1
     parser = build_parser()
+    if not (sys.argv[1:] if argv is None else argv):
+        return _bare(parser)
     args, rest = parser.parse_known_args(argv)
     # A command's words may go on after one of its options (`deli move cube --copy 2 40 50`),
     # which argparse leaves over.

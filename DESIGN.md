@@ -17,8 +17,8 @@ while.
 deli is CLI-first, and that is what makes it simple to use through an AI assistant as
 well as directly: nothing in it is built for one. Output is plain text a reader
 understands first time, and `--json` where a program wants the same facts as data; exit
-codes say what went wrong; nothing asks a question except `deli setup`, which only runs
-when someone is there. An assistant uses deli the way a person does, through the same
+codes say what went wrong; nothing asks a question except `deli setup`, and `deli add <url>`
+when a URL holds several model files, both only when someone is there to answer. An assistant uses deli the way a person does, through the same
 commands, and `skills/deli/` is the briefing that tells it how. Nothing in deli calls a
 model or needs one.
 
@@ -94,7 +94,8 @@ and choosing works the same either way.
 
 ## Asks only when someone is there to answer
 
-One command asks questions: `deli setup`, which a new user runs first. A command may ask
+Two commands ask: `deli setup`, which a new user runs first, and `deli add <url>`, which
+shows a URL's model files as a list to tick off when none was named. A command may ask
 only when every answer can also be given as an option, it never asks when input is not
 a terminal (a script, a pipe, CI), and anything that would change a file of yours
 outside deli's own, such as `~/.zshrc`, is asked about first.

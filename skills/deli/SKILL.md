@@ -89,8 +89,11 @@ the ground truth for what happened.
 
 1. **Add the model.** `deli add part.stl` (also `--count 4` for copies), or
    `deli add https://.../part.stl` to fetch it here first (a zip, a page or a
-   Printables model with several model files lists them for `--file NAME`;
-   other sites that need a login or scripts to list files are not supported).
+   Printables model with several model files lists them, since you are not at
+   a terminal: `--file NAME` picks one, `--file 'R*.stl'` every name a pattern
+   matches, `--file` repeated several, and `--all` every one, in one command;
+   files the print already has are left out. Other sites that need a login or
+   scripts to list files are not supported).
    It prints the part's size in mm, a quick sanity check that the file is the
    right one and in the right units.
 2. **Choose profiles if the defaults are wrong.** `deli printer "voron 350 0.4"`,

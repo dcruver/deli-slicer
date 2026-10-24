@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deli import fetch
+from deli import fetch, pick
 from deli.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,7 +112,8 @@ def test_an_archive_with_several_lists_them_for_file_to_choose(job, web, capsys)
 
     assert main(["add", "https://example.com/kit.zip"]) == 1
     assert capsys.readouterr().err == (
-        "deli: the archive at https://example.com/kit.zip holds 2 model files; say which with --file NAME:\n  cube.stl\n  seam.3mf\n"
+        "deli: the archive at https://example.com/kit.zip holds 2 model files; say which with --file NAME (a pattern such as "
+        "--file 'R*.stl', or --file again for more), or add every one with --all:\n  cube.stl\n  seam.3mf\n"
     )
     assert not (job / "deli.toml").exists()
 
@@ -124,6 +125,62 @@ def test_an_archive_with_several_lists_them_for_file_to_choose(job, web, capsys)
     assert "has no model file named lid.stl; it has: cube.stl, seam.3mf" in capsys.readouterr().err
 
 
+def test_all_adds_every_model_file_and_leaves_out_those_already_there(job, web, capsys):
+    web["https://example.com/kit.zip"] = ("application/octet-stream", "", archive({"cube.stl": CUBE, "seam.3mf": SEAM}))
+
+    assert main(["add", "https://example.com/kit.zip", "--all"]) == 0
+
+    assert [p["file"] for p in parts(job)] == ["cube.stl", "seam.3mf"]
+    out = capsys.readouterr().out
+    assert out.startswith("Fetched cube.stl (3 kB)\nAdded cube.stl\n")
+    assert "Fetched seam.3mf" in out and "Added seam.3mf\n" in out and "2 parts in this print" in out
+
+    assert main(["add", "https://example.com/kit.zip", "--all"]) == 0
+    assert capsys.readouterr().out == "cube.stl is already in the print\nseam.3mf is already in the print\n"
+    assert [p.get("count") for p in parts(job)] == [None, None]
+
+    assert main(["add", "https://example.com/kit.zip", "--file", "cube.stl"]) == 0  # one named still adds a copy
+    assert parts(job)[0]["count"] == 2
+
+
+def test_file_takes_patterns_and_repeats(job, web, capsys):
+    web["https://example.com/model/5"] = ("text/html", "", b'<a href="/R1.stl">a</a> <a href="/R2.stl">b</a> <a href="/lid.3mf">c</a>')
+    for name, data in (("R1.stl", CUBE), ("R2.stl", CUBE), ("lid.3mf", SEAM)):
+        web[f"https://example.com/{name}"] = ("application/octet-stream", "", data)
+
+    assert main(["add", "https://example.com/model/5", "--file", "r*.stl", "--file", "lid.3mf", "--count", "2"]) == 0
+
+    assert [(p["file"], p.get("count")) for p in parts(job)] == [("R1.stl", 2), ("R2.stl", 2), ("lid.3mf", 2)]
+    capsys.readouterr()
+
+    assert main(["add", "https://example.com/model/5", "--file", "*.obj"]) == 1
+    assert "the page at https://example.com/model/5 has no model file matching *.obj; it has: R1.stl, R2.stl, lid.3mf" in capsys.readouterr().err
+    assert main(["add", "cube.stl", "--all"]) == 1
+    assert "--all chooses among the model files at a URL" in capsys.readouterr().err
+
+
+def test_at_a_terminal_the_files_are_ticked_off_in_a_list(job, web, capsys, monkeypatch):
+    web["https://example.com/kit.zip"] = ("application/octet-stream", "", archive({"cube.stl": CUBE, "seam.3mf": SEAM}))
+    monkeypatch.setattr(pick, "available", lambda: True)
+    shown = {}
+
+    def fake_pick(names, title):
+        shown["names"], shown["title"] = names, title
+        return ["seam.3mf"]
+
+    monkeypatch.setattr(pick, "pick", fake_pick)
+
+    assert main(["add", "https://example.com/kit.zip"]) == 0
+
+    assert shown == {"names": ["cube.stl", "seam.3mf"], "title": "the archive at https://example.com/kit.zip holds 2 model files"}
+    assert [p["file"] for p in parts(job)] == ["seam.3mf"]
+
+    monkeypatch.setattr(pick, "pick", lambda names, title: None)
+    assert main(["add", "https://example.com/kit.zip"]) == 0
+    assert capsys.readouterr().out.endswith("Nothing added.\n")
+    assert [p["file"] for p in parts(job)] == ["seam.3mf"]
+
+
 def test_a_page_linking_to_model_files_is_followed(job, web, capsys):
     page = b'<html><body><a href="/files/cube.stl?dl=1">cube</a> <a href="doc.pdf">doc</a> <a href="https://cdn.example.com/seam.3mf">seam</a></body></html>'
     web["https://example.com/model/12-thing"] = ("text/html", "", page)
@@ -131,7 +188,7 @@ def test_a_page_linking_to_model_files_is_followed(job, web, capsys):
     web["https://cdn.example.com/seam.3mf"] = ("application/octet-stream", "", SEAM)
 
     assert main(["add", "https://example.com/model/12-thing"]) == 1
-    assert "the page at https://example.com/model/12-thing holds 2 model files; say which with --file NAME:\n  cube.stl\n  seam.3mf\n" in capsys.readouterr().err
+    assert "the page at https://example.com/model/12-thing holds 2 model files; say which with --file NAME" in capsys.readouterr().err
 
     assert main(["add", "https://example.com/model/12-thing", "--file", "cube.stl"]) == 0
     assert parts(job) == [{"file": "cube.stl", "source": "https://example.com/model/12-thing"}]
@@ -272,7 +329,8 @@ def test_a_printables_model_with_several_lists_them_and_file_chooses(url, job, p
     web["https://cdn.example.com/x/single_color358c.stl"] = ("application/sla", "", CUBE)
 
     assert main(["add", url]) == 1
-    assert capsys.readouterr().err == f"deli: the Printables model at {url} holds 2 model files; say which with --file NAME:\n  single_color(358)3.3mf\n  single_color(358)c.stl\n"
+    assert capsys.readouterr().err.startswith(f"deli: the Printables model at {url} holds 2 model files; say which with --file NAME")
+    assert capsys.readouterr().err == "" and printables["asked"][-1]["query"].startswith("query")  # listed, nothing fetched
 
     assert main(["add", url, "--file", "single_color(358)c.stl"]) == 0
     assert (job / "single_color358c.stl").read_bytes() == CUBE  # the file as Printables serves it

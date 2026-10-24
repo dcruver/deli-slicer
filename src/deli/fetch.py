@@ -1,7 +1,8 @@
 """`deli add <url>`: a model fetched from the web.
 
 A URL may serve a model file itself, an archive holding model files, or a page linking
-to them. One model file is the part; several are listed for `--file` to choose one. A page that
+to them. `look` lists what it holds and fetches each file on request; one model file is the
+part, and several are chosen with `--file`, `--all` or at the terminal (`deli.pick`). A page that
 builds its file list with scripts, or a site that asks for a login before a download,
 serves nothing deli can see, and is reported as such. The one site read another way is
 Printables: its pages are behind a browser check, but the API its pages use lists a
@@ -19,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from deli import update
@@ -42,6 +44,23 @@ class Fetched:
     data: bytes = b""
     choices: list[str] = field(default_factory=list)  # when there are several, by name
     holder: str = ""  # what holds them: "the archive" or "the page"
+
+
+@dataclass
+class Listing:
+    """The model files a URL holds, by name, each fetched when asked for."""
+
+    url: str
+    holder: str  # what holds them: "the archive", "the page", "the Printables model"; "" for a model file served as itself
+    names: list[str]
+    _get: Callable[[str], Fetched] = field(repr=False)
+
+    def get(self, name: str) -> Fetched:
+        if name not in self.names:
+            if not self.holder:
+                raise FetchError(f"{self.url} is the one model file {self.names[0]}, not {name}")
+            raise FetchError(f"{self.holder} at {self.url} has no model file named {name}; it has: " + ", ".join(self.names))
+        return self._get(name)
 
 
 def is_model(name: str) -> bool:
@@ -78,10 +97,10 @@ def _post_json(url: str, body: dict, timeout: float = TIMEOUT) -> dict:
         return json.loads(response.read(MAX_BYTES))
 
 
-def _printables(model: str, want: str | None, url: str) -> Fetched:
+def _printables(model: str, url: str) -> Listing:
     """A model on Printables, by the number in its address: its model files (the site's
-    `stls`, 3MF among them) through the site's own API, and the one wanted fetched from
-    the link the API hands out, as the site's Download button does."""
+    `stls`, 3MF among them) through the site's own API, each fetched from the link the API
+    hands out, as the site's Download button does."""
     try:
         listed = _post_json(PRINTABLES_API, {"query": "query ($id: ID!) { print(id: $id) { stls { id name } } }", "variables": {"id": model}})
         print_ = (listed.get("data") or {}).get("print")
@@ -92,16 +111,17 @@ def _printables(model: str, want: str | None, url: str) -> Fetched:
         raise FetchError(f"Printables has no model {model} ({url})")
     if not found:
         raise FetchError(f"the Printables model at {url} has no model file (STL, OBJ, 3MF or AMF)")
-    chosen = _chosen(found, want, url, "the Printables model")
-    if chosen is None:
-        return Fetched(choices=list(found), holder="the Printables model")
+    return Listing(url, "the Printables model", list(found), lambda name: _printables_file(model, url, name, found[name]))
+
+
+def _printables_file(model: str, url: str, chosen: str, file_id: str) -> Fetched:
     try:
         answer = _post_json(
             PRINTABLES_API,
             {
                 "query": "mutation ($id: ID!, $print: ID!) { getDownloadLink(id: $id, printId: $print, fileType: stl, source: model_detail)"
                 " { ok errors { messages } output { link } } }",
-                "variables": {"id": found[chosen], "print": model},
+                "variables": {"id": file_id, "print": model},
             },
         )
         link = answer["data"]["getDownloadLink"]
@@ -170,17 +190,6 @@ def _model_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     return found
 
 
-def _chosen(found: dict, want: str | None, url: str, holder: str) -> str | None:
-    """The one of several names to use: the only one, or the one `--file` names."""
-    if want is not None:
-        if want in found:
-            return want
-        raise FetchError(f"{holder} at {url} has no model file named {want}; it has: " + ", ".join(found))
-    if len(found) == 1:
-        return next(iter(found))
-    return None
-
-
 def _served(url: str) -> tuple[str, str, bool, str, bytes]:
     """What a URL serves: the URL it ended at, the file name it has, whether it is a page,
     its Content-Type, and the body."""
@@ -217,29 +226,24 @@ def _linked(name: str, urls: list[str], page: str, depth: int = 1) -> Fetched | 
     raise FetchError(f"{name}, linked from {page}, is not served as a model file by " + ", ".join(urls))
 
 
-def fetch(url: str, want: str | None = None) -> Fetched:
-    """A model file from a URL: the file it serves, or the one `want` names of the model
-    files in the archive or on the page it serves, or of the Printables model it names.
-    Several without `want` are returned as choices."""
+def look(url: str) -> Listing:
+    """What a URL holds: the model file it serves, or the model files in the archive or on
+    the page it serves, or of the Printables model it names, each fetched on request."""
     if model := PRINTABLES.match(url):
-        return _printables(model[1], want, url)
+        return _printables(model[1], url)
     final, name, page, content_type, data = _served(url)
     if is_model(name) and not page:  # a page whose address ends in .stl is a page
-        if want is not None and want != name:
-            raise FetchError(f"{url} is the one model file {name}, not {want}")
-        return Fetched(name, data)
+        return Listing(url, "", [name], lambda _: Fetched(name, data))
 
     if not page and (data[:4] == b"PK\x03\x04" or name.lower().endswith(".zip")):
         try:
             archive = zipfile.ZipFile(io.BytesIO(data))
             found = _model_entries(archive)
-            if not found:
-                raise FetchError(f"the archive at {url} holds no model file (STL, OBJ, 3MF or AMF)")
-            if chosen := _chosen(found, want, url, "the archive"):
-                return Fetched(chosen, archive.read(found[chosen]))
         except zipfile.BadZipFile:
             raise FetchError(f"the archive at {url} cannot be read") from None
-        return Fetched(choices=list(found), holder="the archive")
+        if not found:
+            raise FetchError(f"the archive at {url} holds no model file (STL, OBJ, 3MF or AMF)")
+        return Listing(url, "the archive", list(found), lambda name: Fetched(name, archive.read(found[name])))
 
     if page:
         found = _model_links(data.decode(errors="replace"), final)
@@ -248,8 +252,17 @@ def fetch(url: str, want: str | None = None) -> Fetched:
                 f"the page at {url} links to no model file (STL, OBJ, 3MF or AMF); a site that lists its files "
                 "with scripts, or asks for a login before a download, is not supported: download the file yourself and add it"
             )
-        if chosen := _chosen(found, want, url, "the page"):
-            return _linked(chosen, found[chosen], url)
-        return Fetched(choices=list(found), holder="the page")
+        return Listing(url, "the page", list(found), lambda name: _linked(name, found[name], url))
 
     raise FetchError(f"{url} serves {content_type or 'something'} that is not a model file (STL, OBJ, 3MF or AMF), an archive of them, or a page linking to them")
+
+
+def fetch(url: str, want: str | None = None) -> Fetched:
+    """A model file from a URL: the file it serves, or the one `want` names of the model
+    files it holds. Several without `want` are returned as choices."""
+    listing = look(url)
+    if want is not None:
+        return listing.get(want)
+    if len(listing.names) == 1:
+        return listing.get(listing.names[0])
+    return Fetched(choices=listing.names, holder=listing.holder)
