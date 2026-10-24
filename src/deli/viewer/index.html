@@ -8,48 +8,60 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1e23; color: #d8dbe0;
                font: 14px/1.4 system-ui, sans-serif; }
   canvas { display: block; }
-  #info { position: fixed; top: 12px; left: 12px; padding: 10px 14px; background: rgba(27, 30, 35, 0.85);
-          border: 1px solid #3a3f48; border-radius: 6px; max-width: 24em; }
-  #info b { color: #fff; }
-  #info .dim { color: #9aa0a8; }
-  #info .error { color: #ff8a80; }
-  #info .options { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; }
-  #info label { cursor: pointer; display: flex; align-items: center; gap: 0.5em; }
-  #info input { margin: 0; }
-  #info .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  #info .tools button { white-space: nowrap; }
-  #info .tools:not(:first-child) { margin-top: 8px; }
-  #info #selection:empty { display: none; }
-  #info [data-part] { cursor: pointer; }
-  #info [data-part]:hover { text-decoration: underline; }
-  #info [data-part].selected { color: #7dc4ff; }
-  #info button { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px;
+  /* Two panels: the print on the left, its parts on the right, each kept above the layer slider. */
+  .panel { position: fixed; top: 12px; padding: 10px 14px; background: rgba(27, 30, 35, 0.85);
+           border: 1px solid #3a3f48; border-radius: 6px; max-width: 24em;
+           max-height: calc(100vh - 90px); box-sizing: border-box; }
+  #info { left: 12px; overflow-y: auto; }
+  #parts { right: 12px; width: 24em; display: flex; flex-direction: column; }  /* a set width, so the names stay put when the row appears */
+  #parts[hidden] { display: none; }
+  #partsHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+  /* The list scrolls between the head and the selection's row, which stay in view. */
+  #partsList { overflow-y: auto; min-height: 0; margin: 0 -14px; padding: 0 14px; user-select: none; }
+  #selection { margin-top: 6px; flex: none; }
+  .panel .with { display: inline-flex; align-items: center; gap: 2px; }
+  .panel input[type="number"] { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48;
+                               border-radius: 4px; padding: 1px 4px; width: 3.5em; }
+  .panel b { color: #fff; }
+  .panel .dim { color: #9aa0a8; }
+  .panel .error { color: #ff8a80; }
+  .panel .options { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; }
+  .panel label { cursor: pointer; display: flex; align-items: center; gap: 0.5em; }
+  .panel input { margin: 0; }
+  .panel .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .panel .tools button { white-space: nowrap; }
+  .panel .tools:not(:first-child) { margin-top: 8px; }
+  .panel #selection:empty { display: none; }
+  .panel [data-part] { cursor: pointer; }
+  .panel [data-part]:hover { text-decoration: underline; }
+  .panel [data-part].selected { color: #7dc4ff; }
+  .panel button { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px;
                  padding: 2px 10px; cursor: pointer; }
-  #info button:hover { border-color: #8a9099; }
-  #info #sliceNow { background: #3e8fd9; border-color: #3e8fd9; color: #fff; padding: 0 10px; }
-  #info button[aria-pressed="true"] { background: #3e8fd9; border-color: #3e8fd9; color: #fff; }
-  #info .plates { display: flex; flex-wrap: wrap; gap: 6px; }
-  #info .unitsRow { margin-top: 2px; display: flex; justify-content: flex-end; }
-  #info .units { display: inline-flex; }
-  #info .units button { border-radius: 0; }
-  #info .units button:first-child { border-radius: 4px 0 0 4px; }
-  #info .units button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
-  #info .colour-by { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; display: flex; gap: 0.5em; align-items: center; }
-  #info select { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px; padding: 1px 4px; }
-  #info .scale { height: 8px; border-radius: 2px; margin-top: 8px; }
-  #info .range { display: flex; justify-content: space-between; color: #9aa0a8; margin-bottom: 6px; }
-  #info .role { display: flex; align-items: center; padding: 0 4px; margin: 0 -4px; border-radius: 3px; cursor: pointer; }
-  #info .role:first-of-type { margin-top: 6px; }
-  #info .role:hover:not(.fixed) { background: #262a31; }
-  #info .role.fixed { cursor: default; }
-  #info .role.off .name { text-decoration: line-through; color: #6b717a; }
-  #info .role.off .swatch { opacity: 0.3; }
-  #info .role.total { border-top: 1px solid #3a3f48; margin-top: 4px; padding-top: 4px; border-radius: 0; }
-  #info .time, #info .share { color: #9aa0a8; font-variant-numeric: tabular-nums; text-align: right; }
-  #info .time { margin-left: auto; padding-left: 1.5em; }
-  #info .share { width: 3em; }
+  .panel button:hover { border-color: #8a9099; }
+  .panel #sliceNow { background: #3e8fd9; border-color: #3e8fd9; color: #fff; padding: 0 10px; }
+  .panel button[aria-pressed="true"] { background: #3e8fd9; border-color: #3e8fd9; color: #fff; }
+  .panel .plates { display: flex; flex-wrap: wrap; gap: 6px; }
+  .panel .unitsRow { margin-top: 2px; display: flex; justify-content: flex-end; }
+  .panel .units { display: inline-flex; }
+  .panel .units button { border-radius: 0; }
+  .panel .units button:first-child { border-radius: 4px 0 0 4px; }
+  .panel .units button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+  .panel .colour-by { margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a3f48; display: flex; gap: 0.5em; align-items: center; }
+  .panel select { font: inherit; color: inherit; background: #262a31; border: 1px solid #3a3f48; border-radius: 4px; padding: 1px 4px; }
+  .panel .scale { height: 8px; border-radius: 2px; margin-top: 8px; }
+  .panel .range { display: flex; justify-content: space-between; color: #9aa0a8; margin-bottom: 6px; }
+  .panel .role { display: flex; align-items: center; padding: 0 4px; margin: 0 -4px; border-radius: 3px; cursor: pointer; }
+  .panel .role:first-of-type { margin-top: 6px; }
+  .panel .role:hover:not(.fixed) { background: #262a31; }
+  .panel .role.fixed { cursor: default; }
+  .panel .role.off .name { text-decoration: line-through; color: #6b717a; }
+  .panel .role.off .swatch { opacity: 0.3; }
+  .panel .role.total { border-top: 1px solid #3a3f48; margin-top: 4px; padding-top: 4px; border-radius: 0; }
+  .panel .time, .panel .share { color: #9aa0a8; font-variant-numeric: tabular-nums; text-align: right; }
+  .panel .time { margin-left: auto; padding-left: 1.5em; }
+  .panel .share { width: 3em; }
   #layers label { display: flex; align-items: center; gap: 0.4em; cursor: pointer; color: #9aa0a8; }
-  #info .swatch { display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.5em; border-radius: 2px; }
+  .panel .swatch { display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.5em; border-radius: 2px; }
   #layers { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px;
             align-items: center; padding: 8px 14px; background: rgba(27, 30, 35, 0.85);
             border: 1px solid #3a3f48; border-radius: 6px; white-space: nowrap; }
@@ -67,8 +79,8 @@
   #commandOutput { margin: 6px 0 0; font: 13px/1.4 ui-monospace, monospace; color: #d8dbe0; white-space: pre-wrap; }
   #commandOutput.error { color: #ff8a80; }
   #layer { width: min(40vw, 28em); }
-  #info #overhangNote { margin-bottom: 8px; }
-  #info [hidden] { display: none; }
+  .panel #overhangNote { margin-bottom: 8px; }
+  .panel [hidden] { display: none; }
   #measurement { position: fixed; transform: translate(14px, -50%); padding: 4px 8px; pointer-events: none;
                  background: rgba(27, 30, 35, 0.85); border: 1px solid #3a3f48; border-radius: 4px; white-space: nowrap; }
   #measurement[hidden] { display: none; }
@@ -78,7 +90,7 @@
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 </head>
 <body>
-<div id="info">Connecting to deli…</div>
+<div id="panels"><div id="info" class="panel">Connecting to deli…</div><div id="parts" class="panel" hidden></div></div>
 <div id="layers" hidden><input type="range" id="layer" min="1" max="1" list="pauseTicks"><span id="layerLabel"></span>
   <label id="onlyLayerBox"><input type="checkbox" id="onlyLayer"> only this layer</label>
   <button type="button" id="pauseHere" title="The command to pause after this layer">Pause here</button></div>

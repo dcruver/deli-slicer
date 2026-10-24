@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 
 const info = document.getElementById('info');
+const partsBox = document.getElementById('parts');  // the parts, in a panel of their own on the right
+const panels = document.getElementById('panels');  // both panels, for what they share
 const layerBar = document.getElementById('layers');
 const layerSlider = document.getElementById('layer');
 const layerLabel = document.getElementById('layerLabel');
@@ -196,15 +198,23 @@ function paintSelection() {
     }
     partMesh.geometry.attributes.color.needsUpdate = true;
   }
-  for (const name of info.querySelectorAll('[data-part]'))
+  for (const name of partsBox.querySelectorAll('[data-part]'))
     name.classList.toggle('selected', partRanges.some(range => range.part.file === name.dataset.part && isSelected(range)));
   const row = document.getElementById('selection');
   if (row) row.innerHTML = selectionRow();
 }
+// What the row's boxes hold, kept across redraws of the row.
+let turnBy = 90, scaleTo = 100;
 function selectionRow() {
   const count = selectedRanges().length;
   if (!count) return '';
   return `<span class="dim">${count} selected</span>`
+    + `<span class="with"><input type="number" id="turnBy" value="${turnBy}" step="15" title="Degrees to turn on the bed, anticlockwise">°`
+    + '<button type="button" id="turnSelected" title="The deli rotate that turns what is selected on the bed by this much">Rotate</button></span>'
+    + '<button type="button" id="mirrorX" title="The deli mirror along x of each selected part">Mirror x</button>'
+    + '<button type="button" id="mirrorY" title="The deli mirror along y of each selected part">Mirror y</button>'
+    + `<span class="with"><input type="number" id="scaleTo" value="${scaleTo}" step="5" min="1" title="Scale, as a percentage of the file's size">%`
+    + '<button type="button" id="scaleSelected" title="The deli scale that makes each selected part this size">Scale</button></span>'
     + '<button type="button" id="removeSelected" title="The deli remove that takes what is selected out of the print">Remove</button>'
     + '<button type="button" id="clearSelection" title="Select nothing (Esc)">Clear</button>';
 }
@@ -216,16 +226,30 @@ function selectOnly(range, toggle) {
   }
   paintSelection();
 }
-// A part's name clicked: every copy of it on this plate, or with Shift those added to or
-// taken from the selection; clicked again when it is all that is selected, nothing.
-function selectPart(file, toggle) {
+// A part's name clicked: every copy of it on this plate, or with Ctrl (Cmd) those added to
+// or taken from the selection, or with Shift every part from the last name clicked to this
+// one; clicked again when it is all that is selected, nothing.
+let anchor = null;  // the last name clicked without Shift, where a Shift-click's range starts
+function selectPart(file, toggle, span = false) {
+  const names = [...partsBox.querySelectorAll('[data-part]')].map(name => name.dataset.part);
+  const from = span && anchor !== null ? names.indexOf(anchor) : -1, to = names.indexOf(file);
+  if (from >= 0 && to >= 0) {
+    for (const name of names.slice(Math.min(from, to), Math.max(from, to) + 1))
+      for (const range of partRanges) if (range.part.file === name) selected.add(keyOf(range));
+    return paintSelection();
+  }
+  anchor = file;
   const copies = partRanges.filter(range => range.part.file === file);
   const all = copies.every(isSelected);
-  if (!toggle) {
+  if (!toggle && !span) {
     const only = all && selected.size === copies.length;
     selected.clear();
     if (!only) for (const range of copies) selected.add(keyOf(range));
   } else for (const range of copies) selected[all ? 'delete' : 'add'](keyOf(range));
+  paintSelection();
+}
+function selectAll() {
+  for (const range of partRanges) selected.add(keyOf(range));
   paintSelection();
 }
 function clearSelection() {
@@ -247,6 +271,52 @@ function showRemove() {
   }
   if (!runs.length) return;
   showCommand(shown.join(' && '), `to take ${whatIs(picked)} out of the print`, runs);
+}
+
+// The parts among what is selected, each once: a mirror or a scale is the part's, every copy's.
+const selectedParts = () => [...new Set(selectedRanges().map(range => range.part))];
+// How the row names what a part-wide command acts on: a selected copy's part is all of it.
+function whichParts(parts) {
+  const whole = parts.length > 1 ? `the ${parts.length} selected parts` : 'it';
+  const more = parts.some(part => part.count > partRanges.filter(range => range.part === part && isSelected(range)).length);
+  return more ? `${whole}, every copy` : whole;
+}
+// Rotate: the `deli rotate ... z` that turns each selected copy by the box's degrees, about z,
+// added to the turn it has, as dragging with the Rotate tool does.
+function showTurn() {
+  const picked = selectedRanges(), degrees = Number(turnBy);
+  if (!picked.length) return;
+  if (!Number.isFinite(degrees) || !(degrees % 360)) return showCommand(null, 'Give the degrees to turn by.');
+  const runs = [], shown = [];
+  for (const { part, copy } of picked) {
+    const which = part.count > 1 ? ['--copy', String(copy)] : [];
+    const [, , rz] = part.turns?.[copy - 1] ?? part.rotate;  // the copy's own, or the part's
+    let z = Math.round((rz + degrees) * 100) / 100 % 360;
+    if (z > 180) z -= 360;
+    if (z <= -180) z += 360;
+    runs.push(['rotate', part.file, ...which, 'z', number(z)]);
+    shown.push(`deli rotate ${[partName(part), ...which, 'z', number(z)].join(' ')}`);
+  }
+  const by = Math.abs(degrees) % 360;
+  showCommand(shown.join(' && '), `to turn ${whatIs(picked)} ${by}° ${degrees > 0 ? 'anticlockwise' : 'clockwise'}`, runs);
+}
+// Mirror: the `deli mirror <part> <axis>` of each selected part, or the one that puts it back.
+function showMirror(axis) {
+  const parts = selectedParts();
+  if (!parts.length) return;
+  const back = parts.every(part => part.mirror?.includes(axis));
+  showCommand(parts.map(part => `deli mirror ${partName(part)} ${axis}`).join(' && '),
+    back ? `to put ${whichParts(parts)} back as it is in the file along ${axis}` : `to mirror ${whichParts(parts)} along ${axis}`,
+    parts.map(part => ['mirror', part.file, axis]));
+}
+// Scale: the `deli scale <part> N%` that makes each selected part the box's size.
+function showScale() {
+  const parts = selectedParts(), factor = Number(scaleTo);
+  if (!parts.length) return;
+  if (!Number.isFinite(factor) || factor <= 0) return showCommand(null, 'Give the size as a percentage of the file\'s.');
+  const size = `${number(factor)}%`;
+  showCommand(parts.map(part => `deli scale ${partName(part)} ${size}`).join(' && '),
+    `to scale ${whichParts(parts)} to ${size}`, parts.map(part => ['scale', part.file, size]));
 }
 
 // The triangles that look down at less than the overhang angle from level, so that supports
@@ -507,7 +577,7 @@ function options() {
     + (lastState?.parts.length && 'supports' in lastState
         ? `<button type="button" id="supports" title="${lastState.supports ? 'Supports are on: turn them off' : 'Turn on automatic supports'}"`
           + ` aria-pressed="${lastState.supports}">Supports</button>` : '')
-    + `</div><div id="selection" class="tools">${selectionRow()}</div></div>`;
+    + '</div></div>';
 }
 
 function showLayers() {
@@ -532,7 +602,7 @@ document.getElementById('onlyLayer').addEventListener('change', event => {
   showLayers();
 });
 // The info box is rewritten on every redraw, so the box listens for its buttons and rows.
-info.addEventListener('click', event => {
+panels.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (button?.dataset.plate) {
     plate = Number(button.dataset.plate);
@@ -541,8 +611,12 @@ info.addEventListener('click', event => {
   if (button?.dataset.tool) return setMode(mode === button.dataset.tool ? null : button.dataset.tool);
   if (button?.id === 'removeSelected') return showRemove();
   if (button?.id === 'clearSelection') return clearSelection();
+  if (button?.id === 'selectAll') return selectAll();
+  if (button?.id === 'turnSelected') return showTurn();
+  if (button?.id === 'mirrorX' || button?.id === 'mirrorY') return showMirror(button.id === 'mirrorX' ? 'x' : 'y');
+  if (button?.id === 'scaleSelected') return showScale();
   const named = event.target.closest('[data-part]');
-  if (named) return selectPart(named.dataset.part, event.shiftKey);
+  if (named) return selectPart(named.dataset.part, event.ctrlKey || event.metaKey, event.shiftKey);
   if (button?.id === 'sliceNow') return startSlice(button);
   if (button?.id === 'sendNow' || button?.id === 'printNow') return showSend(button.id === 'printNow');
   if (button?.id === 'supports') {
@@ -762,8 +836,19 @@ renderer.domElement.addEventListener('pointerleave', () => {
   loose = pointer = null;
   drawMeasurement();
 });
+panels.addEventListener('input', event => {
+  if (event.target.id === 'turnBy') turnBy = event.target.value;
+  if (event.target.id === 'scaleTo') scaleTo = event.target.value;
+});
 addEventListener('keydown', event => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.target.matches?.('input[type="number"]')) {  // typing in a box of the selection row
+    if (event.key === 'Enter') {
+      if (event.target.id === 'turnBy') showTurn();
+      if (event.target.id === 'scaleTo') showScale();
+    }
+    if (event.key !== 'Escape') return;
+  }
   if (event.key === 'm' || event.key === 'M') setMode(mode === 'measure' ? null : 'measure');
   else if ((event.key === 'r' || event.key === 'R') && partMesh) setMode(mode === 'turn' ? null : 'turn');
   else if (event.key === 'Escape') {  // done: the tool put down, and whatever it wrote
@@ -1187,7 +1272,7 @@ const mm = n => Math.round(n * 100) / 100;
 const lengths = (values, between = ', ') =>
   `<span data-mm="${values.join(' ')}" data-between="${between}">${values.map(length).join(between)} ${units}</span>`;
 function relabelLengths() {
-  for (const span of info.querySelectorAll('[data-mm]'))
+  for (const span of document.querySelectorAll('[data-mm]'))
     span.textContent = span.dataset.mm.split(' ').map(Number).map(length).join(span.dataset.between) + ` ${units}`;
 }
 const pct = f => `${Math.round(f * 1000) / 10}%`;
@@ -1200,31 +1285,38 @@ function describe(state) {
   if (state.plates > 1)
     lines.push('<div class="plates">' + Array.from({ length: state.plates }, (_, i) => i + 1).map(n =>
       `<button type="button" data-plate="${n}" aria-pressed="${n === plate}">Plate ${n}</button>`).join('') + '</div>');
-  for (const part of state.parts) {
-    if (state.plates > 1 && !copiesOn(part, plate)) continue;
+  const parts = [];  // the parts' lines, for the panel of their own on the right
+  const shown = state.parts.filter(part => state.plates === 1 || copiesOn(part, plate));
+  for (const part of shown) {
     const count = state.plates > 1 ? copiesOn(part, plate) : part.count;
-    lines.push(`<b data-part="${part.file}" title="Click to select it on this plate; Shift adds">${part.file}</b>${count > 1 ? ` × ${count}` : ''}`
+    parts.push(`<b data-part="${part.file}" title="Click to select it on this plate; Ctrl adds or takes it, Shift every part down to it">${part.file}</b>${count > 1 ? ` × ${count}` : ''}`
       + (state.plates > 1 && count < part.count ? ` <span class="dim">of ${part.count}</span>` : ''));
-    if (part.size) lines.push(lengths(part.size, ' × '));
+    if (part.size) parts.push(lengths(part.size, ' × '));
     const s = part.scale, r = part.rotate;
-    if (s.some(f => f !== 1)) lines.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
+    if (s.some(f => f !== 1)) parts.push(`<span class="dim">scale</span> ${s.every(f => f === s[0]) ? pct(s[0]) : s.map(pct).join(' × ')}`);
     const turns = ['x', 'y', 'z'].map((a, i) => r[i] ? `${r[i]}° about ${a}` : null).filter(Boolean);
-    if (turns.length) lines.push(`<span class="dim">rotate</span> ${turns.join(', ')}`);
-    if (part.mirror?.length) lines.push(`<span class="dim">mirrored along</span> ${part.mirror.join(', ')}`);
-    if (part.plate) lines.push(`<span class="dim">kept to plate</span> ${part.plate}`);
+    if (turns.length) parts.push(`<span class="dim">rotate</span> ${turns.join(', ')}`);
+    if (part.mirror?.length) parts.push(`<span class="dim">mirrored along</span> ${part.mirror.join(', ')}`);
+    if (part.plate) parts.push(`<span class="dim">kept to plate</span> ${part.plate}`);
     // Where the copies on this plate were moved to, or kept to it on their own.
     part.at.forEach((at, i) => {
       if ((part.on?.[i] ?? 1) !== plate) return;
       const turn = part.count > 1 && part.turns?.[i];
-      if (turn) lines.push(`<span class="dim">copy ${i + 1} rotate</span> `
+      if (turn) parts.push(`<span class="dim">copy ${i + 1} rotate</span> `
         + (['x', 'y', 'z'].map((a, j) => turn[j] ? `${turn[j]}° about ${a}` : null).filter(Boolean).join(', ') || 'none'));
       const own = part.kept[i] !== part.plate ? part.kept[i] : null;
       if (!at && !own) return;
       const which = part.count > 1 ? `copy ${i + 1} ` : '';
-      lines.push(`<span class="dim">${which}${at ? 'at' : 'kept to plate'}</span> ${at ? lengths(at) : own}`);
+      parts.push(`<span class="dim">${which}${at ? 'at' : 'kept to plate'}</span> ${at ? lengths(at) : own}`);
     });
-    if (part.z) lines.push(`<span class="dim">${part.z < 0 ? 'sunk' : 'raised'}</span> ${lengths([Math.abs(part.z)])}`);
+    if (part.z) parts.push(`<span class="dim">${part.z < 0 ? 'sunk' : 'raised'}</span> ${lengths([Math.abs(part.z)])}`);
   }
+  // The parts panel: a head when there are several, the list, which scrolls, and the selection's row.
+  partsBox.hidden = !parts.length;
+  partsBox.innerHTML = (shown.length > 1
+      ? `<div id="partsHead"><span class="dim">${shown.length} parts${state.plates > 1 ? ' on this plate' : ''}</span>`
+        + '<button type="button" id="selectAll" title="Select every part on this plate">All</button></div>' : '')
+    + `<div id="partsList">${parts.join('<br>')}</div><div id="selection" class="tools">${selectionRow()}</div>`;
   if (!state.parts.length) lines.push('No part yet. <span class="dim">deli add &lt;file&gt;</span>');
   else if (state.plates > 1 && !state.parts.some(part => copiesOn(part, plate))) lines.push('<span class="dim">Nothing on this plate.</span>');
   lines.push(state.printer ? `<span class="dim">printer</span> ${state.printer}`

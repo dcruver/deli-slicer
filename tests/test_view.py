@@ -302,6 +302,8 @@ def test_the_page_runs_its_tools_commands(url):
     assert json.loads(post(url, ["rotate", "cube", "x", "90"])[1])["code"] == 0
     assert json.loads(post(url, ["mirror", "cube", "z"])[1])["code"] == 0
     assert json.loads(get(url + "/state")[2])["parts"][0]["mirror"] == ["z"]
+    assert json.loads(post(url, ["scale", "cube", "150%"])[1])["code"] == 0  # the selection row's Scale
+    assert json.loads(get(url + "/state")[2])["parts"][0]["scale"] == [1.5, 1.5, 1.5]
     assert json.loads(post(url, ["pause", "3"])[1])["code"] == 0
     assert json.loads(get(url + "/state")[2])["pauses"] == {"1": [3]}
     main(["add", "cube.stl"])
