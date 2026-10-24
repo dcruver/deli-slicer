@@ -3,7 +3,7 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
-## Unreleased
+## 0.19.0 (2026-10-24)
 
 - A wrong or missing argument gets one line that says what to do next, with exit code 2,
   in place of argparse's usage dump: `deli slcie` suggests `deli slice`, `deli remove`
