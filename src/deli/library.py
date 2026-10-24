@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -211,6 +212,16 @@ def load(kind: str, source: str, name: str | None = None, printer: str | None = 
     if url.scheme == "":
         source = str(Path(source).expanduser().resolve())
     return store(kind, text, source, name=name, fallback=Path(url.path).stem, printer=printer)
+
+
+def remove_printer(name: str) -> dict[str, int]:
+    """Take a printer out of the library, the filaments and processes converted for it
+    with it; how many of each went."""
+    counts = {kind: len(names(kind, name)) for kind in ("filament", "process")}
+    path_of("printer", name).unlink(missing_ok=True)
+    for kind in counts:
+        shutil.rmtree(folder(kind, name), ignore_errors=True)
+    return counts
 
 
 def path_of(kind: str, name: str, printer: str | None = None) -> Path:

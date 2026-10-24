@@ -4,8 +4,10 @@ Every command works on the print in the current directory (`deli.toml`), prints
 what it did, and exits 0; an error goes to stderr with exit code 1 and says what
 to do next (`deli send` exits 3 when the printer cannot be reached and 4 when it
 is busy or refused, so a script can tell those from a mistake). `deli status --json`
-and `deli slice --json` give their facts as data. `deli <command> --help` is the authoritative reference for the
-installed version.
+and `deli slice --json` give their facts as data. A wrong or missing argument is one line too, with exit code 2 (`deli slcie`
+suggests `deli slice`; `deli remove` alone names the parts). `deli` alone prints the
+installed version and whether a newer release is out. `deli <command> --help` is the
+authoritative reference for the installed version.
 
 Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 [placing parts](#placing-parts) · [pauses](#pauses) · [slicing, viewing, sending](#slicing-viewing-sending) ·
@@ -19,6 +21,8 @@ Contents: [the print](#the-print) · [parts](#parts) · [settings](#settings) ·
 | `deli` | alone: the installed version, a newer release if one is out, and the commands |
 | `deli status [--json]` | the print at a glance: printer, filament, process, parts, where `deli send` would send, how many settings are changed, whether the G-code is `current` (with its file's path), `out of date: the print has changed since it was sliced`, or `not sliced yet`; a last line `deli X.Y.Z is out` when a newer release exists (tell the user; do not update unasked). `--json`: the same as one object (`profiles`, `parts`, `host`, `settings.print` and `settings.layers`, `pauses`, `gcode.state` and `gcode.files` by plate, `newer_release`) |
 | `deli printer [name]` | choose the printer for this print, or list: the user's printers first (each with its nozzles, the default marked), then the printer's vendor's from Orca |
+| `deli printer <name> --remove` | take a printer out of the config and the library, its filaments and processes with it (a profile another printer runs stays; refused for the print in this directory). Deletes the user's files: only when the user asks to remove a printer |
+| `deli filament\|process <name> --remove` | take one of this print's printer's (else the default printer's) out of the library, with its settings and defaults in the config; refused when this print uses it. Only when the user asks |
 | `deli filament [name]` | choose a filament, or list those made for the print's printer, the one in use and the default marked |
 | `deli process [name]` | the same for processes (layer height, speeds, infill) |
 | `deli nozzle [size]` | the print's printer's nozzles, or put one in (its profile imported from Orca if need be; the print moves to it) |
@@ -169,7 +173,7 @@ library is `~/.config/deli/`: `printers/<name>.ini`,
 | `deli config KEY` | one value |
 | `deli config KEY VALUE` | set one |
 | `deli config --unset KEY` | remove one |
-| `deli update [--check]` | install the latest release of deli from PyPI over this one (`--check` only says whether there is one). Run it only when the user asks to update deli |
+| `deli update [--check]` | install the latest release of deli from PyPI over this one (`--check`, or `deli` alone, only says whether there is one). Run it only when the user asks to update deli |
 
 Keys:
 

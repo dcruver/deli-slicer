@@ -22,6 +22,76 @@ def project(tmp_path, monkeypatch):
     return tmp_path / "job" / "deli.toml"
 
 
+def test_remove_takes_a_library_printer_out(project, capsys):
+    """A profile no printer of yours runs: its file, and the filaments and processes
+    converted for it, go; the default printer too when it was this one."""
+    library.folder("filament", MK3).mkdir(parents=True)
+    (library.folder("filament", MK3) / "pla.ini").write_text("filament_settings_id = pla\n")
+    (library.folder("filament", MK3) / "petg.ini").write_text("filament_settings_id = petg\n")
+    assert main(["printer", MK3, "--default"]) == 0
+    capsys.readouterr()
+
+    assert main(["printer", MK3, "--remove"]) == 0
+
+    assert capsys.readouterr().out == (
+        f"Removed '{MK3}' from your config; you have no default printer now, set one with: deli printer <name> --default\n"
+        f"Removed '{MK3}' from your library, with its 2 filaments\n"
+        "A print that chose it is refused by deli slice until it chooses another: deli printer <name>\n"
+    )
+    assert library.names("printer") == []
+    assert not library.folder("filament", MK3).exists()
+    from deli import config
+
+    assert config.default_printer() is None and config.machines() == []
+
+
+def test_remove_takes_a_named_printer_and_its_profile_out(project, capsys):
+    assert main(["printer", MK3, "--name", "mk3"]) == 0
+    assert main(["config", "printers.mk3.host", "moonraker://mk3.local"]) == 0
+    capsys.readouterr()
+
+    assert main(["printer", "mk3", "--remove"]) == 1  # this print is on it
+    assert capsys.readouterr().err == "deli: this print is on 'mk3'; choose another printer for it first with: deli printer <name>\n"
+
+    assert main(["printer", MK3, "--remove"]) == 1  # the profile is the printer's nozzle
+    assert capsys.readouterr().err == (
+        f"deli: '{MK3}' is the 0.4 nozzle of your printer 'mk3'; remove the printer with: deli printer mk3 --remove, "
+        "or the nozzle alone with: deli config --unset printers.mk3.nozzles.0.4.profile\n"
+    )
+
+    project.unlink()
+    assert main(["printer", "mk3", "--remove"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"Removed 'mk3' from your config\nRemoved '{MK3}' from your library\n")
+    assert library.names("printer") == []
+    assert main(["config"]) == 0
+    assert "mk3" not in capsys.readouterr().out
+
+
+def test_remove_keeps_a_profile_another_printer_runs(project, capsys):
+    """Two printers of yours with the same profile: removing one keeps the profile."""
+    assert main(["printer", MK3, "--name", "mk3"]) == 0
+    assert main(["printer", MK3, "--name", "mk3-too"]) == 0
+    project.unlink()
+    capsys.readouterr()
+
+    assert main(["printer", "mk3-too", "--remove"]) == 0
+
+    assert capsys.readouterr().out.startswith(f"Removed 'mk3-too' from your config\n'{MK3}' stays in your library: 'mk3' runs it\n")
+    assert library.names("printer") == [MK3]
+
+
+def test_remove_needs_a_name_it_knows(project, capsys):
+    assert main(["printer", "--remove"]) == 1
+    assert capsys.readouterr().err == "deli: name the printer to remove: deli printer <name> --remove\n"
+    assert main(["printer", "voron", "--remove"]) == 1
+    assert capsys.readouterr().err == "deli: no printer 'voron' in your config or library; deli printer lists them\n"
+    assert main(["printer", MK3, "--remove", "--default"]) == 1
+    assert capsys.readouterr().err == "deli: --remove and --default cannot go together\n"
+    assert library.names("printer") == [MK3]
+
+
 def test_choosing_a_printer_records_its_name_and_hash(project, capsys):
     assert main(["printer", MK3]) == 0
 

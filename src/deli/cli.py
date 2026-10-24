@@ -412,10 +412,15 @@ def _choose(args: argparse.Namespace) -> int:
     kind = args.command
     doc = project.read()
 
-    if args.name is None and args.default:
-        raise CommandError(f"name the {kind} to make the default: deli {kind} <name> --default")
+    remove = getattr(args, "remove", False)
+    if args.name is None and (args.default or remove):
+        raise CommandError(f"name the {kind} to remove: deli {kind} <name> --remove" if remove else f"name the {kind} to make the default: deli {kind} <name> --default")
     if args.name is None:
         return _list_kind(doc, kind)
+    if remove:
+        if args.default:
+            raise CommandError("--remove and --default cannot go together")
+        return _remove_printer(doc, args.name) if kind == "printer" else _remove_profile(doc, kind, args.name)
 
     name_as = args.name_as and library.slug(args.name_as)
     if kind == "printer":
@@ -1988,6 +1993,70 @@ def _for_this_printer(doc, kind: str, name: str, from_printer: str, printer: str
     return name
 
 
+def _remove_printer(doc, wanted: str) -> int:
+    """`deli printer NAME --remove`: one of your printers out of the config, its address,
+    settings, nozzles and defaults with it, and its profiles out of the library, each with
+    the filaments and processes converted for it; or a library profile no printer of yours
+    runs. A profile another printer runs stays. Refused for the print in this directory,
+    which chooses another first; a print elsewhere that chose it is refused by `deli slice`
+    until it does (nothing changes under a print)."""
+    machine = _machine_named(wanted)
+    if machine:
+        profiles = [nozzle.profile for nozzle in config.machine(machine).nozzles.values()]
+    else:
+        profile = _in_library("printer", wanted)
+        if not profile:
+            raise CommandError(f"no printer '{wanted}' in your config or library; deli printer lists them")
+        if other := config.machine_of(profile):
+            size = config.machine(other).for_profile(profile).size
+            raise CommandError(
+                f"'{profile}' is the {size} nozzle of your printer '{other}'; remove the printer with: deli printer {other} --remove, "
+                f"or the nozzle alone with: deli config --unset printers.{other}.{config.NOZZLES}.{size}.profile"
+            )
+        profiles = [profile]
+    others = [name for name in config.machines() if name != machine]
+    kept = {profile: other for profile in profiles if (other := next((name for name in others if config.machine(name).for_profile(profile)), None))}
+    going = [profile for profile in profiles if profile not in kept]
+    if project.FILE.exists():
+        on = project.machine(doc)
+        if (machine and on == machine) or project.selected(doc, "printer").get("name") in going:
+            raise CommandError(f"this print is on '{on}'; choose another printer for it first with: deli printer <name>")
+    if config.remove_machine(machine or profiles[0]):
+        print(f"Removed '{machine or profiles[0]}' from your config; you have no default printer now, set one with: deli printer <name> --default")
+    elif machine:
+        print(f"Removed '{machine}' from your config")
+    for profile in going:
+        counts = library.remove_printer(profile)
+        went = [f"{n} {_PLURALS[kind] if n != 1 else kind}" for kind, n in counts.items() if n]
+        print(f"Removed '{profile}' from your library" + (f", with its {' and '.join(went)}" if went else ""))
+    for profile, other in kept.items():
+        print(f"'{profile}' stays in your library: '{other}' runs it")
+    print("A print that chose it is refused by deli slice until it chooses another: deli printer <name>")
+    return 0
+
+
+def _remove_profile(doc, kind: str, wanted: str) -> int:
+    """`deli filament|process NAME --remove`: one of the print's printer's (else the default
+    printer's) out of the library, and out of the config its settings and the default naming
+    it. Refused when this print chose it; a print elsewhere that did is refused by `deli
+    slice` until it chooses another."""
+    machine, profile = _printer_for_layer(doc)
+    name = _in_library(kind, wanted, profile)
+    if not name:
+        names = library.names(kind, profile)
+        mine = f" (it has: {', '.join(names)})" if names else ""
+        raise CommandError(f"no {kind} '{wanted}' for '{profile}' in your library{mine}")
+    if project.FILE.exists() and project.selected(doc, kind).get("name") == name:
+        raise CommandError(f"this print uses the {kind} '{name}'; choose another first with: deli {kind} <name>")
+    library.path_of(kind, name, profile).unlink(missing_ok=True)
+    line = f"Removed '{name}', a {kind} of '{profile}', from your library"
+    if config.remove_profile(kind, name, machine, profile):
+        line += f"; it was what new prints on '{machine}' started with, set another with: deli {kind} <name> --default"
+    print(line)
+    print(f"A print that chose it is refused by deli slice until it chooses another: deli {kind} <name>")
+    return 0
+
+
 def _machine_named(wanted: str) -> str | None:
     """The config's printer someone typed the name of, or words of it; None when none is
     like it, an error when several are."""
@@ -2627,6 +2696,11 @@ def _update(args: argparse.Namespace) -> int:
             raise update.UpdateError(f"this deli runs from the checkout at {how.where}, not a release; update it with: git -C {how.where} pull && make -C {how.where} reinstall")
         if how.kind != "uv-tool":
             raise update.UpdateError(f"deli was not installed by uv, so deli update cannot replace it; install {target} the way deli was installed")
+        if target == f"{update.PACKAGE}=={want}" and update.on_pypi(want) is False:
+            raise update.UpdateError(
+                f"deli {want} is released, but PyPI does not serve it yet; a release reaches PyPI a few minutes after GitHub, so try again shortly"
+                if newer else f"PyPI has no deli-slicer {want}; the releases are at https://github.com/{update.REPO}/releases"
+            )
         print(f"{'Updating' if newer else 'Going back from'} deli {have} to {want}")
         update.install(target)
         if removed := update.remove_old_environment(how):
@@ -2657,10 +2731,73 @@ def _complete(args: argparse.Namespace) -> int:
     return 0
 
 
+_USAGE = {
+    "deli load": "usage: deli load printer|filament|process <URL or path> [--name NAME] [--printer NAME]",
+    "deli add": "usage: deli add <model file or URL> [--count N] [--file NAME]",
+    "deli import": "usage: deli import orca printer|filament|process [NAME]; without a name it lists Orca's presets of that kind",
+    "deli completion": "usage: deli completion bash|zsh|fish; deli setup installs it for you",
+}
+
+
+def _usage(prog: str) -> str:
+    """What a command run without the arguments it needs is told. `deli remove` names the
+    parts here, since that is what it takes."""
+    if prog == "deli remove":
+        line = "usage: deli remove <part> [--count N|--copy N]"
+        if not project.FILE.exists():
+            return f"{line}; there is no print in this directory"
+        try:
+            names = [Path(part["file"]).stem for part in project.parts(project.read())]
+        except project.ProjectError:
+            names = []
+        return f"{line}; the parts here: {', '.join(names)}" if names else f"{line}; this print has no parts"
+    return _USAGE.get(prog, f"{prog} needs more; see: {prog} --help")
+
+
+def _either(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " or " + words[-1]
+
+
+def _in_deli_words(parser: argparse.ArgumentParser, message: str) -> str:
+    """argparse's usage error, as one line that says what to do next, in place of its usage
+    dump (DESIGN.md: every error says what to do next)."""
+    prog = parser.prog
+    see = f"; see: {prog} --help"
+    if re.fullmatch(r"the following arguments are required: (.*)", message):
+        return _usage(prog)
+    if match := re.fullmatch(r"argument (\S+): invalid choice: '(.*?)' \(choose from (.*)\)", message, re.S):
+        name, value, choices = match[1], match[2], [choice.strip("'\"") for choice in match[3].split(", ")]
+        if prog == "deli" and name == "command":
+            names = [choice for choice in choices if not choice.startswith("_")]
+            close = difflib.get_close_matches(value, names, n=1, cutoff=0.7)
+            meant = f". Did you mean deli {close[0]}?" if close else ""
+            return f"'{value}' is not a deli command; deli --help lists them{meant}"
+        return f"{prog} takes {_either(choices)}, not '{value}'"
+    if match := re.fullmatch(r"argument (\S+): invalid (\w+) value: '(.*)'", message):
+        kind = {"int": "a whole number", "float": "a number"}.get(match[2], f"a {match[2]}")
+        return f"{prog}: {match[1]} takes {kind}, not '{match[3]}'"
+    if match := re.fullmatch(r"argument (\S+): not allowed with argument (\S+)", message):
+        return f"{prog}: {match[1]} and {match[2]} cannot go together{see}"
+    if match := re.fullmatch(r"argument (\S+): expected (.*)", message):
+        what = "a value" if match[2] == "one argument" else match[2].replace("arguments", "values").replace("argument", "value")
+        return f"{prog}: {match[1]} needs {what}{see}"
+    return f"{prog}: {message}{see}"
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, with its usage errors in deli's words: one `deli:` line on stderr and exit
+    code 2 (the code argparse uses), never the usage dump. Subparsers are made of the same
+    class by argparse."""
+
+    def error(self, message: str):
+        print(f"deli: {_in_deli_words(self, message)}", file=sys.stderr)
+        sys.exit(2)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="deli", description="CLI-first slicer front end for 3D printing.")
+    parser = _Parser(prog="deli", description="CLI-first slicer front end for 3D printing. Alone, it says which version this is and whether a newer one is out.")
     parser.add_argument("--version", action="version", version=f"deli {importlib.metadata.version('deli-slicer')}")
-    commands = parser.add_subparsers(dest="command", required=True, metavar="command")
+    commands = parser.add_subparsers(dest="command", metavar="command")  # not required: `deli --foo` is answered as a leftover, `deli` alone before parsing
 
     load = commands.add_parser(
         "load",
@@ -2691,6 +2828,10 @@ def build_parser() -> argparse.ArgumentParser:
         )
         choose.add_argument("name", nargs="?", help=f"a {kind} in your library, or Orca's name for one, or part of either")
         choose.add_argument("--default", action="store_true", help="record it in your config as the default for new prints, and leave this print alone")
+        choose.add_argument("--remove", action="store_true",
+                            help="take it out of your config and your library instead, its filaments and processes with it; "
+                            "not the printer of the print in this directory" if kind == "printer" else
+                            f"take it out of your library instead, with its settings and defaults in your config; not this print's {kind}")
         choose.add_argument("--name", dest="name_as", metavar="NAME",
                             help="a name of your own for the printer this profile is for, such as voron; a printer named so already gets it as another nozzle"
                             if kind == "printer" else f"the name to keep an imported {kind} under in your library, instead of Orca's")
@@ -3083,8 +3224,12 @@ def main(argv: list[str] | None = None) -> int:
     if rest and isinstance(getattr(args, "args", None), list) and not any(_is_option(word) for word in rest):
         args.args += rest
     elif rest:
-        parser.error("unrecognized arguments: " + " ".join(rest))
+        prog = f"deli {args.command}" if args.command else "deli"
+        print(f"deli: {prog} does not take {' '.join(rest)}; see: {prog} --help", file=sys.stderr)
+        return 2
     try:
+        if args.command is None:  # only `deli` with nothing argparse objected to, which main() has already answered
+            return _bare(parser)
         if args.command != "__complete":
             _migrate_library()
         return args.run(args)

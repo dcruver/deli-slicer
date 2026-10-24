@@ -107,6 +107,20 @@ def _final_url(url: str, timeout: float = TIMEOUT) -> str:
         return response.url
 
 
+def on_pypi(version: str, timeout: float = TIMEOUT) -> bool | None:
+    """Whether PyPI serves this release of deli-slicer. False when PyPI says it has no such
+    version: a release reaches PyPI a few minutes after GitHub, and `deli update` run in
+    between would only get uv's resolver message. None when PyPI could not be asked, which
+    is left to uv to find out."""
+    try:
+        _final_url(f"https://pypi.org/pypi/{PACKAGE}/{version}/json", timeout)
+    except urllib.error.HTTPError as err:
+        return False if err.code == 404 else None
+    except (OSError, urllib.error.URLError):
+        return None
+    return True
+
+
 def latest(timeout: float = TIMEOUT) -> str:
     """The latest release's version, without its v. Pre-releases are not the latest.
     What it finds is noted for `deli status`, so a check and the status line agree."""
@@ -182,14 +196,13 @@ def _remember(version: str | None, now: float | None = None) -> dict:
     return note
 
 
-def newer_release(have: str | None = None, now: float | None = None) -> str | None:
-    """The release newer than this deli that `deli status` mentions, if there is one. GitHub
-    is asked once a day (an hour after a failure), briefly, and never for a checkout, which
-    git keeps up to date, or when the config's `update_check` is false; the answer is kept in
-    the cache. Nothing here raises: a status that cannot look says nothing."""
+def latest_known(now: float | None = None) -> str | None:
+    """The latest release, as last looked up: GitHub is asked once a day (an hour after a
+    failure), briefly, and never for a checkout, which git keeps up to date, or when the
+    config's `update_check` is false; the answer is kept in the cache. Nothing here raises:
+    None when nothing is known."""
     from deli import config
 
-    have = have or installed()
     now = time.time() if now is None else now
     try:
         if not config.update_check() or how_installed().kind == "checkout":
@@ -208,4 +221,12 @@ def newer_release(have: str | None = None, now: float | None = None) -> str | No
         except UpdateError:
             note = _remember(None, now)
     version = note.get("version")
-    return version if isinstance(version, str) and key(version) > key(have) else None
+    return version if isinstance(version, str) else None
+
+
+def newer_release(have: str | None = None, now: float | None = None) -> str | None:
+    """The release newer than this deli that `deli status` and `deli` alone mention, if
+    there is one (`latest_known`)."""
+    have = have or installed()
+    version = latest_known(now)
+    return version if version and key(version) > key(have) else None

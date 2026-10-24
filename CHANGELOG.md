@@ -3,6 +3,21 @@
 What changed in each release, newest first. Changes that need anything from you, such as
 a command that works differently, are marked **Changed**.
 
+## Unreleased
+
+- A wrong or missing argument gets one line that says what to do next, with exit code 2,
+  in place of argparse's usage dump: `deli slcie` suggests `deli slice`, `deli remove`
+  alone names the parts, `deli load foo` names the kinds it takes.
+- `deli printer <name> --remove` takes a printer out of your config and your library, its
+  filaments and processes with it. A profile another of your printers runs stays; the print
+  in the current directory has to be on another printer first. `deli filament|process
+  <name> --remove` takes one of this print's printer's (else your default printer's) out,
+  with its settings and its place as a default in your config; not one this print uses.
+- `deli update` run in the minutes between a release appearing on GitHub and PyPI serving
+  it says so and asks you to try again shortly, instead of showing uv's resolver message.
+  The release workflow now publishes to PyPI before it creates the GitHub release, so
+  releases from here on have no such window.
+
 ## 0.18.0 (2026-10-23)
 
 - `deli` alone says which version is installed, whether a newer release is out, and lists

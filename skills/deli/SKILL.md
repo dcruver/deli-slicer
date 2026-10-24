@@ -169,8 +169,13 @@ These keep an agent from doing what a person at the keyboard would not.
 - **Do not run `deli setup`.** It asks questions on the terminal and edits
   shell startup files. Do its steps by hand instead (below), with commands
   that take everything as arguments. Nor `deli update`, which replaces the
-  user's installation, unless the user asks to update deli; `deli update
-  --check` only looks.
+  user's installation, unless the user asks to update deli; `deli` alone
+  says which version is installed and whether a newer one is out, and
+  changes nothing.
+- **Do not remove a profile unasked.** `deli printer <name> --remove` deletes
+  the printer's profiles, filaments and processes from the user's library and
+  its table from the config; `deli filament|process <name> --remove` one file
+  and its config entries. Run them only when the user asks to remove that one.
 - **Let deli validate; do not edit `deli.toml` by hand.** Every command
   checks names and values against the engine and the chosen profiles, and
   keeps the user's comments in the file. Hand edits skip those checks. Read

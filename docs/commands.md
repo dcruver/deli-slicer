@@ -8,6 +8,7 @@ in depth; `deli <command> --help` is the authoritative list for the version you 
 | `deli` | which deli this is, whether a newer release is out, and the commands |
 | `deli setup [--printer NAME] [--host ADDRESS] [--shell bash\|zsh\|fish] [--no-completion]` | tab completion, your printer and its address, asked for once; the options answer the questions in advance |
 | `deli printer\|filament\|process [name]` | choose one for this print, by its name or any words of it, from your library or else OrcaSlicer's (imported as it is chosen, under Orca's name or `--name NAME`; a printer brings its default process and filament), or list your library's; `--default` makes it the default for new prints instead |
+| `deli printer\|filament\|process <name> --remove` | take one out of your library, and out of your config its settings and defaults: a printer with its filaments and processes (a profile another of your printers runs stays), a filament or process of this print's printer (else your default printer's); not one this print uses |
 | `deli status [--json]` | the print at a glance: printer, filament, process, parts, where it sends, settings changed, G-code and its file; and, looked up once a day, whether a newer deli is out (`deli config update_check false` stops that). `--json` gives the same as data |
 | `deli nozzle [size]` | the nozzles of this print's printer, or put one in: its profile comes from Orca if need be, and the print moves to it |
 | `deli vendor [vendor\|printer]` | list printer vendors, a vendor's printers, or the printers a name is part of |
@@ -28,4 +29,4 @@ in depth; `deli <command> --help` is the authoritative list for the version you 
 | `deli send [FILE] [--print] [--level] [--plate N] [--name NAME]` | upload to the printer in your config, slicing first if the print has changed; every plate, or `--plate N`; `--name` for what to call it there; `--level` with `--print` has an Elegoo printer level its bed first. A printer that is printing is said to be, not sent to; exit code 3 when it cannot be reached, 4 when it is busy |
 | `deli config [key] [value] [--unset KEY]` | your default printer, your printers' addresses and default filament and process, and the settings for every print and for each profile; `--unset` removes a key |
 | `deli completion bash\|zsh\|fish` | shell completion |
-| `deli update [version] [--check]` | install the latest release from GitHub over this one, or say whether there is one |
+| `deli update [version] [--check]` | install the latest release over this one, from PyPI; `--check` only says whether there is one, as `deli` alone does |

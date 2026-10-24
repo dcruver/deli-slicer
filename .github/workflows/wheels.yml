@@ -325,12 +325,14 @@ jobs:
             PRINTERS.md
             printers.json
 
-  # Every platform's wheel, once its tests pass. A platform added later goes in `needs`;
-  # its wheel artifact, named wheel-<platform>, is picked up from there.
+  # Every platform's wheel, once its tests pass and PyPI has them: `deli update` learns of
+  # a release from GitHub and installs it from PyPI, so the GitHub release comes second. A
+  # platform added later goes in `needs`; its wheel artifact, named wheel-<platform>, is
+  # picked up from there.
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test-linux, test-wsl, test-macos]
+    needs: [test-linux, test-wsl, test-macos, pypi]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -26,6 +26,40 @@ def project(tmp_path, monkeypatch):
     return tmp_path / "job" / "deli.toml"
 
 
+@pytest.mark.parametrize("kind", ["filament", "process"])
+def test_remove_takes_one_out_of_the_library_and_the_config(project, kind, capsys):
+    name, printer = NAMES[kind], NAMES["printer"]
+    assert main([kind, name, "--default"]) == 0
+    assert main(["set", f"--{kind}", name, "walls", "3"]) == 0
+    assert main([kind, name]) == 0  # this print chose it
+    capsys.readouterr()
+
+    assert main([kind, name, "--remove"]) == 1
+    assert capsys.readouterr().err == f"deli: this print uses the {kind} '{name}'; choose another first with: deli {kind} <name>\n"
+    assert library.names(kind, printer) == [name]
+
+    project.unlink()
+    assert main([kind, name, "--remove"]) == 0
+
+    assert capsys.readouterr().out == (
+        f"Removed '{name}', a {kind} of '{printer}', from your library; it was what new prints on '{printer}' started with, "
+        f"set another with: deli {kind} <name> --default\n"
+        f"A print that chose it is refused by deli slice until it chooses another: deli {kind} <name>\n"
+    )
+    assert library.names(kind, printer) == []
+    assert main(["config"]) == 0
+    out = capsys.readouterr().out
+    assert out == f"printer = {printer}\n"
+
+
+def test_remove_needs_a_name_the_printer_has(project, capsys):
+    assert main(["filament", "--remove"]) == 1
+    assert capsys.readouterr().err == "deli: name the filament to remove: deli filament <name> --remove\n"
+    assert main(["process", "silk", "--remove"]) == 1
+    assert capsys.readouterr().err == f"deli: no process 'silk' for '{NAMES['printer']}' in your library (it has: {NAMES['process']})\n"
+    assert library.names("process", NAMES["printer"]) == [NAMES["process"]]
+
+
 def test_choosing_a_filament_records_its_name_and_hash(project, capsys):
     assert main(["filament", "generic-abs"]) == 0
 

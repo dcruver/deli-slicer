@@ -224,6 +224,50 @@ def machine_of(profile: str, doc: tomlkit.TOMLDocument | None = None) -> str | N
     return next((name for name in names if machine(name, doc).for_profile(profile)), None)
 
 
+def remove_machine(name: str) -> bool:
+    """Take a printer's table out of the config, its address, settings, nozzles and defaults
+    with it, and the default printer when it was this one; True when the default went."""
+    doc = read()
+    printers = doc.get("printers", {})
+    if name in printers:
+        del printers[name]
+        if not printers:
+            del doc["printers"]
+    was_default = doc.get(DEFAULT_PRINTER) == name
+    if was_default:
+        del doc[DEFAULT_PRINTER]
+    write(doc)
+    return was_default
+
+
+def remove_profile(kind: str, name: str, machine_name: str, profile: str) -> bool:
+    """Take a filament's or process's settings table out of a printer's table in the config,
+    and the default naming it for the nozzle that runs `profile`; True when a default went."""
+    doc = read()
+    printers = doc.get("printers", {})
+    table = printers.get(machine_name)
+    if not isinstance(table, dict):
+        return False
+    kinds = table.get(TABLES[kind])
+    if isinstance(kinds, dict) and name in kinds:
+        del kinds[name]
+        if not kinds:
+            del table[TABLES[kind]]
+    nozzle = machine(machine_name, doc).for_profile(profile)
+    was_default = bool(nozzle and getattr(nozzle, kind) == name)
+    if was_default:
+        if NOZZLES in table:
+            del table[NOZZLES][nozzle.size][kind]
+        else:
+            del table[kind]
+    if not table:
+        del printers[machine_name]
+        if not printers:
+            del doc["printers"]
+    write(doc)
+    return was_default
+
+
 def _long_form(table, name: str) -> None:
     """Write a printer's table the long way, a table per nozzle, keeping what it says."""
     if NOZZLES in table:
