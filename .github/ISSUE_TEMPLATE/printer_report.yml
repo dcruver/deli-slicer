@@ -6,8 +6,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks. So far only a few printers have printed deli's G-code, so every report helps,
-        including "it just worked".
+        Thanks. Only a few printers have printed deli's G-code so far, so every report helps,
+        including "it just worked". Each one is added to the
+        [Printed on](https://github.com/dcruver/deli-slicer/blob/main/PRINTERS.md#printed-on)
+        table in PRINTERS.md, under the printer's name as Orca gives it.
   - type: input
     id: printer
     attributes:
