@@ -2,10 +2,13 @@
 
 Thanks for helping. The most useful things right now, in order:
 
-1. **Printing with your printer, and saying how it went.** Only the Elegoo Centauri
-   Carbon has printed deli's G-code so far. If you print on anything else, open an issue
-   with the printer (Orca's name for it), the deli version (`pip show deli`), what you
-   printed, and what came out right or wrong. A photo helps.
+1. **Printing with your printer, and saying how it went.** Only a few printers have
+   printed deli's G-code so far; [PRINTERS.md](PRINTERS.md#printed-on) lists them. If you
+   print on any printer, open a
+   [printer report](https://github.com/dcruver/deli-slicer/issues/new?template=printer_report.yml):
+   the printer (Orca's name for it), the deli version (`deli --version`), what you
+   printed, and what came out right or wrong. A photo helps. Each report becomes an entry
+   in `ci/printed.toml`, which PRINTERS.md shows.
 2. **Fixing a printer that does not convert.** [PRINTERS.md](PRINTERS.md) lists every
    printer in OrcaSlicer's presets that does not slice, and why. Most need a change to
    the converter, `src/deli/orca.py`.
@@ -52,8 +55,18 @@ build and of how the engine is bound.
   ```
   git clone --depth 1 --branch v2.4.2 --filter=blob:none --sparse https://github.com/SoftFever/OrcaSlicer orca
   git -C orca sparse-checkout set resources/profiles
-  uv run python ci/sweep.py --orca orca/resources/profiles --label "OrcaSlicer 2.4.2" --ref v2.4.2 --out PRINTERS.md
+  uv run python ci/sweep.py --orca orca/resources/profiles --label "OrcaSlicer 2.4.2" --ref v2.4.2 --out PRINTERS.md --json sweep.json
   ```
+
+After a printer report, add a `[[print]]` to `ci/printed.toml` (the file says what each
+field is) and write PRINTERS.md again from the last sweep's results, which does not slice
+anything again:
+
+```
+uv run python ci/sweep.py --from-json sweep.json --date <the sweep's date> --label "OrcaSlicer 2.4.2" --ref v2.4.2 --out PRINTERS.md
+```
+
+`sweep.json` is what a sweep writes with `--json sweep.json`; without one, run the sweep.
 
 ## The site and the README's clips
 

@@ -4,8 +4,24 @@ Every printer preset in OrcaSlicer 2.4.2, converted by deli and used to slice a 
 on 2026-10-04. This page is written by `ci/sweep.py`.
 
 **What it tells you:** whether `deli import orca printer "<name>"` gives you a printer
-deli can slice for. **What it does not:** whether the G-code prints well. Only the Elegoo
-Centauri Carbon has been printed on; if you print on another, please say how it went.
+deli can slice for. **What it does not:** whether the G-code prints well.
+3 printers have been printed on; what came out is under "Printed on" below.
+If you print with deli on any printer, please say how it went with a
+[printer report](https://github.com/dcruver/deli-slicer/issues/new?template=printer_report.yml).
+
+## Printed on
+
+From the reports kept in `ci/printed.toml`.
+
+| Printer | Result | What was printed | Notes |
+|---|---|---|---|
+| Elegoo Centauri Carbon 0.4 nozzle | printed well | 20 mm cube, PLA |  |
+| Elegoo Centauri Carbon 0.4 nozzle | printed, with problems | Benchy, PETG-CF, with a deli pause | Paused, parked and resumed as it should; stringy, probably from a damp spool |
+| Elegoo Centauri Carbon 0.4 nozzle | printed, with problems | Phone stand, PLA, organic supports | Rough where the supports touched and on unsupported overhangs; converted profiles give overhangs no extra fan yet |
+| Voron 2.4 350 0.4 nozzle | printed well | Benchy, PLA, sent to Moonraker |  |
+| Voron 2.4 350 0.8 nozzle | printed well | Two-part desiccant canister, PETG | Printed cleanly; the thread, designed for a 0.4 nozzle, did not survive the 0.8 |
+
+## Slicing
 
 Of 1001 printers:
 
@@ -487,7 +503,7 @@ Of 1001 printers:
 | Elegoo Centauri 2 0.6 nozzle | converts, but slicing fails: G-code export to cube.gcode failed due to invalid custom G-code sections: start_gcode |
 | Elegoo Centauri 2 0.8 nozzle | converts, but slicing fails: G-code export to cube.gcode failed due to invalid custom G-code sections: start_gcode |
 | Elegoo Centauri Carbon 0.2 nozzle | slices |
-| Elegoo Centauri Carbon 0.4 nozzle | slices |
+| Elegoo Centauri Carbon 0.4 nozzle | **printed 3 times: 1 well, 2 with problems**; slices |
 | Elegoo Centauri Carbon 0.6 nozzle | slices |
 | Elegoo Centauri Carbon 0.8 nozzle | slices |
 | Elegoo Centauri Carbon 2 0.2 nozzle | converts, but slicing fails: G-code export to cube.gcode failed due to invalid custom G-code sections: start_gcode |
@@ -1352,10 +1368,10 @@ Of 1001 printers:
 | Voron 2.4 350 0.15 nozzle | slices |
 | Voron 2.4 350 0.2 nozzle | slices |
 | Voron 2.4 350 0.25 nozzle | slices |
-| Voron 2.4 350 0.4 nozzle | slices |
+| Voron 2.4 350 0.4 nozzle | **printed well**; slices |
 | Voron 2.4 350 0.5 nozzle | slices |
 | Voron 2.4 350 0.6 nozzle | slices |
-| Voron 2.4 350 0.8 nozzle | slices |
+| Voron 2.4 350 0.8 nozzle | **printed well**; slices |
 | Voron 2.4 350 1.0 nozzle | slices |
 | Voron Switchwire 250 0.15 nozzle | slices |
 | Voron Switchwire 250 0.2 nozzle | slices |
