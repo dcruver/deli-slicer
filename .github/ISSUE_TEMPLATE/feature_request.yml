@@ -1,0 +1,25 @@
+name: Feature request
+description: Something deli should do that it does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [What is not done yet](https://github.com/dcruver/deli-slicer/blob/main/docs/faq.md#what-is-not-done-yet)
+        first; it may already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The print or workflow, and where deli gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: If you have a command in mind, how you would type it.
+  - type: textarea
+    id: now
+    attributes:
+      label: What you do today instead

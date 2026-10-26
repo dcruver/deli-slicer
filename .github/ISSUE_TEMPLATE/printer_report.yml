@@ -1,0 +1,50 @@
+name: Printer report
+description: You printed deli's G-code on a printer. Say how it went, good or bad.
+title: "Printed on: "
+labels: ["printer report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Only a few printers have printed deli's G-code so far, so every report helps,
+        including "it just worked". Each one is added to the
+        [Printed on](https://github.com/dcruver/deli-slicer/blob/main/PRINTERS.md#printed-on)
+        table in PRINTERS.md, under the printer's name as Orca gives it.
+  - type: input
+    id: printer
+    attributes:
+      label: Printer
+      description: Orca's name for it, as `deli printer` lists it.
+      placeholder: Elegoo Centauri Carbon 0.4 nozzle
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: deli version
+      description: The output of `deli --version`.
+      placeholder: deli 0.19.0
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: How did it go?
+      options:
+        - Printed well
+        - Printed, with problems
+        - Did not print
+    validations:
+      required: true
+  - type: textarea
+    id: printed
+    attributes:
+      label: What you printed
+      description: The model, filament, and any settings you changed (`deli status` or your deli.toml).
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What came out right or wrong
+      description: A photo helps a lot. Drag it in here.

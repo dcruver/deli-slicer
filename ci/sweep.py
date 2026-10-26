@@ -1,6 +1,7 @@
 """Convert every printer OrcaSlicer ships and slice a cube with each, to say which work in deli.
 
     python ci/sweep.py --orca DIR [--vendor NAME] [--jobs N] [--out PRINTERS.md] [--json FILE]
+    python ci/sweep.py --from-json FILE --date YYYY-MM-DD --out PRINTERS.md
 
 DIR is OrcaSlicer's `profiles` folder: `resources/profiles` in its repository, or the one
 an installed Orca has. Each printer is tried with the process and the filament Orca names
@@ -8,7 +9,9 @@ as its defaults, or failing that the first that say they fit it, in a process of
 so that one printer crashing the engine does not end the sweep.
 
 What this shows is that a printer converts and slices. It does not show that the G-code
-prints well; only someone with the printer can say that.
+prints well; only someone with the printer can say that, and what they said is kept in
+ci/printed.toml, which the report shows alongside. After adding to that file, the report
+can be written again from a sweep's --json, without slicing everything again.
 """
 
 from __future__ import annotations
@@ -21,12 +24,15 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 from deli import _engine, orca, orca_install, settings
 
 ROOT = Path(__file__).resolve().parents[1]
 CUBE = ROOT / "vendor/PrusaSlicer/tests/data/test_stl/ASCII/20mmbox-LF.stl"
+PRINTED = ROOT / "ci/printed.toml"
+PRINT_RESULTS = {"good": "printed well", "problems": "printed, with problems", "failed": "did not print"}
 OUTCOMES = {
     "sliced": "converts and slices",
     "slicing": "converts, but slicing fails",
@@ -118,18 +124,74 @@ def _reason(why: str) -> str:
     return line if len(line) <= 160 else line[:157] + "..."
 
 
-def report(results: list[dict], label: str, ref: str | None = None) -> str:
+def load_printed(path: Path) -> list[dict]:
+    """The prints people have reported, from ci/printed.toml, checked enough that a typo
+    fails here rather than vanishing from the report."""
+    if not path.exists():
+        return []
+    entries = tomllib.loads(path.read_text()).get("print", [])
+    for n, entry in enumerate(entries, 1):
+        missing = [key for key in ("printer", "result", "printed") if not entry.get(key)]
+        if missing:
+            raise SystemExit(f"{path.name}: print {n} has no {', '.join(missing)}")
+        if entry["result"] not in PRINT_RESULTS:
+            raise SystemExit(f"{path.name}: print {n} has result {entry['result']!r}; use one of {', '.join(PRINT_RESULTS)}")
+    return entries
+
+
+def _printed_summary(entries: list[dict]) -> str:
+    """One printer's prints in a few words: "printed well", or "printed 3 times: 1 well, 2 with problems"."""
+    if len(entries) == 1:
+        return PRINT_RESULTS[entries[0]["result"]]
+    short = {"good": "well", "problems": "with problems", "failed": "failed"}
+    counts = collections.Counter(e["result"] for e in entries)
+    return f"printed {len(entries)} times: " + ", ".join(f"{counts[r]} {short[r]}" for r in PRINT_RESULTS if counts[r])
+
+
+def _cell(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def report(results: list[dict], label: str, ref: str | None = None, printed: list[dict] | None = None, date: str | None = None) -> str:
     counts = collections.Counter(r["outcome"] for r in results)
+    printed = printed or []
+    by_printer: dict[str, list[dict]] = collections.defaultdict(list)
+    for entry in printed:
+        by_printer[entry["printer"]].append(entry)
+    so_far = (f"{len(by_printer)} {'printer has' if len(by_printer) == 1 else 'printers have'} been printed on;"
+              " what came out is under \"Printed on\" below" if by_printer else "Nothing has been printed on yet")
     lines = [
         "# Printers",
         "",
         f"Every printer preset in {label}, converted by deli and used to slice a 20 mm cube",
-        f"on {datetime.date.today().isoformat()}. This page is written by `ci/sweep.py`.",
+        f"on {date or datetime.date.today().isoformat()}. This page is written by `ci/sweep.py`.",
         "",
         f"**What it tells you:** whether `deli import orca printer \"<name>\"{'' if ref in (None, orca_install.ORCA_REF) else ' --ref ' + ref}` gives you a printer",
-        "deli can slice for. **What it does not:** whether the G-code prints well. Only the Elegoo",
-        "Centauri Carbon has been printed on; if you print on another, please say how it went.",
+        "deli can slice for. **What it does not:** whether the G-code prints well.",
+        so_far + ".",
+        "If you print with deli on any printer, please say how it went with a",
+        "[printer report](https://github.com/dcruver/deli-slicer/issues/new?template=printer_report.yml).",
         "",
+    ]
+    if printed:
+        # A column only when some print has it, so a table of old reports has no empty ones.
+        optional = [(key, title) for key, title in (("version", "deli"), ("date", "Date")) if any(e.get(key) for e in printed)]
+        heads = ["Printer", "Result", *(title for _, title in optional), "What was printed", "Notes"]
+        lines += [
+            "## Printed on",
+            "",
+            "From the reports kept in `ci/printed.toml`.",
+            "",
+            "| " + " | ".join(heads) + " |",
+            "|" + "---|" * len(heads),
+        ]
+        for entry in sorted(printed, key=lambda e: (e["printer"], str(e.get("date", "")))):
+            issue = entry.get("issue")
+            notes = entry.get("notes", "") + (f" ([#{issue}](https://github.com/dcruver/deli-slicer/issues/{issue}))" if issue else "")
+            cells = [entry["printer"], PRINT_RESULTS[entry["result"]], *(str(entry.get(key, "")) for key, _ in optional), entry["printed"], notes.strip()]
+            lines.append("| " + " | ".join(_cell(c) for c in cells) + " |")
+        lines += ["", "## Slicing", ""]
+    lines += [
         f"Of {len(results)} printers:",
         "",
     ]
@@ -153,6 +215,8 @@ def report(results: list[dict], label: str, ref: str | None = None) -> str:
         lines += [f"<details><summary>{vendor}</summary>", "", "| Printer | Result |", "|---|---|"]
         for r in mine:
             result = "slices" if r["outcome"] == "sliced" else f"{OUTCOMES[r['outcome']]}: {_reason(r['why'])}".rstrip(": ")
+            if r["printer"] in by_printer:
+                result = f"**{_printed_summary(by_printer[r['printer']])}**; {result}"
             lines.append(f"| {r['printer']} | {result.replace('|', '\\|')} |")
         lines += ["", "</details>", ""]
     return "\n".join(lines)
@@ -167,23 +231,33 @@ def main() -> int:
     parser.add_argument("--ref", help="the OrcaSlicer tag the presets come from, for the import command the report shows")
     parser.add_argument("--out", type=Path, help="write the report here (default: print a summary only)")
     parser.add_argument("--json", type=Path, help="write every result here")
+    parser.add_argument("--from-json", type=Path, help="write the report from a sweep's --json instead of sweeping again")
+    parser.add_argument("--date", help="the day the sweep ran, for the report (default today; give it with --from-json)")
+    parser.add_argument("--printed", type=Path, default=PRINTED, help="the prints people have reported (default ci/printed.toml)")
     parser.add_argument("--one", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.one:
         print(json.dumps(try_one(json.loads(args.one))))
         return 0
-    if not args.orca:
-        parser.error("--orca DIR is needed")
-
-    jobs = plan(args.orca, args.vendor)
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = list(pool.map(run, jobs))
+    printed = load_printed(args.printed)
+    if args.from_json:
+        results = json.loads(args.from_json.read_text())
+    elif args.orca:
+        jobs = plan(args.orca, args.vendor)
+        with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+            results = list(pool.map(run, jobs))
+    else:
+        parser.error("--orca DIR or --from-json FILE is needed")
     counts = collections.Counter(r["outcome"] for r in results)
     print(f"{len(results)} printers: " + ", ".join(f"{counts[o]} {o}" for o in OUTCOMES if counts[o]))
     if args.json:
         args.json.write_text(json.dumps(results, indent=1))
+    if not args.vendor:
+        known = {r["printer"] for r in results}
+        for name in sorted({e["printer"] for e in printed} - known):
+            print(f"{args.printed.name}: {name!r} is not a printer in this sweep; it is listed, but check the name against Orca's", file=sys.stderr)
     if args.out:
-        args.out.write_text(report(results, args.label, args.ref) + "\n")
+        args.out.write_text(report(results, args.label, args.ref, printed, args.date) + "\n")
     return 0
 
 

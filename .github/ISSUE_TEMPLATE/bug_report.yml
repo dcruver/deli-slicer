@@ -1,0 +1,50 @@
+name: Bug report
+description: A command failed, did the wrong thing, or surprised you.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If something surprised you, that counts. [DESIGN.md](https://github.com/dcruver/deli-slicer/blob/main/DESIGN.md)
+        says how deli is meant to behave. For a printer that will not convert or slice, check
+        [PRINTERS.md](https://github.com/dcruver/deli-slicer/blob/main/PRINTERS.md) first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The commands you ran and what they printed. Paste the output as text.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: deli version
+      description: The output of `deli --version`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS and version, and how you installed deli (pip, uv, from source).
+      placeholder: Ubuntu 24.04, pip
+    validations:
+      required: true
+  - type: input
+    id: printer
+    attributes:
+      label: Printer
+      description: If it matters here, Orca's name for it.
+  - type: textarea
+    id: toml
+    attributes:
+      label: deli.toml
+      description: If the problem is with a particular print, its deli.toml.
+      render: toml

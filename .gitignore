@@ -14,3 +14,4 @@ wheels/
 .ruff_cache/
 .ccache/
 demo/work/
+sweep.json

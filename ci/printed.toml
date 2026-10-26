@@ -1,0 +1,41 @@
+# What has actually been printed with deli's G-code, one [[print]] per print reported.
+# ci/sweep.py shows these in PRINTERS.md: a "Printed on" table, and the result beside the
+# printer in its vendor's list. After adding one, write the report again from the last
+# sweep's results (see the docstring of ci/sweep.py), or let the next sweep pick it up.
+#
+#   printer  Orca's name for it, exactly as PRINTERS.md lists it   (required)
+#   result   good, problems or failed                             (required)
+#   printed  the model and filament, in a few words               (required)
+#   version  deli's version, as `deli --version` says it
+#   date     YYYY-MM-DD
+#   issue    the printer report's issue number
+#   notes    what went right or wrong, briefly
+
+[[print]]
+printer = "Elegoo Centauri Carbon 0.4 nozzle"
+result = "good"
+printed = "20 mm cube, PLA"
+
+[[print]]
+printer = "Elegoo Centauri Carbon 0.4 nozzle"
+result = "problems"
+printed = "Benchy, PETG-CF, with a deli pause"
+notes = "Paused, parked and resumed as it should; stringy, probably from a damp spool"
+
+[[print]]
+printer = "Elegoo Centauri Carbon 0.4 nozzle"
+result = "problems"
+printed = "Phone stand, PLA, organic supports"
+notes = "Rough where the supports touched and on unsupported overhangs; converted profiles give overhangs no extra fan yet"
+
+# CHECK: the Voron's size (250, 300 or 350) is a guess; use the name `deli printer` shows.
+[[print]]
+printer = "Voron 2.4 350 0.4 nozzle"
+result = "good"
+printed = "Benchy, PLA, sent to Moonraker"
+
+[[print]]
+printer = "Voron 2.4 350 0.8 nozzle"
+result = "good"
+printed = "Two-part desiccant canister, PETG"
+notes = "Printed cleanly; the thread, designed for a 0.4 nozzle, did not survive the 0.8"
